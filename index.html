@@ -268,8 +268,29 @@ V.region = () => {
       ${can("editor") ? `<div class="row"><button class="btn primary" id="queue" type="button">Queue full refresh</button><span class="small muted">Simulated; the worker would pick these up from the <code>jobs</code> table.</span></div>` : lock("editor", "Queuing pipeline jobs")}
       <div id="jobs" style="margin-top:8px">${jobsHTML()}</div>
     </div>
-  </div>`;
+  </div>
+  ${sourcePlanHTML(g)}`;
 };
+function sourcePlanHTML(g) {
+  const p = g.source_plan, all = D.index_regions || [];
+  if (!p) return "";
+  const groups = {}; p.steps.forEach((s) => { const k = s.step.replace(/\[.*\]$/, ""); (groups[k] = groups[k] || { n: 0, s }).n++; });
+  const filt = store.get("ta-filter", "");
+  return `<h2>Source plan for ${esc(g.ta)}</h2>
+  <p class="small muted">The worker runs these requests for the region, from <code>index/source_index.json</code>. The index holds templates only (keys are placeholders), and the same plan exists for every TA with a water provider. TA ${esc(p.ta_code)} · ${esc(p.regional_council)} · ${p.sa2_count} SA2s · imagery folders: ${p.imagery_folders.map(esc).join(", ")}.</p>
+  <div class="card scroll"><table><thead><tr><th>Step</th><th class="l">Service</th><th>Calls</th><th class="l">Depends on</th><th class="l">Output</th></tr></thead><tbody>
+  ${Object.entries(groups).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="l">${esc(v.s.service)}</td><td>${v.n}</td><td class="l">${esc(v.s.depends_on.join(", ") || "–")}</td><td class="l" style="white-space:normal;min-width:260px">${esc(v.s.output)}</td></tr>`).join("")}
+  </tbody></table></div>
+  <h2>All regions with charging rates (${all.length} TAs)</h2>
+  <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="ta-filter" value="${esc(filt)}" placeholder="TA, provider or region"></label></div>
+  <div class="card scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>TA</th><th>Code</th><th class="l">Regional council</th><th class="l">PRVDR</th><th class="l">Charging</th><th>SA2s</th><th class="l">Imagery folders</th><th>Requests</th></tr></thead><tbody id="ta-rows">${taRows(all, filt)}</tbody></table></div>`;
+}
+function taRows(all, f) {
+  const q = f.trim().toLowerCase();
+  return all.filter((r) => !q || [r.TA, r.PRVDR, r.PROVIDER, r.REGIONAL_COUNCIL].join(" ").toLowerCase().includes(q))
+    .map((r) => `<tr><td>${esc(r.TA)}</td><td>${esc(r.TA_CODE)}</td><td class="l">${esc(r.REGIONAL_COUNCIL)}</td><td class="l">${esc(r.PRVDR)}</td><td class="l">${esc(r.CHARGING_TYPE)}</td><td>${esc(r.SA2_COUNT)}</td><td class="l">${esc(r.IMAGERY_FOLDERS)}</td><td>${esc(r.REQUESTS)}</td></tr>`).join("");
+}
+document.addEventListener("input", (e) => { if (e.target.id === "ta-filter") { store.set("ta-filter", e.target.value); const el = $("#ta-rows"); if (el) el.innerHTML = taRows(D.index_regions || [], e.target.value); } });
 function jobsHTML() {
   const mine = jobs.filter((j) => j.region === region);
   return mine.length ? mine.slice(-8).reverse().map((j) => `<div class="job"><span>${esc(j.type)}</span><span class="tag ${j.status === "done" ? "ok" : j.status === "running" ? "warn" : "info"}">${j.status}</span></div>`).join("") : `<p class="small muted">No jobs yet.</p>`;
@@ -335,8 +356,70 @@ V.validate = () => {
   </div>
   <h2>Labeller vs tool</h2><div class="card scroll">${ct(U)}</div>
   <h2>Second reviewer (Claude, blind) vs tool</h2><div class="card scroll">${ct(Cl)}<p class="small muted">The two reviewers agree on pool or not pool for ${v.agree.same} of ${v.agree.n} chips (${fmt(100 * v.agree.same / v.agree.n, 1)}%).</p></div>
-  <h2>Gardens</h2><div class="card"><p class="small">Labeller: ${gr(v.garden.user)}<br>Claude: ${gr(v.garden.claude)}</p></div>`;
+  <h2>Gardens</h2><div class="card"><p class="small">Labeller: ${gr(v.garden.user)}<br>Claude: ${gr(v.garden.claude)}</p></div>
+  ${valPackHTML()}`;
 };
+
+// ---------- validation pack: flagged tiles + outcome format ----------
+const POOL_LABELS = ["pool", "not_pool", "water", "unknown"], GARDEN_LABELS = ["over", "about_right", "under", "unknown"];
+const tilesOf = (k) => Object.entries(D.regions[k].validation_tiles).map(([id, t]) => ({ id, k, ...t })).sort((a, b) => a.priority - b.priority || b.items - a.items);
+const flaggedOnly = () => store.get("vp-flag", "all") === "flagged";
+const packTiles = () => scopeRegions().flatMap(tilesOf).filter((t) => !flaggedOnly() || t.priority === 1);
+const VALPACK = {
+  "validation_tiles.csv": { desc: "Imagery tiles flagged for visual validation: COG and STAC links, NZTM extent, item counts, flags, priority", make: () => csv([["TILE_ID", "REGION", "CAPTURE_ID", "COG_URL", "STAC_URL", "MINX", "MINY", "MAXX", "MAXY", "ITEMS", "POOL_ACCEPTED", "POOL_REJECTED", "GARDEN", "LABELLED", "FLAGS", "PRIORITY"],
+    ...packTiles().map((t) => [t.id, t.k, D.regions[t.k].capture_id, t.cog, t.stac, ...t.bbox, t.items, t.pool_accepted, t.pool_rejected, t.garden, t.labelled, t.flags.join("; "), t.priority])]) },
+  "validation_items.csv": { desc: "Items to check, per tile. In the public demo, IDs are opaque and coordinates are left out; the full app adds X_NZTM, Y_NZTM and CHIP_URL for signed-in labellers", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "REGION", "TASK", "GROUP", "TOOL_VERDICT", "CHIP_SIZE_M"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1])).map((r) => [r[0], r[1], k, r[2], r[3], r[4] || (r[2] === "garden" ? "measured" : ""), r[2] === "pool" ? 28 : "section+12"]))]); } },
+  "validation_outcome_template.csv": { desc: "Outcome format to fill in: one row per item. Labels: pool / not_pool / water / unknown (pools), over / about_right / under / unknown (gardens)", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT", "NOTES"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1])).map((r) => [r[0], r[1], r[2], "", "", "", ""]))]); } },
+  "validation_outcome_example.csv": { desc: "The same format, filled with the pilot labeller's results", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT", "NOTES"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1]) && r[5]).map((r) => [r[0], r[1], r[2], r[5], "pilot-labeller", D.generated + "T00:00:00+13:00", ""]))]); } },
+  "validation_outcome.schema.json": { desc: "JSON Schema (2020-12) for one outcome row; the app validates uploads against it", make: () => JSON.stringify({
+    $schema: "https://json-schema.org/draft/2020-12/schema", $id: "https://github.com/water-rha-nz/explore-nz-suburb-water/validation_outcome.schema.json", title: "Validation outcome row", type: "object",
+    required: ["ITEM_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT"], additionalProperties: false,
+    properties: { ITEM_ID: { type: "string", pattern: "^v[0-9a-f]{10}$" }, TILE_ID: { type: "string" }, TASK: { enum: ["pool", "garden"] }, LABEL: { enum: [...new Set([...POOL_LABELS, ...GARDEN_LABELS])] },
+      LABELLER: { type: "string", minLength: 1, description: "Email or user ID of the labeller" }, LABELLED_AT: { type: "string", format: "date-time" }, NOTES: { type: "string" } },
+    allOf: [{ if: { properties: { TASK: { const: "pool" } } }, then: { properties: { LABEL: { enum: POOL_LABELS } } } }, { if: { properties: { TASK: { const: "garden" } } }, then: { properties: { LABEL: { enum: GARDEN_LABELS } } } }] }, null, 2) },
+};
+function valPackHTML() {
+  const ts = tilesOf(region), top = ts.slice(0, 12);
+  return `<h2>Validation pack: flagged tiles and outcome format</h2>
+  <p class="small muted">Tiles are LINZ Cloud-Optimised GeoTIFFs, so a labeller or external reviewer can open each by its URL and window. The outcome file comes back in the format below, and the app imports it into <code>validation_labels</code>.</p>
+  ${can("labeller") ? `<div class="row" style="margin-bottom:8px"><label class="small">Scope <select id="scope"><option value="region" ${store.get("scope", "region") === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${store.get("scope", "region") === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+    <label class="small">Tiles <select id="vp-flag"><option value="all" ${flaggedOnly() ? "" : "selected"}>All with items</option><option value="flagged" ${flaggedOnly() ? "selected" : ""}>Priority 1 only</option></select></label></div>
+  <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
+  ${Object.entries(VALPACK).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-vpreview="${f}" type="button">Preview</button></td><td><button class="btn" data-vdl="${f}" type="button">Download</button></td></tr>`).join("")}
+  </tbody></table></div><pre id="vpreview" hidden></pre>
+  <div class="card" style="margin-top:10px"><h3>Check a completed outcome file</h3><p class="small muted">Choose a filled <code>validation_outcome.csv</code>. It's checked in your browser against the schema and item list; nothing is uploaded in this demo.</p>
+  <input type="file" id="vp-import" accept=".csv,text/csv"><div id="vp-result" class="small" style="margin-top:8px"></div></div>` : lock("labeller", "Downloading validation packs")}
+  <h3 style="margin-top:14px">Most-flagged tiles: ${esc(R().label)}</h3>
+  <div class="card scroll"><table><thead><tr><th>Tile</th><th>Items</th><th>Pool accepted</th><th>Pool rejected</th><th>Garden</th><th>Labelled</th><th class="l">Flags</th><th>Priority</th></tr></thead><tbody>
+  ${top.map((t) => `<tr><td><a href="${esc(t.stac)}" target="_blank" rel="noopener">${esc(t.id)}</a></td><td>${t.items}</td><td>${t.pool_accepted}</td><td>${t.pool_rejected}</td><td>${t.garden}</td><td>${t.labelled}</td><td class="l">${t.flags.map((f) => `<span class="tag ${f === "calibration sample" ? "info" : "warn"}">${esc(f)}</span>`).join(" ")}</td><td>${t.priority}</td></tr>`).join("")}
+  </tbody></table></div><p class="small muted">${ts.length} tiles with validation items in this region; ${ts.filter((t) => t.priority === 1).length} are priority 1.</p>`;
+}
+function parseCSV(text) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) { const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+    else if (c === '"') q = true; else if (c === ",") { row.push(f); f = ""; } else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; } else f += c; }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x !== ""));
+}
+function checkOutcome(text) {
+  const rows = parseCSV(text); if (!rows.length) return { ok: false, msg: "Empty file." };
+  const h = rows[0].map((x) => x.trim().toUpperCase()), need = ["ITEM_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT"];
+  const miss = need.filter((n) => !h.includes(n)); if (miss.length) return { ok: false, msg: "Missing columns: " + miss.join(", ") };
+  const known = new Map(Object.values(D.regions).flatMap((r) => r.validation_items.map((x) => [x[0], x[2]])));
+  const col = (r, n) => (r[h.indexOf(n)] || "").trim();
+  let ok = 0, blank = 0; const errs = [], counts = {};
+  rows.slice(1).forEach((r, i) => { const id = col(r, "ITEM_ID"), task = col(r, "TASK"), lab = col(r, "LABEL");
+    if (!lab) { blank++; return; }
+    const e = []; if (!/^v[0-9a-f]{10}$/.test(id)) e.push("bad ITEM_ID"); else if (!known.has(id)) e.push("unknown ITEM_ID"); else if (known.get(id) !== task) e.push("TASK doesn't match item");
+    if (!(task === "pool" ? POOL_LABELS : task === "garden" ? GARDEN_LABELS : []).includes(lab)) e.push(`LABEL "${lab}" not allowed for ${task || "?"}`);
+    if (!col(r, "LABELLER")) e.push("LABELLER empty"); if (Number.isNaN(Date.parse(col(r, "LABELLED_AT")))) e.push("LABELLED_AT not a date-time");
+    if (e.length) errs.push(`row ${i + 2}: ${e.join(", ")}`); else { ok++; counts[task + ":" + lab] = (counts[task + ":" + lab] || 0) + 1; } });
+  return { ok: !errs.length, msg: `${ok} valid labels, ${blank} unlabelled rows, ${errs.length} errors.` + (errs.length ? "<br>" + errs.slice(0, 8).map(esc).join("<br>") : "") + (ok ? "<br>" + Object.entries(counts).map(([k, v]) => `${esc(k)}: ${v}`).join(" · ") : "") };
+}
 V.context = () => {
   const g = R(), subs = g.suburbs.filter((s) => s.census && s.census["2023"]);
   const sel = g.suburbs.find((s) => s.linz_id == store.get("csub-" + region) && s.grid) || g.suburbs.find((s) => s.grid);
@@ -452,17 +535,21 @@ document.addEventListener("click", async (e) => {
   const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
   if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…"; const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
   if (t.dataset.dl) { download(t.dataset.dl, await makeExport(t.dataset.dl)); return; }
+  if (t.dataset.vpreview) { const p = $("#vpreview"); p.hidden = false; const txt = VALPACK[t.dataset.vpreview].make(); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.vpreview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
+  if (t.dataset.vdl) { download(t.dataset.vdl, VALPACK[t.dataset.vdl].make()); return; }
   if (t.id === "dl-all") { const man = { app: "explore-nz-suburb-water demo", generated: new Date().toISOString(), data_as_of: D.generated, scope: scopeRegions(), files: [] };
     for (const f of Object.keys(EXPORTS)) { const txt = await makeExport(f); man.files.push({ file: f, bytes: new Blob([txt]).size }); download(f, txt); await new Promise((r) => setTimeout(r, 250)); }
     man.sources = { linz: "LDS layers 113764, 50772, 50804, 101290; nz-imagery " + scopeRegions().map((k) => D.regions[k].imagery_prefix).join(", "), statsnz: "ADE CEN23_HOU_020, CEN23_FHH_038, CEN23_HOU_001, CEN23_HOU_018; Datafinder 111206", climate: "Open-Meteo archive (best match)" };
     download("manifest.json", JSON.stringify(man, null, 2)); }
 });
-document.addEventListener("change", (e) => {
+document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset.msub) { const k = region + ":" + t.dataset.msub; const s = R().suburbs.find((x) => x.linz_id == t.dataset.msub); if (t.value.trim() && t.value.trim() !== s.name) edits[k] = t.value.trim(); else delete edits[k]; store.set("edits", JSON.stringify(edits)); }
   if (t.id === "csub") { store.set("csub-" + region, t.value); render(); }
   if (["metric", "sx", "sy", "scope"].includes(t.id)) { store.set(t.id, t.value); render(); }
   if (t.id === "sa2") { store.set("sa2", t.checked ? "1" : "0"); render(); }
+  if (t.id === "vp-flag") { store.set("vp-flag", t.value); render(); }
+  if (t.id === "vp-import" && t.files && t.files[0]) { const r = checkOutcome(await t.files[0].text()); $("#vp-result").innerHTML = `<span class="tag ${r.ok ? "ok" : "bad"}">${r.ok ? "valid" : "problems"}</span> ${r.msg}`; }
 });
 document.addEventListener("mouseover", (e) => { const p = e.target.closest && e.target.closest("#exmap path.sub"); if (p) { const s = R().suburbs[+p.dataset.i]; const m = M[store.get("metric", "PercPool")] || M.PercPool; tip.innerHTML = `<b>${esc(s.name)}</b><br>${esc(m.label)}: ${fmt(resident(s) ? m.get(s) : null, m.d)}${s.sections != null ? `<br>${fmt(s.sections)} sections` : ""}`; tip.classList.add("show"); } });
 document.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest("#exmap path.sub")) tip.classList.remove("show"); });
