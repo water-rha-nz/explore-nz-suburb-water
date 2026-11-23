@@ -30,24 +30,14 @@ This covers the steps between "accounts exist" and "a signed-in admin". The desi
 ## You do (needs your browser)
 1. ~~Supabase access token~~ (done).
 2. ~~`tools/supabase_bootstrap.sh --apply`~~ (done: see above).
-3. **Google OAuth client** (Google Cloud console, https://console.cloud.google.com):
-   1. **New Project** screen: project name `explore-nz-suburb-water` (the project ID can stay as suggested). With a personal Google account, **Organisation / Parent resource = "No organisation"** is correct. Press **Create**, then select the new project in the top bar.
-   2. Menu ☰ → **APIs & Services → OAuth consent screen**, which opens the **Google Auth Platform**. Press **Get started**, then **Branding** (OAuth consent screen):
-      - app name `Explore NZ Suburb Water`, with your support email;
-      - app home page `https://water-rha-nz.github.io/explore-nz-suburb-water/`;
-      - authorised domains `water-rha-nz.github.io` and **`uthodoiocvnwxwfzahwd.supabase.co`**. `github.io` and `supabase.co` are public suffixes, so Google only accepts the subdomain, and rejects `supabase.co` with "must be a top private domain";
-      - developer contact email.
-   3. **Audience:** External. While in *Testing*, add the Google accounts that may sign in as test users; publish when ready. The `openid`, `email` and `profile` scopes need no Google verification.
-   4. **Data access → scopes:** `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile` only.
-   5. **Clients → Create client → Web application**, name `Supabase auth`:
-      - Authorised JavaScript origins: `https://water-rha-nz.github.io`, `http://localhost:5173`
-      - Authorised redirect URI: **`https://uthodoiocvnwxwfzahwd.supabase.co/auth/v1/callback`**
-   6. Copy the client ID and secret into `~/.config/google/oauth_client_id` and `~/.config/google/oauth_client_secret`.
-4. Run `tools/supabase_bootstrap.sh --apply` again. Step 5 pushes the Google provider into Supabase Auth.
-5. **First admin:** sign in once with Google; your profile is created as `viewer` / `pending`. Then, in the Supabase SQL editor:
-   ```sql
-   update profiles set role = 'admin', status = 'active' where email = '<your Google email>';
-   ```
+3. ~~Google OAuth client~~ (done: authorised domains `water-rha-nz.github.io` and `uthodoiocvnwxwfzahwd.supabase.co`).
+4. ~~Bootstrap again~~ (done: Google provider enabled; MFA kept available; redirect allow-list covers the Pages site and localhost).
+5. ~~First admin~~ (done 2026-11-23: signed in via `signin.html`, promoted to admin / active; the change is in `audit_log`).
+
+## Status: setup complete
+- Real sign-in: https://water-rha-nz.github.io/explore-nz-suburb-water/signin.html
+- Later Google accounts arrive as `viewer` / `pending`. An admin approves them by setting `status = 'active'` (and a role).
+- Housekeeping: revoke the Supabase personal access token when setup changes are finished (the app doesn't use it); delete the unused Tokyo project; optionally rotate the Supabase secret key.
 
 ## Not part of this setup
 - Worker hosting (GitHub Actions workflows need a token with the `workflow` scope) and the `worker` database role password. Both come at milestone M3–M4.

@@ -2,7 +2,7 @@
 
 Version 0.2 (draft), 2026-11-23
 
-**Status:** specification, static demo and setup prerequisites. Supabase and Google Cloud accounts exist. The Supabase project `explore-nz-suburb-water-syd` (Sydney, free) exists with migrations 0001–0004 applied and secrets set. Google sign-in waits on the OAuth client (`docs/SETUP.md`). The demo is in `demo/`, built from the Taupō and Tauranga pilot.
+**Status:** specification, static demo and setup prerequisites. Supabase and Google Cloud accounts exist. The Supabase project `explore-nz-suburb-water-syd` (Sydney, free) exists with migrations 0001–0004 applied and secrets set. Google sign-in is live and the first admin is set up (`docs/SETUP.md`). The demo is in `demo/`, built from the Taupō and Tauranga pilot.
 
 ## 1. Purpose
 A web application that prepares, maintains and exports **suburb-level metadata for residential water-demand analysis anywhere in New Zealand**. It covers every explanatory variable of Ghavidelfar, Shamseldin & Melville (2018) *except water consumption*.
