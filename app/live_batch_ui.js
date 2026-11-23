@@ -13,15 +13,30 @@ STAGES.splice(1, STAGES.filter(([id]) => id === "load" || id === "allocate").len
 let bsub = store.get("batch-sub", "select");
 if (["batch", "allocate", "vsuburbs"].includes(stage)) { if (stage !== "batch") bsub = stage; stage = "configure"; }
 const isSub = (k) => stage === "configure" && bsub === k;
-const BATCH = { tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr-v2", "{}")), cfgPrvdr: {},
+const BATCH = { rev: 0, tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr-v2", "{}")), cfgPrvdr: {},
   files: {}, keep: store.get("batch-keep", "any"), config: null, configs: [], valid: {}, vTA: null,
   batches: [], jobs: [], regions: [], view: null, savedScope: null, fileNames: {}, linz: {}, aTA: null, aPick: null, builder: null,
   matches: JSON.parse(store.get("batch-matches", "{}")), alloc: JSON.parse(store.get("batch-alloc", "{}")), picks: JSON.parse(store.get("batch-picks", "{}")), tl: JSON.parse(store.get("batch-tl", "{}")) };
 const isB = () => Object.prototype.hasOwnProperty.call(BSTAGES, stage);
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-const saveSel = () => { store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
+const saveSel = () => { BATCH.rev = (BATCH.rev || 0) + 1; MEMO.fresh = false; store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
   store.set("batch-matches", JSON.stringify(BATCH.matches)); store.set("batch-alloc", JSON.stringify(BATCH.alloc)); store.set("batch-picks", JSON.stringify(BATCH.picks)); store.set("batch-tl", JSON.stringify(BATCH.tl)); };
 const taOf = (c) => (BATCH.tas || []).find((x) => x.code === c) || {};
+// memoised derived data (scope, PRVDRs, allocation rows): recomputed only when the inputs change, so drawing a step or
+// clicking the map doesn't re-scan every file row
+const IDS = new WeakMap(); let IDN = 0;
+const oid = (o) => o && typeof o === "object" ? (IDS.get(o) || (IDS.set(o, ++IDN), IDN)) : 0;
+const MEMO = { sig: "", fresh: false, m: new Map() };
+function stateSig() {
+  const F = BATCH.files;
+  return [BATCH.rev || 0, [...BATCH.sel].join(","), BATCH.keep, oid(F.map), oid(F.ref), oid(F.provider), (F.map || []).length, (F.ref || []).length, (F.provider || []).length,
+    oid(BATCH.alloc), Object.keys(BATCH.alloc).length, oid(BATCH.matches), Object.keys(BATCH.matches).length, oid(BATCH.picks), JSON.stringify(BATCH.picks).length,
+    oid(BATCH.savedScope), Object.keys(BATCH.linz).join(","), (BATCH.tas || []).length, BATCH.providers.length, oid(BATCH.prvdr), Object.keys(BATCH.prvdr).length, oid(BATCH.cfgPrvdr)].join("|");
+}
+function memo(key, fn) {
+  const sg = stateSig(); if (sg !== MEMO.sig) { MEMO.sig = sg; MEMO.m.clear(); }
+  if (!MEMO.m.has(key)) MEMO.m.set(key, fn()); return MEMO.m.get(key);
+}
 
 // ---------------------------------------------------------------- scope files (rules of suburb_lookup.html)
 function readCSV(text) {
@@ -179,6 +194,13 @@ async function setTl(c, o) {
 function migrateTl() { const d = BATCH.tl._default; if (!d) return; for (const c of BATCH.sel) if (!BATCH.tl[c]) BATCH.tl[c] = { ...d }; delete BATCH.tl._default; }
 migrateTl();
 
+{ const w = (name, f, key) => f;
+  const _scope = scopeByTA; scopeByTA = () => memo("scopeByTA", _scope);
+  const _rowTAs = rowTAs; rowTAs = (t, p) => memo("rowTAs|" + norm(t) + "|" + norm(p), () => _rowTAs(t, p));
+  const _prov = provRowTAs; provRowTAs = (r) => memo("prov|" + oid(r), () => _prov(r));
+  const _fp = filePrvdr; filePrvdr = (c) => memo("filePrvdr|" + c, () => _fp(c));
+  const _tif = tasInFiles; tasInFiles = () => memo("tasInFiles", _tif); }
+
 // ---------------------------------------------------------------- data
 async function loadBatchData() {
   if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 }));
@@ -198,7 +220,8 @@ function mapBox(geoms) {
   for (const g of geoms) for (const p of g) for (const r of p) for (const [x, y] of r) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   const pad = Math.max(x1 - x0, y1 - y0) * 0.03; return [x0 - pad, -(y1 + pad), x1 - x0 + 2 * pad, y1 - y0 + 2 * pad];
 }
-const pathD = (g) => g.map((p) => p.map((r) => r.map(([x, y], i) => (i ? "L" : "M") + Math.round(x) + "," + Math.round(-y)).join("") + "Z").join("")).join("");
+const PATHS = new WeakMap();
+const pathD = (g) => { if (g && typeof g === "object" && PATHS.has(g)) return PATHS.get(g); const d = g.map((p) => p.map((r) => r.map(([x, y], i) => (i ? "L" : "M") + Math.round(x) + "," + Math.round(-y)).join("") + "Z").join("")).join(""); if (g && typeof g === "object") PATHS.set(g, d); return d; };
 function zoomMap(id, layers, full) {
   const v = (BATCH.view && BATCH.view.id === id) ? BATCH.view.box : full;
   return `<div class="zmap" data-zmap="${id}" style="position:relative">
@@ -262,6 +285,7 @@ for (const id of Object.keys(BSTAGES)) V[id] = () => {
   return `<h1>0 · ${BSTAGES[id]}</h1><p class="lead">${LEADS[id]}</p><div id="batch-body"><p class="muted">Loading…</p></div>`;
 };
 function drawBatch() {
+  MEMO.fresh = false;
   const el = $("#batch-body"); if (!el || !BATCH.tas || !isB()) return;
   if (stage === "load") { el.innerHTML = loadHTML(); return; }
   const i = CFG_STEPS.findIndex(([k]) => k === bsub);
@@ -321,9 +345,11 @@ async function ensureLinz(c, force) {
   const { data, error } = await sb.functions.invoke("linz-suburbs", { body: { ta_code: c } });
   if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (_) { /* keep message */ } throw new Error(m); }
   const res = await q(sb.rpc("ta_suburbs", { p_ta: c, p_tol: 20 }));
+  BATCH.rev = (BATCH.rev || 0) + 1; MEMO.fresh = false;
   return (BATCH.linz[c] = { list: res.suburbs || [], cached: data && data.cached, requests: (data && data.requests) || 0 });
 }
-const linzIndex = (linz) => { const m = new Map(); for (const x of linz) { m.set(norm(x.name), x); if (x.name_ascii) m.set(norm(x.name_ascii), x); } return m; };
+const LIDX = new WeakMap();
+const linzIndex = (linz) => { if (LIDX.has(linz)) return LIDX.get(linz); const m = new Map(); LIDX.set(linz, m); for (const x of linz) { m.set(norm(x.name), x); if (x.name_ascii) m.set(norm(x.name_ascii), x); } return m; };
 // a scoped name -> LINZ suburbs: direct match, else your allocation for that row
 function locate(name, terr, file, byNorm) {
   const a = allocFor(file, name, terr);
@@ -340,8 +366,9 @@ const manualFor = (c) => Object.values(BATCH.alloc).filter((a) => a.file === "ma
 
 // suburbs a TA would load: your names matched or allocated (or all its LINZ suburbs when no list covers it), then your
 // picks from 2.2: excluded suburbs removed, added suburbs included
-function tapicks(c) { return BATCH.picks[c] || { add: [], ex: [] }; }
-function scopeOf(c) {
+function tapicks(c) { const P = BATCH.picks[c] || {}; return { add: P.add || [], ex: P.ex || [], skip: P.skip || [] }; }
+function scopeOf(c) { return memo("scopeOf|" + c, () => scopeOf_(c)); }
+function scopeOf_(c) {
   const s = scopeByTA()[c], L = BATCH.linz[c]; if (!L) return null;
   const byNorm = linzIndex(L.list), pairs = []; let unmatched = [];
   if (s) { for (const n of s.keep) { const rows = s.rows.filter((r) => norm(r.linz_ref) === norm(n)); let ok = false;
@@ -358,18 +385,22 @@ function scopeOf(c) {
     byId.set(m.linz.id, e); }
   const base = [...byId.values()];
   base.forEach((e) => { e.studies = [...new Map(e.studies.map((x) => [norm(x), x])).values()]; });
-  const P = tapicks(c), ex = new Set(P.ex.map(norm)), inBase = new Set(base.map((m) => norm(m.linz.name)));
+  const P = tapicks(c), skip = new Set(P.skip.map(norm));
+  if (skip.size) { for (let i = pairs.length - 1; i >= 0; i--) if (skip.has(norm(pairs[i].mname))) pairs.splice(i, 1);
+    for (const e of base) e.studies = e.studies.filter((x) => !skip.has(norm(x)));
+    for (let i = base.length - 1; i >= 0; i--) if (s && !base[i].studies.length && !base[i].whole) base.splice(i, 1); }
+  const ex = new Set(P.ex.map(norm)), inBase = new Set(base.map((m) => norm(m.linz.name)));
   const matched = base.filter((m) => !ex.has(norm(m.linz.name)));
   for (const n of P.add) { const x = byNorm.get(norm(n)); if (x && !inBase.has(norm(x.name)) && !ex.has(norm(x.name))) matched.push({ input: x.name, linz: x, added: true, studies: [] }); }
   return { s, L, base, matched, unmatched, allPairs: pairs, isEx: (n) => ex.has(norm(n)), pairs: pairs.filter((m) => !ex.has(norm(m.linz.name))), excluded: base.filter((m) => ex.has(norm(m.linz.name))),
-    scoped: !!s || P.add.length > 0 || P.ex.length > 0 || manualFor(c).length > 0 };
+    scoped: !!s || P.add.length > 0 || P.ex.length > 0 || P.skip.length > 0 || manualFor(c).length > 0 };
 }
 function togglePick(c, name, include) {
-  const P = { add: [...tapicks(c).add], ex: [...tapicks(c).ex] }, sc = scopeOf(c), k = norm(name);
+  const P = { add: [...tapicks(c).add], ex: [...tapicks(c).ex], skip: [...tapicks(c).skip] }, sc = scopeOf(c), k = norm(name);
   const inBase = sc && sc.base.some((m) => norm(m.linz.name) === k);
   P.add = P.add.filter((x) => norm(x) !== k); P.ex = P.ex.filter((x) => norm(x) !== k);
   if (inBase && !include) P.ex.push(name); if (!inBase && include) P.add.push(name);
-  P.add.length || P.ex.length ? BATCH.picks[c] = P : delete BATCH.picks[c]; BATCH.valid = {}; saveSel();
+  P.add.length || P.ex.length || P.skip.length ? BATCH.picks[c] = P : delete BATCH.picks[c]; BATCH.valid = {}; saveSel();
 }
 // ‹ previous / next › through the selected TAs, labelled with each TA's provider
 function taNav(cur, attr) {
@@ -389,7 +420,8 @@ function codesInFiles() {
   return [...m.entries()].map(([k, e]) => ({ key: k, ...e, mine: BATCH.matches[k] || "", saved: prvdrCode(e.code) })).sort((a, b) => (!!(a.mine || a.saved) - !!(b.mine || b.saved)) || a.code.localeCompare(b.code));
 }
 // rows of a TA's lists that match no LINZ suburb (allocated or not)
-function allocRows(c, all) {
+function allocRows(c, all) { return memo(`allocRows|${c}|${all ? 1 : 0}`, () => allocRows_(c, all)); }
+function allocRows_(c, all) {
   const s = scopeByTA()[c], L = BATCH.linz[c]; if (!L) return [];
   const byNorm = linzIndex(L.list), out = [], seen = new Set();
   if (s) { const keep = new Set(s.keep.map(norm)), rows = s.rows.length ? s.rows : s.keep.map((n) => ({ linz_ref: n, m_suburb: n, territory: "", file: "" }));
@@ -399,9 +431,12 @@ function allocRows(c, all) {
       const k = allocKey(r.file, r.linz_ref, r.territory || ""); if (seen.has(k)) continue;
       const alloc = allocFor(r.file, r.linz_ref, r.territory || ""); if (!all && direct && !(alloc && alloc.file === r.file)) continue; seen.add(k);
       const hit = locateRow(r.linz_ref, r, byNorm);
-      out.push({ key: k, file: r.file, name: r.linz_ref, mname: r.m_suburb || r.linz_ref, territory: r.territory || "", alloc, direct, targets: hit ? hit.linz.map((x) => x.name) : [] }); } }
+      const tg = hit ? hit.linz.map((x) => x.name) : [];
+      out.push({ key: k, file: r.file, name: r.linz_ref, mname: r.m_suburb || r.linz_ref, territory: r.territory || "", alloc, direct, targets: tg, status: !tg.length ? "not found" : hit.allocated ? "mapped" : "matched" }); } }
   for (const a of manualFor(c)) { const k = allocKey("manual", a.name, a.territory);
-    out.push({ key: k, file: "manual", name: a.name, mname: a.name, territory: a.territory, alloc: a, manual: true, targets: (a.linzSuburbs || []).map((x) => (byNorm.get(norm(x.name)) || {}).name).filter(Boolean) }); }
+    const tg = (a.linzSuburbs || []).map((x) => (byNorm.get(norm(x.name)) || {}).name).filter(Boolean);
+    out.push({ key: k, file: "manual", name: a.name, mname: a.name, territory: a.territory, alloc: a, manual: true, targets: tg, status: tg.length ? "mapped" : "not found" }); }
+  const skip = new Set(tapicks(c).skip.map(norm)); for (const r of out) if (skip.has(norm(r.mname))) r.skipped = true;
   return out;
 }
 function allocateHTML() {
@@ -411,55 +446,54 @@ function allocateHTML() {
     <td class="l"><select data-pmatch="${esc(e.key)}" aria-label="Provider for ${esc(e.code)}">${opts(e.mine || e.saved)}</select></td>
     <td class="l small">${e.mine ? `your match <button class="btn" type="button" data-punmatch="${esc(e.key)}" style="padding:1px 6px">reset</button>` : e.saved ? "saved provider" : '<span class="tag warn">unresolved</span>'}</td></tr>`).join("");
   const c = BATCH.aTA && sel.includes(BATCH.aTA) ? BATCH.aTA : sel[0], t = taOf(c), L = BATCH.linz[c], sc = scopeByTA()[c];
+  if (sel.some((x) => !BATCH.linz[x] && !(BATCH.linzErr || {})[x])) setTimeout(autoLinz, 0);
   let detail;
-  if (!L) detail = `<p class="small">Load ${esc(t.name)}'s LINZ suburbs to allocate rows and choose suburbs. <button class="btn primary" type="button" data-alinz="${c}">Load LINZ suburbs</button></p>`;
+  if (!L) detail = (BATCH.linzErr || {})[c] ? `<p class="small"><span class="tag bad">${esc(BATCH.linzErr[c])}</span> <button class="btn" type="button" data-alinz="${c}">Try again</button></p>` : `<p class="small muted">Loading ${esc(t.name)}'s LINZ suburbs (shared cache)…</p>`;
   else {
-    const all = store.get("map-all", "0") === "1", rows = allocRows(c, all), names = L.list.map((x) => x.name), tgt = new Set(), S = scopeOf(c);
-    for (const m of S.pairs) if (m.allocated) tgt.add(norm(m.linz.name));
-    const studies = [...new Map(allocRows(c, true).map((r) => [norm(r.mname), r.mname])).values()].sort();
-    const pick = BATCH.aPick && rows.find((r) => r.key === BATCH.aPick);
-    const inc = new Set(S.matched.map((m) => norm(m.linz.name))), exc = new Set(S.excluded.map((m) => norm(m.linz.name)));
+    const rows = allocRows(c, true), names = L.list.map((x) => x.name), S = scopeOf(c), selected = aSel();
+    for (const k of [...selected]) if (!rows.some((r) => r.key === k)) selected.delete(k);
+    const selTargets = new Set(rows.filter((r) => selected.has(r.key)).flatMap((r) => r.targets.map(norm)));
+    const used = new Map(); for (const r of rows) if (!r.skipped) for (const x of r.targets) used.set(norm(x), (used.get(norm(x)) || 0) + 1);
+    const exc = new Set(S.excluded.map((m) => norm(m.linz.name))), added = new Set(S.matched.filter((m) => m.added).map((m) => norm(m.linz.name)));
     const layers = [{ d: pathD(t.geom.coordinates), fill: "var(--land)", stroke: "var(--ink)", sw: 1.4, title: t.name },
-      ...L.list.map((x) => { const k = norm(x.name), st = tgt.has(k) && inc.has(k) ? "allocated" : inc.has(k) ? "included" : exc.has(k) ? "excluded" : "not in scope";
-        return { attr: `data-asub="${esc(x.name)}"`, click: true, d: pathD(x.geom.coordinates), fill: st === "allocated" || st === "included" ? "var(--accent)" : st === "excluded" ? "var(--bad, #b3261e)" : "var(--land)",
-          op: st === "allocated" ? 0.8 : st === "included" ? 0.45 : st === "excluded" ? 0.3 : 0.6, sw: 0.8, title: `${x.name} (${st})` }; })];
-    const list = [...S.base.map((m) => ({ name: m.linz.name, studies: m.studies, allocated: m.allocated, on: !exc.has(norm(m.linz.name)) })), ...S.matched.filter((m) => m.added).map((m) => ({ name: m.linz.name, studies: [], added: true, on: true }))]
-      .sort((x, y) => x.name.localeCompare(y.name));
-    const filt = norm(store.get("apick-filter", ""));
-    const rowsHTML = rows.length ? `<div style="max-height:420px;overflow:auto"><table style="width:100%"><thead><tr><th class="l" style="width:24%">Study suburb</th><th class="l">LINZ suburb(s)</th><th class="l" style="width:330px">Add</th></tr></thead><tbody>${rows.map((r, i) => {
-        const sug = r.targets.length ? [] : similar(r.name, names);
-        return `<tr${BATCH.aPick === r.key ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.mname)}</b>${norm(r.mname) !== norm(r.name) ? ` <span class="small muted">(ref ${esc(r.name)})</span>` : ""}<br><span class="small muted">${esc(r.manual ? "added here" : r.file || "saved configuration")}${r.territory ? " · " + esc(r.territory) : ""}</span>${r.manual ? ` <button class="btn" type="button" data-mdel="${esc(r.key)}" style="padding:0 4px" aria-label="Remove ${esc(r.name)}">remove</button>` : ""}</td>
-          <td class="l small">${r.targets.map((x) => `<span class="tag ${r.alloc && !r.manual || r.manual ? "ok" : "info"}">${esc(x)} <button class="btn" type="button" data-adel="${i}" data-aname="${esc(x)}" style="padding:0 4px" aria-label="Remove ${esc(x)}">×</button></span>`).join(" ") || '<span class="tag warn">not mapped</span>'}${r.alloc && !r.manual && r.direct ? ` <button class="btn" type="button" data-areset="${i}" style="padding:0 4px">use name match</button>` : ""}
-            ${sug.length ? `<br><span class="muted">did you mean</span> ${sug.map((n) => `<button class="btn" type="button" data-aadd="${i}" data-aname="${esc(n)}" style="padding:1px 6px">${esc(n)}</button>`).join(" ")}` : ""}</td>
-          <td class="l"><input type="text" list="alc-dl" data-ain="${i}" placeholder="LINZ suburb" style="width:140px" aria-label="LINZ suburb for ${esc(r.name)}"> <button class="btn" type="button" data-aadd="${i}">Add</button> <button class="btn" type="button" data-apick="${i}">Pick on map</button></td></tr>`; }).join("")}</tbody></table>
-      </div><p class="small muted">A study suburb can map to several LINZ suburbs, and several study suburbs to one LINZ suburb. Rows left unmapped aren't loaded. Mappings are saved with the configuration and in an exported builder config.</p>` : `<p class="small">${all ? "No study suburbs yet: add one below." : sc ? "Every row matches a LINZ suburb. Show all to change a mapping." : "No suburb list covers this TA: add study suburbs below."}</p>`;
-    detail = `<datalist id="alc-dl">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
-      <div class="grid g2"><div class="card">${zoomMap("alc-" + c, layers, mapBox([t.geom.coordinates]))}
-      <p class="small ${pick ? "" : "muted"}" style="margin:6px 0 0">${pick ? `Click suburbs to allocate <b>${esc(pick.name)}</b>. <button class="btn" type="button" id="apick-done">Done</button>`
-        : "Blue = will be loaded (darker = allocated), red = excluded, grey = not in scope. Click a suburb to include or exclude it, or press <b>Pick on map</b> on a row to allocate it."}</p></div>
-      <div class="card"><h3>Suburbs to load (${S.matched.length}${S.excluded.length ? `, ${S.excluded.length} excluded` : ""})</h3>
-      <div class="row" style="gap:6px;margin-bottom:6px"><button class="btn" type="button" data-pall="on">Include all</button><button class="btn" type="button" data-pall="off">Exclude all</button>
-        <input type="text" id="apick-filter" value="${esc(store.get("apick-filter", ""))}" placeholder="Filter" style="width:110px" aria-label="Filter suburbs">
-        <input type="text" list="alc-dl" id="padd-in" placeholder="Add a LINZ suburb" style="width:150px" aria-label="Add a LINZ suburb"><button class="btn" type="button" id="padd">Add</button></div>
-      <div style="max-height:430px;overflow:auto"><table><thead><tr><th></th><th class="l">LINZ suburb</th><th class="l">Study suburb(s)</th></tr></thead><tbody>${list.filter((x) => !filt || norm(x.name).includes(filt)).map((x) => `<tr><td><input type="checkbox" data-pinc="${esc(x.name)}" ${x.on ? "checked" : ""} aria-label="Load ${esc(x.name)}"></td>
-        <td class="l">${esc(x.name)}${x.added ? ' <span class="tag info">added</span>' : x.allocated ? ' <span class="tag info">mapped</span>' : ""}${!x.on ? ' <span class="tag bad">excluded</span>' : ""}</td><td class="l small muted">${(x.studies || []).filter((y) => norm(y) !== norm(x.name) || x.studies.length > 1).map(esc).join(", ")}</td></tr>`).join("")}</tbody></table></div>
-      <p class="small muted">Excluded suburbs are dropped from 2.3 and Load; added ones are loaded too. Saved with the configuration.</p></div></div>
-      <div class="card amap" style="margin-top:12px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">Study suburb → LINZ mappings (${rows.length}${all ? "" : " unmatched"})</h3>
-        <label class="small"><input type="checkbox" id="map-all" ${all ? "checked" : ""}> show all</label></div>${rowsHTML}
-      <datalist id="study-dl">${studies.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
-      <div class="row" style="gap:6px;margin:6px 0"><input type="text" list="study-dl" id="mnew-study" placeholder="Study suburb (new or existing)" style="width:170px" aria-label="Study suburb">
-        → <input type="text" list="alc-dl" id="mnew-linz" placeholder="LINZ suburb" style="width:140px" aria-label="LINZ suburb"><button class="btn" type="button" id="mnew">Map</button></div>
-</div>`;
+      ...L.list.map((x) => { const k = norm(x.name), st = selTargets.has(k) ? "selected" : exc.has(k) ? "excluded" : used.has(k) || added.has(k) || !sc ? "in use" : "free";
+        return { attr: `data-asub="${esc(x.name)}"`, click: true, d: pathD(x.geom.coordinates), fill: st === "selected" ? "#e6550d" : st === "in use" ? "var(--accent)" : st === "excluded" ? "var(--bad, #b3261e)" : "var(--land)",
+          op: st === "selected" ? 0.85 : st === "in use" ? 0.5 : st === "excluded" ? 0.3 : 0.7, sw: 0.8, title: `${x.name}${used.get(k) ? ` (used by ${used.get(k)} study suburb${used.get(k) === 1 ? "" : "s"})` : st === "free" ? " (not assigned)" : ""}` }; })];
+    const order = { "not found": 0, mapped: 1, matched: 2 }, filt = norm(store.get("afilter", ""));
+    const shown = rows.filter((r) => !filt || norm(r.mname + " " + r.targets.join(" ")).includes(filt)).sort((a, b) => (a.skipped - b.skipped) || (order[a.status] - order[b.status]) || a.mname.localeCompare(b.mname));
+    const nf = rows.filter((r) => r.status === "not found" && !r.skipped).length, nm = rows.filter((r) => r.status === "mapped").length, nok = rows.filter((r) => r.status === "matched").length;
+    const tag = (st) => `<span class="tag ${st === "not found" ? "warn" : st === "mapped" ? "info" : "ok"}">${st}</span>`;
+    const hint = selected.size ? `<b>${selected.size}</b> study suburb${selected.size === 1 ? "" : "s"} selected: click areas on the map to assign or unassign them. <button class="btn" type="button" id="aclear" style="padding:0 6px">Clear selection</button>`
+      : "Tick study suburbs (start with the ones not found), then click areas on the map to assign them. With nothing ticked, clicking an area ticks the study suburbs that use it.";
+    detail = `<div class="grid" style="grid-template-columns:minmax(0,1.1fr) minmax(320px,1fr);gap:12px;align-items:start">
+      <div class="card">${zoomMap("alc-" + c, layers, mapBox([t.geom.coordinates]))}
+        <p class="small" style="margin:6px 0 0">${hint}</p>
+        <p class="small muted" style="margin:4px 0 0"><span style="color:#e6550d">■</span> selected suburbs' areas · <span style="color:var(--accent)">■</span> assigned · ■ not assigned${S.excluded.length || added.size ? ` · earlier picks: ${S.excluded.length} excluded, ${added.size} added <button class="btn" type="button" id="apicks-clear" style="padding:0 6px">clear</button>` : ""}</p></div>
+      <div class="card amap"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Study suburbs (${rows.length})</h3>
+        <span class="small">${nf ? `<span class="tag warn">${nf} not found</span> ` : ""}<span class="tag info">${nm} mapped</span> <span class="tag ok">${nok} matched</span></span></div>
+        <div class="row" style="gap:6px;margin:6px 0"><input type="text" id="afilter" value="${esc(store.get("afilter", ""))}" placeholder="Filter" style="width:120px" aria-label="Filter study suburbs">
+          ${nf ? `<button class="btn" type="button" id="asel-nf" style="padding:1px 8px">Select not found</button>` : ""}</div>
+        <div style="max-height:470px;overflow:auto"><table style="width:100%"><thead><tr><th></th><th class="l">Study suburb</th><th class="l">LINZ suburb(s)</th><th class="l">Load</th></tr></thead><tbody>
+        ${shown.map((r) => { const sug = r.targets.length ? [] : similar(r.name, names), on = selected.has(r.key);
+          return `<tr style="${on ? "background:var(--accent-soft)" : ""}${r.skipped ? ";opacity:.55" : ""}"><td><input type="checkbox" data-asel="${esc(r.key)}" ${on ? "checked" : ""} aria-label="Select ${esc(r.mname)}"></td>
+            <td class="l"><b>${esc(r.mname)}</b> ${tag(r.status)}${norm(r.mname) !== norm(r.name) ? `<br><span class="small muted">ref ${esc(r.name)}</span>` : ""}${r.manual ? ` <button class="btn" type="button" data-mdel="${esc(r.key)}" style="padding:0 4px">remove</button>` : ""}</td>
+            <td class="l small">${r.targets.map((x) => `<span class="tag ${r.status === "matched" ? "ok" : "info"}">${esc(x)} <button class="btn" type="button" data-adel="${esc(r.key)}" data-aname="${esc(x)}" style="padding:0 4px" aria-label="Unassign ${esc(x)}">×</button></span>`).join(" ")}
+              ${r.alloc && !r.manual && r.direct ? ` <button class="btn" type="button" data-areset="${esc(r.key)}" style="padding:0 4px">use name match</button>` : ""}
+              ${sug.length ? `<span class="muted">did you mean</span> ${sug.map((n) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(n)}" style="padding:1px 6px">${esc(n)}</button>`).join(" ")}` : ""}</td>
+            <td><label class="small"><input type="checkbox" data-askip="${esc(r.mname)}" ${r.skipped ? "" : "checked"} aria-label="Load ${esc(r.mname)}"></label></td></tr>`; }).join("")}</tbody></table></div>
+        <datalist id="alc-dl">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+        <div class="row small" style="gap:6px;margin:8px 0 0">Add a study suburb <input type="text" id="mnew-study" placeholder="name" style="width:120px" aria-label="New study suburb"> → <input type="text" list="alc-dl" id="mnew-linz" placeholder="LINZ suburb" style="width:120px" aria-label="LINZ suburb"><button class="btn" type="button" id="mnew">Add</button></div>
+        <p class="small muted" style="margin:6px 0 0">A study suburb can use several LINZ suburbs and a LINZ suburb several study suburbs. Untick <i>Load</i> to leave a study suburb out. Saved with the configuration and in exported builder configs.</p></div></div>`;
   }
   return `<div class="card"><h3>Provider codes in your files</h3>
     ${codes.length ? `<table><thead><tr><th class="l">PRVDR / PROVIDER</th><th>Rows</th><th class="l">File</th><th class="l">Saved provider</th><th class="l"></th></tr></thead><tbody>${codeRows}</tbody></table>
       <p class="small muted">Codes resolve through your match, else a saved provider's PRVDR, legacy code, alias or name. Matches feed each TA's PRVDR in 2.1.</p>` : '<p class="small muted">No provider codes: add nz_suburb_provider.csv or nz_suburb_map.csv in 2.1.</p>'}</div>
   <div class="row" style="margin:14px 0 8px;justify-content:space-between"><h2 style="margin:0">${esc(t.name)} <span class="small muted">· ${esc(prvdrFor(c))}</span></h2>${taNav(c, "data-ata")}</div>
-  <div class="row" style="margin:0 0 8px">${sel.map((x) => `<button class="btn ${x === c ? "primary" : ""}" type="button" data-ata="${x}">${esc(taOf(x).name)}${BATCH.linz[x] ? ` (${allocRows(x).filter((r) => !r.targets.length).length})` : ""}</button>`).join("")}
-    <button class="btn" type="button" id="alinz-all">Load LINZ suburbs for all</button></div>
+  <div class="row" style="margin:0 0 8px">${sel.map((x) => `<button class="btn ${x === c ? "primary" : ""}" type="button" data-ata="${x}">${esc(taOf(x).name)}${BATCH.linz[x] ? (unassigned(x).length ? ` <span class="tag warn">${unassigned(x).length}</span>` : " ✓") : " …"}</button>`).join("")}</div>
   ${detail}
   ${refinedHTML()}
-  <div class="row" style="margin-top:12px"><button class="btn primary" type="button" data-btab="vsuburbs">Next: 2.3 Validate suburbs →</button></div>`;
+  ${(() => { const todo = sel.reduce((t, x) => t + unassigned(x).length, 0);
+    return `<div class="row" style="margin-top:12px;align-items:center;gap:8px"><button class="btn primary" type="button" id="alloc-next" data-todo="${todo}">Next: 2.3 Validate suburbs →</button>${todo ? `<span class="tag warn">${todo} study suburb${todo === 1 ? "" : "s"} not assigned</span> <span class="small muted">They won't be loaded unless you assign or skip them.</span>` : ""}</div>`; })()}`;
 }
 function setAlloc(r, names) {
   const k = allocKey(r.file, r.name, r.territory), terr = taOf(curTA()).name || "";
@@ -475,7 +509,18 @@ function mapPair(c, study, linz) {
   BATCH.valid = {}; saveSel();
 }
 const curTA = () => BATCH.aTA && BATCH.sel.has(BATCH.aTA) ? BATCH.aTA : [...BATCH.sel].sort()[0];
-function curAllocRows() { return allocRows(curTA(), store.get("map-all", "0") === "1"); }
+function curAllocRows() { return allocRows(curTA(), true); }
+const rowByKey = (k) => curAllocRows().find((r) => r.key === k);
+// study suburbs still without a LINZ suburb (skipped ones don't count), per TA
+const unassigned = (c) => BATCH.linz[c] ? allocRows(c, true).filter((r) => !r.targets.length && !r.skipped) : [];
+// selection of study rows (per TA) for assigning LINZ areas on the map
+const aSel = () => { const c = curTA(); BATCH.aSel = BATCH.aSel || {}; return (BATCH.aSel[c] = BATCH.aSel[c] || new Set()); };
+// open 2.2: fetch each selected TA's LINZ suburbs (shared cache) so study names are cross-referenced without validating first
+async function autoLinz() {
+  if (BATCH.linzLoading) return; BATCH.linzLoading = true;
+  try { for (const c of [...BATCH.sel].sort()) if (!BATCH.linz[c]) { try { await ensureLinz(c); } catch (err) { BATCH.linzErr = BATCH.linzErr || {}; BATCH.linzErr[c] = err.message; } if (isSub("allocate")) drawBatch(); } }
+  finally { BATCH.linzLoading = false; }
+}
 
 // ---------------------------------------------------------------- refined input files, saved as new versions
 // The originals are never overwritten: each download gets the next version number and a timestamp, e.g.
@@ -744,10 +789,13 @@ document.addEventListener("click", async (e) => {
   const tab = cl("[data-btab]"); if (tab && isB()) { const k = tab.dataset.btab; BATCH.view = null;
     if (CFG_STEPS.some(([x]) => x === k)) { bsub = k; store.set("batch-sub", k); if (stage === "configure") return drawBatch(); stage = "configure"; } else stage = k;
     store.set("stage", stage); render(); return scrollTo(0, 0); }
-  const as0 = cl("[data-asub]"); if (as0 && isSub("allocate") && !BATCH.aPick && !window._dragMoved) { const c = curTA(), S = scopeOf(c); if (!S) return;
-    const k = norm(as0.dataset.asub); togglePick(c, as0.dataset.asub, !S.matched.some((m) => norm(m.linz.name) === k)); return drawBatch(); }
-  const as = cl("[data-asub]"); if (as && isSub("allocate") && BATCH.aPick && !window._dragMoved) { const r = curAllocRows().find((x) => x.key === BATCH.aPick); if (r) { const cur = r.targets, n = as.dataset.asub;
-    setAlloc(r, cur.some((x) => norm(x) === norm(n)) ? cur.filter((x) => norm(x) !== norm(n)) : [...cur, n]); BATCH.aPick = r.key; } return drawBatch(); }
+  const as = cl("[data-asub]"); if (as && isSub("allocate") && !window._dragMoved) { const n = as.dataset.asub, k = norm(n), rows = curAllocRows(), selected = aSel();
+    if (selected.size) {   // toggle this area for every selected study suburb
+      const chosen = rows.filter((r) => selected.has(r.key)), allHave = chosen.every((r) => r.targets.some((x) => norm(x) === k));
+      for (const r of chosen) { const cur = r.targets.filter((x) => norm(x) !== k); setAlloc(r, allHave ? cur : [...cur, n]); }
+    } else { for (const r of rows) if (r.targets.some((x) => norm(x) === k)) selected.add(r.key);   // tick the study suburbs that use it
+      if (!selected.size) toastMsg(`${n}: no study suburb uses it. Tick study suburbs first to assign it.`); }
+    return drawBatch(); }
   const ta = cl("[data-ta]"); if (ta && isSub("select") && !window._dragMoved) { const c = ta.dataset.ta; BATCH.sel.has(c) ? BATCH.sel.delete(c) : BATCH.sel.add(c); saveSel(); BATCH.valid = {}; return drawBatch(); }
   const z = cl("[data-zoom]");
   if (z) { const svg = z.closest(".zmap").querySelector("svg"), b = svg.getAttribute("viewBox").split(" ").map(Number), act = z.dataset.zoom;
@@ -762,26 +810,22 @@ document.addEventListener("click", async (e) => {
   if (t.dataset && t.dataset.ata) { BATCH.aTA = t.dataset.ata; BATCH.aPick = null; BATCH.view = null; return drawBatch(); }
   if (t.dataset && t.dataset.alinz) { t.disabled = true; try { await ensureLinz(t.dataset.alinz); } catch (err) { toastMsg("LINZ suburbs: " + err.message); } return drawBatch(); }
   if (t.id === "alinz-all") { t.disabled = true; for (const c of [...BATCH.sel].sort()) { try { await ensureLinz(c); } catch (err) { toastMsg(`${taOf(c).name}: ${err.message}`); } drawBatch(); } return; }
-  if (t.dataset && t.dataset.areset) { const r = curAllocRows()[+t.dataset.areset]; if (r) { for (const [k, a] of Object.entries(BATCH.alloc)) if (a === r.alloc) delete BATCH.alloc[k]; BATCH.valid = {}; saveSel(); } return drawBatch(); }
+  if (t.dataset && t.dataset.areset) { const r = rowByKey(t.dataset.areset); if (r) { for (const [k, a] of Object.entries(BATCH.alloc)) if (a === r.alloc) delete BATCH.alloc[k]; BATCH.valid = {}; saveSel(); } return drawBatch(); }
   if (t.dataset && t.dataset.mdel) { delete BATCH.alloc[t.dataset.mdel]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "mnew") { const c = curTA(), st = (($("#mnew-study") || {}).value || "").trim(), ln = (($("#mnew-linz") || {}).value || "").trim();
     const x = ((BATCH.linz[c] || {}).list || []).find((y) => norm(y.name) === norm(ln));
     if (!st) return toastMsg("Type a study suburb name"); if (!x) return toastMsg(`"${ln}" is not a LINZ suburb in ${taOf(c).name}`);
     mapPair(c, st, x.name); return drawBatch(); }
-  if (t.dataset && (t.dataset.aadd || t.dataset.adel || t.dataset.apick)) { const rows = curAllocRows(), r = rows[+(t.dataset.aadd || t.dataset.adel || t.dataset.apick)]; if (!r) return;
-    if (t.dataset.apick) { BATCH.aPick = BATCH.aPick === r.key ? null : r.key; return drawBatch(); }
-    const cur = r.targets;
-    if (t.dataset.adel) { setAlloc(r, cur.filter((x) => x !== t.dataset.aname)); return drawBatch(); }
-    const inp = $(`[data-ain="${t.dataset.aadd}"]`), n = t.dataset.aname || (inp && inp.value.trim()), L = (BATCH.linz[BATCH.aTA && BATCH.sel.has(BATCH.aTA) ? BATCH.aTA : [...BATCH.sel].sort()[0]] || {}).list || [];
-    const hit = L.find((x) => norm(x.name) === norm(n)); if (!hit) return toastMsg(`"${n || ""}" is not a LINZ suburb in this TA`);
-    if (!cur.includes(hit.name)) setAlloc(r, [...cur, hit.name]); return drawBatch(); }
-  if (t.id === "apick-done") { BATCH.aPick = null; return drawBatch(); }
-  if (t.dataset && t.dataset.pall) { const c = curTA(), S = scopeOf(c); if (!S) return; const f = norm(store.get("apick-filter", ""));
-    for (const m of S.base) if (!f || norm(m.linz.name).includes(f)) togglePick(c, m.linz.name, t.dataset.pall === "on");
-    if (t.dataset.pall === "off") for (const m of S.matched.filter((m) => m.added)) if (!f || norm(m.linz.name).includes(f)) togglePick(c, m.linz.name, false);
-    return drawBatch(); }
-  if (t.id === "padd") { const c = curTA(), n = ($("#padd-in") || {}).value || "", x = ((BATCH.linz[c] || {}).list || []).find((y) => norm(y.name) === norm(n.trim()));
-    if (!x) return toastMsg(`"${n}" is not a LINZ suburb in ${taOf(c).name}`); togglePick(c, x.name, true); return drawBatch(); }
+  if (t.dataset && (t.dataset.aadd || t.dataset.adel)) { const r = rowByKey(t.dataset.aadd || t.dataset.adel); if (!r) return;
+    if (t.dataset.adel) { setAlloc(r, r.targets.filter((x) => x !== t.dataset.aname)); return drawBatch(); }
+    const hit = ((BATCH.linz[curTA()] || {}).list || []).find((x) => norm(x.name) === norm(t.dataset.aname)); if (!hit) return toastMsg(`"${t.dataset.aname}" is not a LINZ suburb in this TA`);
+    if (!r.targets.includes(hit.name)) setAlloc(r, [...r.targets, hit.name]); return drawBatch(); }
+  if (t.id === "aclear") { aSel().clear(); return drawBatch(); }
+  if (t.id === "asel-nf") { const S = aSel(); for (const r of curAllocRows()) if (!r.targets.length && !r.skipped) S.add(r.key); return drawBatch(); }
+  if (t.id === "apicks-clear") { const c = curTA(), P = tapicks(c); P.skip.length ? BATCH.picks[c] = { add: [], ex: [], skip: P.skip } : delete BATCH.picks[c]; BATCH.valid = {}; saveSel(); return drawBatch(); }
+  if (t.id === "alloc-next") { const n = +t.dataset.todo || 0;
+    if (n && !confirm(`${n} study suburb${n === 1 ? " is" : "s are"} not assigned to a LINZ suburb and won't be loaded. Continue to validation anyway?`)) return;
+    bsub = "vsuburbs"; store.set("batch-sub", bsub); BATCH.view = null; drawBatch(); return scrollTo(0, 0); }
   if (t.dataset && t.dataset.punmatch) { delete BATCH.matches[t.dataset.punmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bcfg-export") return exportBuilder();
   const tlb = t.closest && t.closest("[data-tlyb]");
@@ -810,9 +854,11 @@ document.addEventListener("change", async (e) => {
   if (t.dataset && t.dataset.tsel) { t.checked ? BATCH.sel.add(t.dataset.tsel) : BATCH.sel.delete(t.dataset.tsel); saveSel(); BATCH.valid = {}; return drawBatch(); }
   if (t.dataset && t.dataset.tprvdr) { const c = t.dataset.tprvdr, auto = (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0];
     t.value === auto ? delete BATCH.prvdr[c] : BATCH.prvdr[c] = t.value; saveSel(); return drawBatch(); }
-  if (t.id === "batch-keep") { BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
+  if (t.id === "batch-keep") { BATCH.rev++; MEMO.fresh = false; BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "cfg-pick") return loadConfig(t.value);
-  if (t.id === "map-all") { store.set("map-all", t.checked ? "1" : "0"); BATCH.aPick = null; return drawBatch(); }
+  if (t.dataset && t.dataset.asel) { const S = aSel(); t.checked ? S.add(t.dataset.asel) : S.delete(t.dataset.asel); return drawBatch(); }
+  if (t.dataset && t.dataset.askip) { const c = curTA(), P = tapicks(c), k = norm(t.dataset.askip); const skip = P.skip.filter((x) => norm(x) !== k); if (!t.checked) skip.push(t.dataset.askip);
+    const np = { add: P.add, ex: P.ex, skip }; np.add.length || np.ex.length || np.skip.length ? BATCH.picks[c] = np : delete BATCH.picks[c]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.tl) { const c = t.dataset.tl, o = { ...tlOf(c) }, v = parseDay(t.value);
     if (v === null) { toastMsg(`"${t.value}" isn't a date between 1940-01-01 and ${latestDay()}: use yyyy-mm-dd, e.g. 2012-01-01`); t.value = tlOf(c)[t.dataset.tlk] || ""; return; }
     v ? o[t.dataset.tlk] = v : delete o[t.dataset.tlk];
@@ -831,11 +877,11 @@ document.addEventListener("change", async (e) => {
   if (t.id === "bcfg-import" && t.files && t.files[0]) { const f = t.files[0];
     try { toastMsg(importBuilder(JSON.parse(await f.text()), f.name)); } catch (err) { toastMsg(err instanceof SyntaxError ? `${f.name} is not valid JSON` : err.message); } return drawBatch(); }
   if (t.dataset && t.dataset.sfile && t.files && t.files[0]) {
-    BATCH.files[t.dataset.sfile] = readCSV(await t.files[0].text()); BATCH.fileNames[t.dataset.sfile] = t.files[0].name; BATCH.savedScope = null; BATCH.valid = {};
+    BATCH.files[t.dataset.sfile] = readCSV(await t.files[0].text()); BATCH.fileNames[t.dataset.sfile] = t.files[0].name; BATCH.savedScope = null; BATCH.valid = {}; BATCH.rev++; MEMO.fresh = false;
     toastMsg(`${BATCH.files[t.dataset.sfile].length} rows read; applied to ${Object.keys(scopeByTA()).length} selected TA(s)`); return drawBatch();
   }
 });
-document.addEventListener("input", (e) => { if (e.target.id === "apick-filter") { store.set("apick-filter", e.target.value); clearTimeout(window._af); window._af = setTimeout(() => { drawBatch(); const f = $("#apick-filter"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); return; }
+document.addEventListener("input", (e) => { if (e.target.id === "afilter") { store.set("afilter", e.target.value); clearTimeout(window._af); window._af = setTimeout(() => { drawBatch(); const f = $("#afilter"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); return; }
   if (e.target.id === "bta-filter") { store.set("bta-filter", e.target.value); clearTimeout(window._bf); window._bf = setTimeout(() => { drawBatch(); const f = $("#bta-filter"); if (f) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); } }, 250); } });
 
 // stage headings take their number from the stage bar (stages were inserted and replaced)
