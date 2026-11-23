@@ -554,8 +554,38 @@ function importBuilder(c, fname) {
     if (targets.length) { BATCH.alloc[allocKey(a.file, a.name, a.territory || "")] = { file: a.file, name: a.name, territory: a.territory || "", linzSuburbs: targets }; n++; }
   }
   if (c.suburbPicks && typeof c.suburbPicks === "object") for (const [tn, P] of Object.entries(c.suburbPicks)) for (const code of rowTAs(tn)) BATCH.picks[code] = { add: [...(P.add || [])], ex: [...(P.ex || [])] };
+  const extra = importStudy(c.study);
   BATCH.builder = { ...c, fname }; BATCH.valid = {}; saveSel();
-  return `Loaded ${fname}: ${Object.keys(c.prvdrMatches || {}).length - bad} PRVDR matches${bad ? ` (${bad} matched no saved provider)` : ""}, ${n} allocations, keep rule "${BATCH.keep}"`;
+  return `Loaded ${fname}: ${Object.keys(c.prvdrMatches || {}).length - bad} PRVDR matches${bad ? ` (${bad} matched no saved provider)` : ""}, ${n} allocations, keep rule "${BATCH.keep}"${extra}`;
+}
+// everything this app adds to a builder config: selection, PRVDRs, timelines (dates and census years), scope, picks and the
+// study -> LINZ mappings per TA. The reference builder ignores this section; importing it here restores the study.
+function studyExport() {
+  const sel = [...BATCH.sel].sort(), sc = scopeByTA();
+  const tl = (t) => ({ weatherFrom: t.climate_start || CLIMATE_FROM, weatherTo: t.climate_end || "latest", censusYears: (t.census_years || CENSUS_YEARS).map(Number) });
+  return { app: "NZ Suburb Water Profiles", version: 1, exported: new Date().toISOString(), name: BATCH.config ? BATCH.config.name : null, keepMode: BATCH.keep,
+    timelineTemplate: tl(tlOf("_all")),
+    territorialAuthorities: sel.map((c) => { const f = filePrvdr(c), S = BATCH.linz[c] ? scopeOf(c) : null;
+      return { code: c, name: taOf(c).name, prvdr: prvdrFor(c), prvdrName: (BATCH.providers.find((p) => p.prvdr === prvdrFor(c)) || {}).name || null,
+        prvdrChosen: !!BATCH.prvdr[c], prvdrSource: prvdrSource(c), fileAcronyms: f ? f.acronyms : [], unmatchedCodes: f ? f.unresolved : [],
+        timeline: tl(tlOf(c)), scopeBasis: sc[c] ? sc[c].basis : "whole TA", suburbsInScope: sc[c] ? sc[c].keep : [],
+        picks: BATCH.picks[c] || { add: [], ex: [] },
+        mappings: S ? [...new Map(S.allPairs.map((m) => [`${m.mname}|${m.linz.name}`, { study: m.mname, linz: m.linz.name, how: m.manual ? "added" : m.allocated ? "allocated" : "name match", excluded: S.isEx(m.linz.name) }])).values()] : null,
+        linzSuburbsToLoad: S ? S.matched.map((m) => m.linz.name) : null }; }) };
+}
+function importStudy(st) {
+  if (!st || !Array.isArray(st.territorialAuthorities)) return "";
+  const tlIn = (t) => { if (!t) return {}; const o = {}; if (t.weatherFrom && t.weatherFrom !== CLIMATE_FROM) o.climate_start = t.weatherFrom; if (t.weatherTo && t.weatherTo !== "latest") o.climate_end = t.weatherTo;
+    if (Array.isArray(t.censusYears) && t.censusYears.length) o.census_years = CENSUS_YEARS.filter((y) => t.censusYears.map(String).includes(y)); return o; };
+  BATCH.sel = new Set(st.territorialAuthorities.map((t) => t.code).filter((c) => taOf(c).code));
+  for (const t of st.territorialAuthorities) { if (!taOf(t.code).code) continue;
+    if (t.prvdr) { BATCH.cfgPrvdr[t.code] = t.prvdr; if (t.prvdrChosen) BATCH.prvdr[t.code] = t.prvdr; }
+    BATCH.tl[t.code] = tlIn(t.timeline);
+    if (t.picks && (t.picks.add || t.picks.ex)) BATCH.picks[t.code] = { add: [...(t.picks.add || [])], ex: [...(t.picks.ex || [])] };
+    if (Array.isArray(t.suburbsInScope) && t.suburbsInScope.length) BATCH.savedScope = { ...(BATCH.savedScope || {}), [t.code]: t.suburbsInScope }; }
+  if (st.timelineTemplate) BATCH.tl._all = tlIn(st.timelineTemplate);
+  if (st.keepMode === "any" || st.keepMode === "both") { BATCH.keep = st.keepMode; store.set("batch-keep", st.keepMode); }
+  return `; ${BATCH.sel.size} TA(s) with PRVDRs, timelines and picks${st.name ? ` (study "${st.name}")` : ""}`;
 }
 function exportBuilder(made) {
   const b = BATCH.builder || {}, roles = { map: "suburb_map", ref: "suburb_ref", provider: "suburb_provider" };
@@ -566,7 +596,8 @@ function exportBuilder(made) {
     settings: { ...(b.settings || {}), keepMode: BATCH.keep },
     prvdrMatches: Object.fromEntries(Object.entries(BATCH.matches).map(([k, v]) => [k.toUpperCase(), nameOf(v)])),
     suburbAllocations: Object.values(BATCH.alloc).map((a) => ({ file: a.file, name: a.name, territory: a.territory || "", linzSuburbs: a.linzSuburbs })),
-    suburbPicks: Object.fromEntries(Object.entries(BATCH.picks).map(([c, P]) => [taOf(c).name || c, P])) };
+    suburbPicks: Object.fromEntries(Object.entries(BATCH.picks).map(([c, P]) => [taOf(c).name || c, P])),
+    study: studyExport() };
   delete out.fname;
   download(made ? versionName(b.fname, "nz_suburb_builder_config.json").replace(/\.csv$/, ".json") : "nz_suburb_builder_config.json", JSON.stringify(out, null, 2) + "\n");
 }
