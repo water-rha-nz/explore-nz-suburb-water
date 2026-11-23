@@ -556,19 +556,24 @@ Everything a job downloads goes into shared tables, whichever user's or the proj
 
 A batch for a TA that already has a region reuses that region; the pilot regions carry their TA codes (021, 023). Verified: re-preparing Kawerau made one LINZ request (the suburbs lookup) and nothing else.
 
-## 25. Batch stage: Configure → Validate → Load
+## 25. Batch preparation: 2 Configure → 3 Allocate → 4 Validate suburbs → 5 Load
+These four stages replace the reference builder's Load and Allocate stages. The stage bar runs 1 Region, 2 Configure, 3 Allocate, 4 Validate suburbs, 5 Load, then Imagery, Validate, Context, Explore and Export.
 1. **Configure:**
    - select TAs on a zoomable map (scroll to zoom, drag to pan, +/−, zoom to selection, reset) or in the 67-TA table;
    - uploaded `nz_suburb_map.csv`, `nz_suburb_ref.csv` and `nz_suburb_provider.csv` apply **only to the selected TAs**: files never change the selection, but TAs they mention can be added with **Select them**;
-   - each selected TA has a **PRVDR**: chosen by hand, otherwise allocated by `nz_suburb_provider.csv` (the most common code among the TA's rows; legacy codes and aliases map to current codes), otherwise the TA's provider;
+   - each selected TA's **PRVDR** is filled from the reference CSVs, resolved as the builder does: `nz_suburb_provider.csv` PRVDR, then `nz_suburb_map.csv` PROVIDER (the most common code among the TA's rows, through your matches; legacy codes, aliases and provider names map to current codes), then the TA's saved provider. It stays editable, with a reset to the file value;
    - each selected TA shows that PRVDR's **charging rates** (type, fixed $/yr, volumetric $/m³, date checked) with a link to the provider's **source**;
-   - **saved configurations** (`batch_configs`) store the selected TAs, PRVDRs, keep rule and the resulting suburb names, never file contents; they are private to their owner.
-2. **Validate:**
-   - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive), with matched and not-found names and "did you mean" suggestions;
+   - **saved configurations** (`batch_configs`) store the selected TAs, PRVDRs, keep rule, provider-code matches (`prvdr_matches`), allocations (`allocations`) and the resulting suburb names, never file contents; they are private to their owner;
+   - **builder configs:** `nz_suburb_builder_config.json` from `suburb_lookup.html` can be imported (keep rule, `prvdrMatches`, `suburbAllocations`; it lists which of the lists it expects) and exported in the same format, keeping fields this app doesn't use (data folder, outputs, other settings).
+2. **Allocate** (as the builder's Allocate tab):
+   - every PRVDR / PROVIDER value in your files, with the saved provider it resolves to and a picker to assign or override it;
+   - per selected TA, the list rows that match no LINZ suburb. Allocate each to one or more LINZ suburbs by picking "did you mean" suggestions, typing a name, or clicking suburbs on the TA's map. Unallocated rows aren't loaded.
+3. **Validate suburbs:**
+   - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive); allocated rows count as matched; not-found names show "did you mean" suggestions;
    - the located suburbs are drawn on a zoomable map: in scope in blue, the TA's other suburbs in grey;
-   - LINZ suburbs come from the `linz-suburbs` Edge Function, which is editor-only, uses the caller's key or the project key, counts against the key's daily budget, honours Retry-After, and fetches each TA **once into a shared cache** (`linz_suburb_index`, fresh for 30 days);
+   - LINZ suburbs come from the `linz-suburbs` Edge Function, which is editor-only, uses the caller's key or the project key, counts against the key's daily budget, honours Retry-After, and fetches each TA **once into a shared cache** (`linz_suburb_index`, fresh for 30 days); Allocate and Validate share it;
    - the worker reads the same cache, so loading a validated TA makes no suburbs request.
-3. **Load:** queue only validated LINZ suburbs (`regions.scope`) with the region's PRVDR (`regions.prvdr`, used for `suburb_metrics`), then follow progress, publish, and download the tile list.
+4. **Load:** queue only validated LINZ suburbs (`regions.scope`) with the region's PRVDR (`regions.prvdr`). `m_suburbs` keeps your M_SUBURB names with the LINZ suburb each maps to, one row per allocated suburb. Then follow progress, publish, and download the tile list.
 
 ## 26. Privacy
 - Users see only their own configurations, batches, jobs (plus scheduled project jobs), job runs, validation labels and exports, and usage of their own keys or the project's. Admins see everything.
