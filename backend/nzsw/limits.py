@@ -258,9 +258,19 @@ class Client:
             raise ServicePaused(f"{service}: paused after repeated throttling")
         self.check_budget(service, cost)
         http = session or requests
+        timeout = kw.pop("timeout", 300)
         for attempt in range(MAX_RETRIES + 1):
             self._pace(service)
-            r = http.request(method, url, timeout=kw.pop("timeout", 300), **kw)
+            try:
+                r = http.request(method, url, timeout=timeout, **kw)
+            except (requests.ConnectionError, requests.Timeout) as e:   # DNS blips, resets, timeouts: retry with backoff
+                self.ledger.add(service, 1.0)
+                if attempt == MAX_RETRIES:
+                    raise
+                delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** attempt) * (0.5 + random.random() / 2)
+                self.log(f"{service}: {type(e).__name__}, retry {attempt + 1}/{MAX_RETRIES} in {delay:.0f}s")
+                self.sleep(delay)
+                continue
             # count every attempt: providers count requests, not successes
             self.ledger.add(service, cost if attempt == 0 else 1.0, nbytes=len(r.content or b""))
             if r.status_code not in RETRY_STATUSES:

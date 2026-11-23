@@ -15,8 +15,12 @@ def connect(url=None):
 class DbLedger:
     """Same interface as limits.Ledger, stored in the api_usage table (per service, UTC day/hour)."""
 
-    def __init__(self, con):
+    def __init__(self, con, owners=None):
         self.con = con
+        self.owners = owners or {}          # service -> key owner (user id), default 'project'
+
+    def _o(self, service):
+        return self.owners.get(service, "project")
 
     @staticmethod
     def _buckets():
@@ -25,18 +29,18 @@ class DbLedger:
 
     def used(self, service, period="day"):
         b = self._buckets()[0 if period == "day" else 1]
-        r = self.con.execute("select cost from api_usage where service=%s and period=%s and bucket=%s", (service, period, b)).fetchone()
+        r = self.con.execute("select cost from api_usage where service=%s and period=%s and bucket=%s and key_owner=%s", (service, period, b, self._o(service))).fetchone()
         return float(r[0]) if r else 0.0
 
     def add(self, service, cost, nbytes=0):
         day, hour = self._buckets()
         for period, b in (("day", day), ("hour", hour)):
-            self.con.execute("""insert into api_usage (service, period, bucket, cost, bytes) values (%s,%s,%s,%s,%s)
-                                on conflict (service, period, bucket) do update set cost = api_usage.cost + excluded.cost,
-                                bytes = api_usage.bytes + excluded.bytes""", (service, period, b, cost, nbytes if period == "day" else 0))
+            self.con.execute("""insert into api_usage (service, period, bucket, cost, bytes, key_owner) values (%s,%s,%s,%s,%s,%s)
+                                on conflict (service, period, bucket, key_owner) do update set cost = api_usage.cost + excluded.cost,
+                                bytes = api_usage.bytes + excluded.bytes""", (service, period, b, cost, nbytes if period == "day" else 0, self._o(service)))
 
     def bytes_today(self, service):
-        r = self.con.execute("select bytes from api_usage where service=%s and period='day' and bucket=%s", (service, self._buckets()[0])).fetchone()
+        r = self.con.execute("select bytes from api_usage where service=%s and period='day' and bucket=%s and key_owner=%s", (service, self._buckets()[0], self._o(service))).fetchone()
         return int(r[0]) if r else 0
 
     def remaining(self, service, period="day"):

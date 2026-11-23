@@ -7,17 +7,37 @@ import argparse, datetime as dt, json, sys, traceback
 from . import limits as L
 from .db import connect, DbLedger, sync_rates
 from .steps import STEPS
+from . import steps as _steps
+from . import prepare
+STEPS = {**STEPS, **prepare.STEPS}
+PREPARE_STEPS = ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"]
 
 DEFAULT_STEPS = ["climate", "census", "publish"]
 
 
 def run_steps(con, region, steps, job_id=None, log=print):
     sync_rates(con)
-    client = L.Client(ledger=DbLedger(con), log=log)
+    # keys: the job creator's own keys (Vault) where set, else the project keys; budgets are counted per key owner
+    _steps.USER_KEYS.clear()
+    owners = {}
+    SVC = {"linz": "linz_wfs", "statsnz_ade": "statsnz_ade", "statsnz_datafinder": "statsnz_datafinder", "openmeteo": "openmeteo"}
+    if job_id:
+        for name, service in SVC.items():
+            r = con.execute("select key, owner from job_api_key(%s, %s)", (job_id, name)).fetchone()
+            if r and r[0]:
+                _steps.USER_KEYS[name] = r[0]; owners[service] = str(r[1])
+    if owners:
+        log(f"using the job creator's own keys for: {', '.join(sorted(owners))}")
+    client = L.Client(ledger=DbLedger(con, owners), log=log)
     if con.execute("select count(*) from regions where id=%s", (region,)).fetchone()[0] != 1:
         raise ValueError(f"unknown region {region!r}")   # one region per run; no national/multi-region path exists
     results = {}
+    done_before = set()
+    if job_id:   # resuming a parked or requeued job: skip steps it already finished
+        done_before = {r[0] for r in con.execute("select step from job_runs where job_id=%s and status='done'", (job_id,)).fetchall()}
     for s in steps:
+        if s in done_before:
+            log(f"[{region}] {s}: already done, skipped"); results[s] = dict(status="done", message="already done", seconds=0); continue
         if s not in STEPS:
             raise ValueError(f"unknown step {s!r} (available: {', '.join(STEPS)})")
         t0 = dt.datetime.now(dt.timezone.utc)
@@ -27,6 +47,8 @@ def run_steps(con, region, steps, job_id=None, log=print):
             status = "done"
         except (L.QuotaExceeded, L.ServicePaused) as e:
             msg, status = str(e), "paused_quota"
+        except prepare.Continue as e:
+            msg, status = str(e), "queued"
         except L.RunTooLarge as e:
             msg, status = str(e), "failed"
         except Exception as e:  # noqa: BLE001
@@ -37,7 +59,7 @@ def run_steps(con, region, steps, job_id=None, log=print):
         log(f"[{region}] {s}: {status}: {msg}")
         results[s] = dict(status=status, message=msg, seconds=round((dt.datetime.now(dt.timezone.utc) - t0).total_seconds(), 1))
         if status != "done":
-            return status, results
+            return status, results   # 'queued' = out of run time: the next run continues from here
     return "done", results
 
 
@@ -56,6 +78,8 @@ def worker(con, log=print, max_jobs=20):
             when = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=6)).isoformat()
         con.execute("update jobs set status=%s, not_before=%s, reason=%s, counts=%s, finished_at=case when %s in ('done','failed') then now() end where id=%s",
                     (status, when, json.dumps({k: v["status"] for k, v in res.items()}), json.dumps(res), status, jid))
+        if status == "queued":
+            log("run time used up; remaining work continues on the next scheduled run"); break
         n += 1
     return n
 
