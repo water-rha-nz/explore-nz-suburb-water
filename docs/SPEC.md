@@ -541,3 +541,17 @@ Raising rates never lifts the per-run region caps (section 20.1). A faster downl
 - Each user can set their own LINZ, Stats NZ ADE, Stats NZ Datafinder and (optional, commercial) Open-Meteo keys. Keys are encrypted in **Supabase Vault** through `set_my_api_key` / `delete_my_api_key`. Users see only the last 4 characters (`user_api_keys`) and can't read keys back.
 - The worker decrypts a key only through `job_api_key(job, service)` (worker role only), for the user who created the job. Without a user key it uses the project keys (GitHub secrets). The admin's keys are stored the same way.
 - Budgets are counted per key owner (`api_usage.key_owner`), since each free-tier key has its own limits.
+
+## 24. Shared data and reuse across accounts
+Everything a job downloads goes into shared tables, whichever user's or the project's keys were used, so every approved user sees published regions. The worker checks what is already stored before requesting anything:
+
+| Step | Reused when | Request still made |
+|---|---|---|
+| `linz` | sections already exist for a scoped suburb | one suburbs lookup to resolve the scope; parcels and buildings only for suburbs not yet stored |
+| SA2 | sections already fall in stored SA2 boundaries | a Datafinder request only if some sections are unassigned |
+| `census` | `census_metrics` already holds the SA2 | ADE only for missing SA2s; suburb apportioning is recomputed in SQL |
+| `imagery_index` | every section is covered by indexed tiles | none |
+| `imagery` | tiles already processed (`processed_at`) | none |
+| `climate` | cells are shared between regions; days already stored | only new days |
+
+A batch for a TA that already has a region reuses that region; the pilot regions carry their TA codes (021, 023). Verified: re-preparing Kawerau made one LINZ request (the suburbs lookup) and nothing else.
