@@ -25,7 +25,7 @@ const srcLink = (k) => SRC[k] ? `<a href="${SRC[k][1]}" target="_blank" rel="noo
 const jget = (k, d) => { try { return JSON.parse(store.get(k, JSON.stringify(d))); } catch (_) { return d; } };
 const MAPV = { fill: store.get("map-fill", "hh_size"), year: store.get("map-year", ""), layout: store.get("map-layout", "geo"), glyph: store.get("map-glyph", "colour"),
   axes: jget("map-axes", ["hh_size", "income", "garden", "pool", "rain"]), sizeBy: store.get("map-size", "none"), pres: new Set(jget("map-pres", ["pools", "green"])),
-  labels: store.get("map-labels", "1") === "1", dom: jget("map-dom", {}), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
+  labels: store.get("map-labels", "1") === "1", dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
 const cenOf = (s) => { const c = s.census || {}; const y = MAPV.year && c[MAPV.year] ? MAPV.year : Object.keys(c).sort().pop(); return y ? c[y] : {}; };
 // suburb statistics: [key, label, digits, value(s), sources, diverging]
 const FILLS = [
@@ -50,7 +50,7 @@ const AXIS_COL = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab0
 const MAKEUP = [["Building", "#8d7b6f", (s) => +s.Footprint || 0], ["Garden", "#4daf4a", (s) => +s.GardSize || 0], ["Pool", "#2b83ba", (s) => (+s.PercPool || 0) / 100 * (+s.PoolArea || 0)],
   ["Other open / paved", "#d9d4c7", (s) => Math.max(0, (+s.LotSize || 0) - (+s.Footprint || 0) - (+s.GardSize || 0) - (+s.PercPool || 0) / 100 * (+s.PoolArea || 0))]];
 const PRES = { pools: ["Pools", "#0b6fb8"], green: ["Green space", "#2f9a3e"] };
-const RAMP = ["#f1eef6", "#bdc9e1", "#74a9cf", "#2b8cbe", "#045a8d"], DIV = ["#b2182b", "#ef8a62", "#f7f7f7", "#67a9cf", "#2166ac"];
+const RAMP = ["#c6dbef", "#9ecae1", "#6baed6", "#3182bd", "#08519c"], DIV = ["#b2182b", "#ef8a62", "#f7f7f7", "#67a9cf", "#2166ac"];
 const niceStep = (m) => { const e = Math.pow(10, Math.floor(Math.log10(m))); for (const f of [1, 2, 5, 10]) if (f * e >= m) return f * e; return 10 * e; };
 const finite = (v) => v != null && isFinite(v);
 
@@ -79,8 +79,15 @@ function scaleFor(f) {
   const v = allSubs().map(({ s }) => f[3](s)).filter(finite); if (!v.length) return null;
   let lo = Math.min(...v), hi = Math.max(...v); const div = !!f[5];
   if (div) { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; lo = -m; hi = m; }
-  const log = !div && lo > 0 && skewness(v) > 1, g = log ? Math.log : (x) => x, G0 = g(lo), G1 = g(hi), span = G1 - G0;
   const [a, b] = MAPV.dom[f[0]] || [0, 1];
+  if (!div && MAPV.stretch === "rank" && v.length > 1) {
+    const sv = v.slice().sort((x, y) => x - y), n = sv.length;
+    const rank = (x) => { let lo2 = 0, eq = 0; for (const y of sv) { if (y < x) lo2++; else if (y === x) eq++; } return (lo2 + Math.max(eq - 1, 0) / 2) / (n - 1); };
+    const t = (x) => finite(x) ? Math.min(1, Math.max(0, (Math.min(1, rank(x)) - a) / ((b - a) || 1))) : null;
+    const inv = (u) => { const w = (a + u * (b - a)) * (n - 1), i = Math.min(n - 2, Math.floor(w)); return sv[i] + (sv[i + 1] - sv[i]) * (w - i); };
+    return { key: f[0], label: f[1], digits: f[2], src: f[4], t, inv, log: false, rank: true, div, lo, hi, a, b, zoomed: a > 0 || b < 1, n };
+  }
+  const log = !div && lo > 0 && skewness(v) > 1, g = log ? Math.log : (x) => x, G0 = g(lo), G1 = g(hi), span = G1 - G0;
   const t = (x) => { if (!finite(x) || (log && x <= 0)) return null; const w = span ? (g(x) - G0) / span : 1; return Math.min(1, Math.max(0, (w - a) / ((b - a) || 1))); };
   const inv = (u) => { const y = G0 + (a + u * (b - a)) * span; return log ? Math.exp(y) : y; };
   return { key: f[0], label: f[1], digits: f[2], src: f[4], t, inv, log, div, lo, hi, a, b, zoomed: a > 0 || b < 1, n: v.length };
@@ -92,12 +99,13 @@ const colourOf = (v, sc) => sc ? interp(sc.div ? DIV : RAMP, sc.t(v)) : null;
 // radar wedges follow the same scale as the legend spectrum (log when skewed, narrowed range if set)
 function normaliser(f) { const sc = scaleFor(f); return (x) => sc ? sc.t(x) : null; }
 // a spectrum: name above, no printed values; hover shows the value under the cursor and the span, scroll narrows / widens
-const specInfo = (sc) => [sc.log ? "log scale" : "", sc.zoomed ? "narrowed" : ""].filter(Boolean).join(" · ");
+const specInfo = (sc) => [sc.rank ? "rank" : sc.log ? "log scale" : sc.div ? "centred on 0" : "linear", sc.zoomed ? "narrowed" : "", "hover for values"].filter(Boolean).join(" · ");
 function spectrumHTML(sc, stops, label, src) {
   if (!sc) return `<div style="margin:6px 0"><b>${esc(label)}</b>${srcRef(src || [])} <span class="muted">no data yet</span></div>`;
-  return `<div style="margin:6px 0"><div><b>${esc(label)}</b>${srcRef(src || [])} <span class="muted" data-specinfo="${sc.key}">${specInfo(sc)}</span></div>
+  return `<div style="margin:6px 0"><div><b>${esc(label)}</b>${srcRef(src || [])}</div>
     <div data-spec="${sc.key}" role="img" aria-label="${esc(label)}: ${fmt(sc.inv(0), sc.digits)} to ${fmt(sc.inv(1), sc.digits)}" title="Hover for values; scroll to narrow or widen the range; double-click to reset"
-      style="height:12px;margin-top:2px;border-radius:3px;border:1px solid var(--line);cursor:ew-resize;background:linear-gradient(90deg,${stops.join(",")})"></div></div>`;
+      style="height:12px;margin-top:2px;border-radius:3px;border:1px solid var(--line);cursor:ew-resize;background:linear-gradient(90deg,${stops.join(",")})"></div>
+    <div class="muted" data-specinfo="${sc.key}" style="height:1.35em;line-height:1.35em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px">${specInfo(sc)}</div></div>`;
 }
 const specScale = (key) => scaleFor(fillOf(key));
 // size axis: shrink each suburb about its centre so its area is proportional to the chosen count (largest stays full size)
@@ -273,6 +281,7 @@ function legendHTML() {
   const groups = ["Census", "Property (LINZ)", "Imagery", "Climate"], f = fillOf(MAPV.fill);
   let h = `${hd("Layout")}${seg("data-mvlayout", MAPV.layout, [["geo", "Geographic"], ["tiles", "Equal-area tiles"]])}
     ${hd("Suburb glyph")}${seg("data-mvglyph", MAPV.glyph, [["colour", "Colour"], ["radar", "Radar"], ["makeup", "Section make-up"]])}
+    ${MAPV.glyph !== "makeup" ? `${hd("Stretch")}${seg("data-mvstretch", MAPV.stretch, [["rank", "Rank"], ["value", "Value"]])} <span class="muted">${MAPV.stretch === "rank" ? "even spread by position" : "true values; log when skewed"}</span>` : ""}
     ${years.length ? `<div style="margin-top:6px"><label>Census year <select id="mv-year">${years.map((y) => `<option ${y === (MAPV.year || years[years.length - 1]) ? "selected" : ""}>${y}</option>`).join("")}</select></label></div>` : ""}`;
   if (MAPV.glyph === "colour") {
     h += f[3] ? spectrumHTML(scaleFor(f), f[5] ? DIV : RAMP, f[1] + (FILL_GROUP(f) === "Census" ? ` (census ${MAPV.year || years[years.length - 1] || "latest"})` : ""), f[4]) + (f[5] ? '<div class="muted">red = deficit, blue = surplus</div>' : "") : "";
@@ -284,7 +293,7 @@ function legendHTML() {
     h += `<p class="muted" style="margin:6px 0 2px">Each wedge is one statistic, reaching from the suburb's centre toward its edge: the further, the higher the value among the suburbs shown (up to 6).</p>
       ${FILLS.filter((x) => x[3]).map((x) => { const i = axes.findIndex((a) => a[0] === x[0]), on = i >= 0;
         return `<label style="display:block"><input type="checkbox" data-mvaxis="${x[0]}" ${on ? "checked" : ""} ${!on && axes.length >= 6 ? "disabled" : ""}> ${on ? `<i style="display:inline-block;width:10px;height:10px;background:${AXIS_COL[i]};vertical-align:-1px"></i> ` : ""}${esc(x[1])}</label>`; }).join("")}
-      ${axes.map((x, i) => spectrumHTML(scaleFor(x), ["#f3f3f3", AXIS_COL[i]], x[1], x[4])).join("")}`;
+      ${axes.map((x, i) => spectrumHTML(scaleFor(x), [interp(["#ffffff", AXIS_COL[i]], 0.3), AXIS_COL[i]], x[1], x[4])).join("")}`;
   } else {
     h += `<p class="muted" style="margin:6px 0 2px">A square per suburb, sized by its median section and divided into what that section is made of.${srcRef(["linz_parcels", "linz_buildings", "imagery"])}</p>
       <div style="display:flex;flex-wrap:wrap;gap:2px 10px">${MAKEUP.map(([l, c]) => `<span><i style="display:inline-block;width:12px;height:10px;background:${c};vertical-align:-1px"></i> ${l}</span>`).join("")}</div>`;
@@ -328,7 +337,7 @@ function restyle(full) {
 function specAt(e) { const el = e.target.closest && e.target.closest("[data-spec]"); if (!el) return null; const sc = specScale(el.dataset.spec); if (!sc) return null;
   const r = el.getBoundingClientRect(); return { el, sc, u: Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1))) }; }
 function showSpec(key, text) { for (const n of document.querySelectorAll(`[data-specinfo="${key}"]`)) n.textContent = text; }
-const specText = (sc, u) => `${fmt(sc.inv(u), sc.digits)} · span ${fmt(sc.inv(0), sc.digits)}–${fmt(sc.inv(1), sc.digits)}${sc.log ? " (log)" : ""}`;
+const specText = (sc, u) => `${fmt(sc.inv(u), sc.digits)} · span ${fmt(sc.inv(0), sc.digits)}–${fmt(sc.inv(1), sc.digits)}${sc.rank ? " (rank)" : sc.log ? " (log)" : ""}`;
 document.addEventListener("mousemove", (e) => { const h = specAt(e); if (h) showSpec(h.sc.key, specText(h.sc, h.u)); });
 document.addEventListener("mouseout", (e) => { const el = e.target.closest && e.target.closest("[data-spec]"); if (el) { const sc = specScale(el.dataset.spec); if (sc) showSpec(sc.key, specInfo(sc)); } });
 // scroll over a spectrum: narrow / widen its range about the cursor (starts at the full range)
@@ -356,6 +365,7 @@ document.addEventListener("click", (e) => {
   const c = (q) => e.target.closest && e.target.closest(q);
   const fb = c("[data-mvfill]"); if (fb) { MAPV.fill = fb.dataset.mvfill; store.set("map-fill", MAPV.fill); return restyle(); }
   const lb = c("[data-mvlayout]"); if (lb) { MAPV.layout = lb.dataset.mvlayout; store.set("map-layout", MAPV.layout); return restyle(true); }
+  const sbtn = c("[data-mvstretch]"); if (sbtn) { MAPV.stretch = sbtn.dataset.mvstretch; store.set("map-stretch", MAPV.stretch); return restyle(); }
   const gb = c("[data-mvglyph]"); if (gb) { MAPV.glyph = gb.dataset.mvglyph; store.set("map-glyph", MAPV.glyph); return restyle(); }
   const p = c("[data-mvsub]"); if (!p || window._dragMoved) return;
   MAPV.sel = p.dataset.mvsub; setTimeout(() => suburbInfo(MAPV.sel), 0);   // region switch (data-reg) re-renders the page first

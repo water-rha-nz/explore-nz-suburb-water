@@ -564,6 +564,8 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 
 Refreshing a region's data, job progress and download rates are on **3 Load**.
 
+**Loading.** From the first moment after a refresh, a loading view shows each step (sign-in, profile, then each region as it loads) instead of an empty page.
+
 **1 Overview: data map.** Stage 1 is named *Overview*. The header's study filters it to that study's TAs that have prepared data; when there are none, it says so and outlines the study's TAs. The map is a zoomable, pannable view of the data, kept light: all layers come from data loaded at sign-in plus one cached request for TA outlines.
 - **Pan and zoom:** a drag moves only the viewBox, and layers are redrawn once it ends. Drag distance matches the cursor; the wheel zooms in proportion to the scroll, about the cursor; releasing anywhere ends a drag.
 - **Suburb statistics, several axes at once:**
@@ -571,7 +573,7 @@ Refreshing a region's data, job progress and download rates are on **3 Load**.
   - *glyph:* **colour** (a continuous scale of one statistic), **radar** in the suburb's own shape (one wedge per statistic, up to 6, reaching toward the suburb's edge in proportion to the value), or **section make-up** (a square per suburb sized by its median section, divided into building, garden, pool and other);
   - *size axis:* a non-contiguous cartogram (area ∝ sections, titles or pools), or tile size in the tile layout;
   - census values come from the chosen census year.
-- **Scales and legend:** continuous colour scales over the full data range by default. They switch to logarithmic when values are right-skewed (all positive, skewness > 1) and are centred on zero for diverging statistics. Each spectrum shows its name above it and no printed values: hovering shows the value under the cursor and the span, scrolling over it narrows or widens the range about the cursor, and a double-click resets it. Radar wedges use the same scales.
+- **Scales and legend:** continuous colour scales with a clearly coloured lightest step (not mistaken for "no data"). *Stretch* sets how values map to colour: **Rank** (default) places each suburb by its position among those shown, which spreads suburbs evenly even when one region stands apart; **Value** uses true values (logarithmic when right-skewed: all positive and skewness > 1). Diverging statistics are always centred on zero. Each spectrum shows its name above it and no printed values. Hover text (value under the cursor and span) sits on a fixed-height line beneath the spectrum, so nothing moves. Scrolling over a spectrum narrows or widens the range about the cursor, and a double-click resets it. Radar wedges use the same scales.
 - **Where pools and green space are:** shown separately from the statistics, as dots.
   - *Below full zoom:* dots aggregated to a grid snapped to round distances (dot ∝ number of pools, or ∝ garden area), from `map_presence`: cells ≥ 100 m, only cells with ≥ 5 sections, visible to viewers.
   - *Full zoom* (under ~2.5 km): single pools at true size, each section's garden, and pool and garden validation chips, from `map_items` (row-level security: property-level detail for editors).
