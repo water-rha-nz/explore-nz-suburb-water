@@ -35,8 +35,8 @@ This covers the steps between "accounts exist" and "a signed-in admin". The desi
 5. ~~First admin~~ (done 2026-11-23: signed in via `signin.html`, promoted to admin / active; the change is in `audit_log`).
 
 ## Status: setup complete
-- Real sign-in: https://water-rha-nz.github.io/explore-nz-suburb-water/signin.html
-- Later Google accounts arrive as `viewer` / `pending`. An admin approves them by setting `status = 'active'` (and a role).
+- App (sign in with Google): https://water-rha-nz.github.io/explore-nz-suburb-water/
+- Later Google accounts arrive as `viewer` / `pending`. An admin approves them on the app's **Admin** page.
 - Housekeeping: revoke the Supabase personal access token when setup changes are finished (the app doesn't use it); delete the unused Tokyo project; optionally rotate the Supabase secret key.
 
 ## Not part of this setup

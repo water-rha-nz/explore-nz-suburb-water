@@ -17,9 +17,11 @@ Results export in the formats of the original `suburb_lookup.html` reference bui
 - **Back-end:** a Python worker ([`backend/`](backend/), SPEC section 17). Hosted on GitHub Actions ([`docs/examples/worker.yml`](docs/examples/worker.yml)), one region per run.
 - **Usage limits:** the app runs on the free keys of every service, one region at a time. There are no national runs. Budgets, pacing and throttling (Retry-After, backoff, circuit breaker) are enforced by [`backend/nzsw/limits.py`](backend/nzsw/limits.py) (SPEC section 20).
 - **Validation pack:** labellers export flagged imagery tiles plus an outcome template and schema, and import completed outcome files (SPEC section 19).
-- **Static demo:** [`demo/`](demo/) exemplifies the full spec without the stack, using the Taupō and Tauranga pilot data. Sign-in and roles are simulated, and exports are generated in the browser.
-  - Live: https://water-rha-nz.github.io/explore-nz-suburb-water/.
-  - Locally: `python3 -m http.server -d demo 8000`, then open http://localhost:8000.
+- **Live app:** https://water-rha-nz.github.io/explore-nz-suburb-water/
+  - Google sign-in. Signed-out visitors see only a landing page; new accounts wait for an admin's approval.
+  - The data is served from Supabase under row-level security. Anonymous database access is revoked entirely (migration 0007).
+  - The source is `app/live.js` plus the stage UI from `demo/index.html`, built by `tools/build_app.py`.
+  - The static demo (`demo/`) stays in the repo for offline review. It is no longer published.
 
 ## Pilot results (Taupō 2023 and Tauranga 2025 imagery)
 - **Pools:** 97–100% precision on validated chips. Estimated recall is 77% (Taupō) and 80% (Tauranga), so pool counts are a lower bound. Tauranga's deep-blue pools need the colour rule recalibrated.
