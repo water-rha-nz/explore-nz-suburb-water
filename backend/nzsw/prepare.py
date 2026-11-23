@@ -72,7 +72,19 @@ def linz(con, client, region, log):
     R = _region(con, region)
     ta_cql = f"territorial_authority_ascii IN ({_q(R['ta_names'])}) OR territorial_authority IN ({_q(R['ta_names'])})"
     subs = []
-    if R["scope"]:
+    # reuse: suburbs already in the shared cache (filled by Batch → Validate) need no LINZ request
+    cached = con.execute("select linz_id, name, name_ascii, type, st_asbinary(geom), fetched_at from linz_suburb_index where ta_code=%s", (R["ta_code"],)).fetchall()
+    if cached:
+        cg = gpd.GeoDataFrame({"id": [r[0] for r in cached], "name": [r[1] for r in cached], "name_ascii": [r[2] for r in cached], "type": [r[3] for r in cached],
+                               "territorial_authority": R["ta_names"][0], "population_estimate": None}, geometry=[wkb.loads(bytes(r[4])) for r in cached], crs=2193)
+        if R["scope"]:
+            want = {n.lower() for n in R["scope"]}
+            cg = cg[cg["name"].str.lower().isin(want) | cg["name_ascii"].fillna("").str.lower().isin(want)]
+        if len(cg):
+            subs.append(cg); log(f"suburbs: {len(cg)} from the shared cache (no LINZ request)")
+    if subs:
+        pass
+    elif R["scope"]:
         for i in range(0, len(R["scope"]), 60):
             names = R["scope"][i:i + 60]
             subs.append(_wfs(client, "linz_wfs", LINZ, 113764, cql=f"({ta_cql}) AND (name IN ({_q(names)}) OR name_ascii IN ({_q(names)}))"))
@@ -348,7 +360,8 @@ def publish_new(con, client, region, log):
                           left join suburb_climate_cell sc on sc.linz_id = su.linz_id
                           where su.region_id = %s group by 1,2,3,4,5,9""", (region,)).fetchall()
     cap = (con.execute("select imagery_captures[1] from regions where id=%s", (region,)).fetchone() or [None])[0]
-    prv = con.execute("""select t.prvdrs[1] from regions r join territorial_authorities t on t.code = r.ta_code where r.id=%s""", (region,)).fetchone()
+    # PRVDR: the one chosen in the batch configuration, else the TA's provider
+    prv = con.execute("""select coalesce(r.prvdr, t.prvdrs[1]) from regions r left join territorial_authorities t on t.code = r.ta_code where r.id=%s""", (region,)).fetchone()
     bins_s = [0, 300, 450, 600, 750, 900, 1100, 1400, 2000, 4000]; bins_g = [0, 50, 100, 200, 300, 400, 600, 800, 1200, 2000]
     for lid, name, typ, ta, km2, n, titles, med, cell in rows:
         dens = (titles or 0) / km2 if km2 else 0
@@ -360,7 +373,7 @@ def publish_new(con, client, region, log):
         con.execute("""insert into suburb_metrics (linz_id, region_id, name, type, territorial_authority, prvdr, area_km2, sections, titles, density_per_km2,
                          urban_rural, survey_area, hist_section, hist_section_bins, hist_garden, hist_garden_bins, capture_id, climate_cell)
                        values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                       on conflict (linz_id) do update set titles=excluded.titles, density_per_km2=excluded.density_per_km2, urban_rural=excluded.urban_rural,
+                       on conflict (linz_id) do update set prvdr=excluded.prvdr, titles=excluded.titles, density_per_km2=excluded.density_per_km2, urban_rural=excluded.urban_rural,
                          hist_section=excluded.hist_section, hist_garden=excluded.hist_garden, capture_id=excluded.capture_id, climate_cell=excluded.climate_cell""",
                     (lid, region, name, typ, ta, prv[0] if prv else None, round(km2, 2), n or None, titles, round(dens), ur if n else None,
                      med, hs, bins_s, hg, bins_g, cap, cell))

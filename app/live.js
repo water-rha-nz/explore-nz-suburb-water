@@ -85,7 +85,7 @@ async function loadRegion(r) {
     source_plan: st.source_plan, area_check: st.area_check };
 }
 async function loadAll() {
-  const regions = await q(sb.from("regions").select("*").order("id"));
+  const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr").order("id"));
   const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
@@ -164,7 +164,7 @@ dlHTML = function () {
 document.addEventListener("change", async (e) => {
   const k = e.target.dataset && e.target.dataset.liveRate; if (!k || !can("editor")) return;
   const ce = ((D.limits || {}).ceilings || {})[k] || {}; const v = Math.min(+e.target.value, ce.per_min || 60);
-  const next = { ...LIVE.rates, [k]: { ...(LIVE.rates[k] || {}), per_min: v, changed_at: new Date().toISOString(), reason: "user: " + user.email } };
+  const next = { ...LIVE.rates, [k]: { ...(LIVE.rates[k] || {}), per_min: v, changed_at: new Date().toISOString() } };
   try { await q(sb.from("app_settings").upsert({ key: "rates", value: next })); LIVE.rates = next; toastMsg(`${k}: ${fmt(v)}/min saved`); }
   catch (err) { toastMsg("Not saved: " + err.message); }
   const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML();
