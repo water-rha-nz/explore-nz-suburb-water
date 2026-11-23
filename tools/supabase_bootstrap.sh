@@ -91,9 +91,9 @@ echo "   $(wc -l < "$TMP") secret(s) found: $(cut -d= -f1 "$TMP" | tr '\n' ' ')"
 
 step "7. Client config (.env, gitignored)"
 if (( APPLY )); then
-  ANON="$("$SB" projects api-keys --remote="$REF" -o json | json "print(next((k['api_key'] for k in d if k.get('name') in ('anon','publishable')), ''))")"
+  ANON="$("$SB" projects api-keys --remote="$REF" -o json | json "ks=[k for k in d if k.get('type')=='publishable'] or [k for k in d if k.get('name')=='anon']; print(ks[0]['api_key'] if ks else '')")"
   umask 077; printf 'VITE_SUPABASE_URL=https://%s.supabase.co\nVITE_SUPABASE_ANON_KEY=%s\n' "$REF" "$ANON" > .env
-  echo "   wrote .env (project URL and publishable anon key)"
+  echo "   wrote .env (project URL and publishable key; legacy anon key only if no publishable key exists)"
 else echo "   would write .env with the project URL and anon key"; fi
 
 step "Done"
