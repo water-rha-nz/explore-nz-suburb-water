@@ -181,7 +181,10 @@ const _vRegion = V.region;
 // Queuing jobs, job progress and download rates are on 3 Load.
 V.region = () => {
   setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
-  const regs = Object.entries(D.regions), g = R();
+  const regs = studyRegions(), st = studyOf();
+  if (!regs.length) return `<h1>1 · Overview</h1><p class="lead">${st ? `The study <b>${esc(st.name)}</b> has no prepared data in the database yet. Its ${(st.ta_codes || []).length} TA(s) are outlined on the map; prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.` : "No prepared data in the database yet. Prepare regions in <b>2 · Configure</b> and <b>3 · Load</b>."}</p>
+    <div style="margin-top:12px">${dataMapHTML()}</div>${sourcesHTML()}`;
+  const g = (regs.find(([k]) => k === region) || regs[0])[1];
   const yrs = (x) => [...new Set(x.suburbs.flatMap((s) => Object.keys(s.census || {})))].sort().join(", ") || "–";
   const clim = (x) => { const c = Object.values(x.climate_cells || {}); if (!c.length) return "–"; const m = c.flatMap((y) => y.months || []).filter(Boolean).sort(), n = `${c.length} cell${c.length === 1 ? "" : "s"}`; return m.length ? `${n}, ${m[0].slice(0, 4)}–${m[m.length - 1].slice(0, 4)}` : `${n}, no months yet`; };
   const row = (k, x) => { const sub = x.suburbs.filter(resident), pools = sub.reduce((t, s) => t + (+s.pools || 0), 0);
@@ -189,7 +192,7 @@ V.region = () => {
       imagery: x.capture_id || "–", pools, garden: sub.some((s) => s.GardSize != null), census: yrs(x), climate: clim(x), status: x.status || "–" }; };
   const rows = regs.map(([k, x]) => row(k, x)), tot = (f) => rows.reduce((t, r) => t + r[f], 0);
   const cell = (v) => typeof v === "number" ? fmt(v) : esc(v);
-  return `<h1>1 · Region</h1><p class="lead">What's already in the database: ${rows.length} region${rows.length === 1 ? "" : "s"} with prepared data. Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
+  return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ${rows.length} of its ${(st.ta_codes || []).length} TA(s) have prepared data in the database.` : `What's already in the database: ${rows.length} region${rows.length === 1 ? "" : "s"} with prepared data.`} Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
   <div class="kpis">
     <div class="kpi"><span>Regions</span><b>${fmt(rows.length)}</b></div><div class="kpi"><span>LINZ suburbs (with housing)</span><b>${fmt(tot("suburbs"))}</b><span>${fmt(tot("housing"))}</span></div>
     <div class="kpi"><span>Residential sections</span><b>${fmt(tot("sections"))}</b></div><div class="kpi"><span>SA2 areas</span><b>${fmt(tot("sa2"))}</b></div>
@@ -209,7 +212,7 @@ V.region = () => {
         <tr><td>Status</td><td><span class="tag ${g.status === "published" ? "ok" : g.status === "draft" ? "warn" : "info"}">${esc(g.status || "–")}</span></td></tr>
       </tbody></table></div>
     <div class="card"><h3>About this overview</h3><p class="small">Everything shown comes from data already prepared and stored, loaded once when you signed in. Choose one statistic to colour the suburbs, add pool, green-space and rainfall symbols on top, and zoom in: at full zoom, detected pools and imagery chips appear. Each layer's source is linked in the legend and below.</p></div></div>
-  <h2>All regions in the database</h2>
+  <h2>${st ? "Regions in this study" : "All regions in the database"}</h2>
   <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
     <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l">${esc(r.prvdr)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
       <td class="l small">${esc(r.imagery)}</td><td>${cell(r.pools)}</td><td class="l">${r.garden ? "yes" : "–"}</td><td class="l">${esc(r.census)}</td><td class="l small">${esc(r.climate)}</td><td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status)}</span></td></tr>`).join("")}
