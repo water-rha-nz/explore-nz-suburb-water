@@ -577,6 +577,7 @@ Refreshing a region's data, job progress and download rates are on **3 Load**.
 - **Where pools and green space are:** shown separately from the statistics, as dots.
   - *Below full zoom:* dots aggregated to a grid snapped to round distances (dot ∝ number of pools, or ∝ garden area), from `map_presence`: cells ≥ 100 m, only cells with ≥ 5 sections, visible to viewers.
   - *Full zoom* (under ~2.5 km): single pools at true size, each section's garden, and pool and garden validation chips, from `map_items` (row-level security: property-level detail for editors).
+- **Explanations:** each spectrum, each *Scale suburbs by* option (a radio list: real area, or area ∝ sections, titles or pools) and the *Stretch* setting has an ⓘ superscript. Clicking it opens a short plain-language definition beneath (what the statistic is, how it is built from its sources, how the scaling works); clicking again closes it.
 - **Suburb details** (click) appear below the map; **sources** are superscript references to the numbered list at the bottom of the page.
 
 **Header.** The header shows the **study**: the saved configuration in use, selectable. Choosing one loads it and limits the region picker to its TAs. The region picker appears only on stages that work on one region (Imagery onwards).
