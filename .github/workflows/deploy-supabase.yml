@@ -23,9 +23,14 @@ jobs:
       PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
     steps:
       - uses: actions/checkout@v5
-      - uses: supabase/setup-cli@v1
-        with:
-          version: 3.2.0
+      - name: Install Supabase CLI (checksum verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V: 3.2.0
+        run: |
+          gh release download "v$V" -R supabase/cli -p "supabase_${V}_linux_amd64.tar.gz" -p checksums.txt -D "$RUNNER_TEMP/cli"
+          cd "$RUNNER_TEMP/cli" && grep " supabase_${V}_linux_amd64.tar.gz$" checksums.txt | sha256sum -c -
+          tar -xzf "supabase_${V}_linux_amd64.tar.gz" supabase && echo "$RUNNER_TEMP/cli" >> "$GITHUB_PATH"
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" -p "$SUPABASE_DB_PASSWORD"
       - name: Migrations (dry run)
