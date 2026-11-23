@@ -510,3 +510,34 @@ Raising rates never lifts the per-run region caps (section 20.1). A faster downl
   - chips are served to labellers by signed URL;
   - the worker uses its own role with explicit policies and no RLS bypass.
 
+
+## 22. Batch preparation (Batch stage)
+- **Select** territorial authorities by clicking them on the map (TA 2023 outlines, from Stats NZ Datafinder layer 111193, in `territorial_authorities`), or by ticking them in the table of 67 TAs with water charging rates. Both stay in sync.
+- **Scope** each TA with the user's lists, using the rules of `suburb_lookup.html`. The files are read in the browser:
+  - `nz_suburb_map.csv` (`M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY`) keeps the LINZ suburb named in `NZ_SUBURB_REF`.
+  - `nz_suburb_ref.csv` (`M_SUBURB, …, M_TERRITORY`) keeps `M_SUBURB`.
+  - With both lists for a TA, keep a suburb when it is in **either** or in **both**.
+  - `nz_suburb_provider.csv` (`M_SUBURB, Other spellings, PRVDR`) assigns PRVDRs and other spellings (separated by `;` `,` `|` `/`). It scopes a TA only when neither keep-list covers it.
+  - Names match with or without macrons. `M_TERRITORY` (or the PRVDR's territories) places a row in its TA. Uploading a file also selects the TAs it names.
+- **Queue:**
+  - one `batches` row;
+  - for each TA, a region (`ta-<code>`, or the existing region for that TA) with its `scope` and the user's `m_suburbs` rows;
+  - one `prepare` job: `linz → imagery_index → imagery → census → publish_new → climate`.
+  - Jobs run one at a time within budgets (section 20). Large TAs (more than one run part) need a suburb list.
+- **Worker steps:**
+  - LINZ: suburbs filtered by TA and scope, residential parcels with a building of at least 40 m², buildings, SA2s, climate cells;
+  - imagery index: the newest RGB+NIR capture at 0.125 m or finer covering the region's buildings;
+  - imagery: windowed reads; pools and vegetation per section; resumable;
+  - publish metrics.
+
+  Finished steps are skipped when a job resumes. Imagery hands long runs back to the queue before the runner's time limit.
+- **Progress and output:**
+  - per-region job status, and **Publish** (editors) once a region is done;
+  - **Download tile list (CSV)**: the COG and STAC URLs of the tiles indexed for the batch;
+  - the Export stage covers published regions.
+- Verified on Kawerau District: 1 suburb, 2,777 sections, 7 tiles of the 2025 0.1 m capture, 20 pools. Climate was parked by the budget and resumed later.
+
+## 23. Per-user API keys (Account stage)
+- Each user can set their own LINZ, Stats NZ ADE, Stats NZ Datafinder and (optional, commercial) Open-Meteo keys. Keys are encrypted in **Supabase Vault** through `set_my_api_key` / `delete_my_api_key`. Users see only the last 4 characters (`user_api_keys`) and can't read keys back.
+- The worker decrypts a key only through `job_api_key(job, service)` (worker role only), for the user who created the job. Without a user key it uses the project keys (GitHub secrets). The admin's keys are stored the same way.
+- Budgets are counted per key owner (`api_usage.key_owner`), since each free-tier key has its own limits.

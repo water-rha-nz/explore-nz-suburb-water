@@ -17,7 +17,9 @@ REPL = [
     ('<a class="small" href="../" title="The live app, with Google sign-in">Live app</a>\n', ''),
     ('$("#signin").addEventListener("click", () => { if (user) { user = null; store.set("user", "null"); render(); } else $("#signin-dlg").showModal(); });', '/* live: sign-in handled by live.js */'),
     ('if (t.id === "queue") {', 'if (t.id === "queue-sim") {'),
-    ("<title>Explore NZ Suburb Water</title>", "<title>Explore NZ Suburb Water</title>"),
+    ("<title>Explore NZ Suburb Water</title>", "<title>NZ Suburb Water Profiles</title>"),
+    ('app: "explore-nz-suburb-water demo"', 'app: "NZ Suburb Water Profiles (live)"'),
+    ('<span class="brand">Explore NZ Suburb Water</span>', '<span class="brand">NZ Suburb Water Profiles</span>'),
 ]
 for a, b in REPL:
     assert a in s, a[:70]
@@ -27,8 +29,9 @@ s = re.sub(r'\$\("#signin-dlg"\)\.addEventListener\("close".*?\n', "/* live: no 
 boot = s.index('fetch("data/demo.json").then((r) => { if (!r.ok)')
 end = s.index("</script>", boot)
 s = s[:boot] + "/* live: boot is in live.js */\n" + s[end:]
+s = re.sub(r'<meta name="description" content="[^"]*">', '<meta name="description" content="NZ Suburb Water Profiles: suburb-level data for residential water-demand analysis in Aotearoa New Zealand (pools, gardens, sections, census, climate, water charges).">', s, count=1)
 s = s.replace('<main id="main"><p class="muted">Loading data…</p></main>', '<main id="main"><p class="muted">Checking sign-in…</p></main>')
-live = open(os.path.join(ROOT, "app", "live.js"), encoding="utf-8").read()
+live = "\n".join(open(os.path.join(ROOT, "app", f), encoding="utf-8").read() for f in ("live.js", "live_batch.js"))
 inject = (f'<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>\n'
           f'<script>\nconst SB_URL = {json.dumps(url)}, SB_KEY = {json.dumps(key)};\n{live}\n</script>\n</body>')
 s = s.replace("</body>", inject, 1)
