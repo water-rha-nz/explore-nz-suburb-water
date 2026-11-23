@@ -1832,7 +1832,7 @@ const srcLink = (k) => SRC[k] ? `<a href="${SRC[k][1]}" target="_blank" rel="noo
 const jget = (k, d) => { try { return JSON.parse(store.get(k, JSON.stringify(d))); } catch (_) { return d; } };
 const MAPV = { fill: store.get("map-fill", "hh_size"), year: store.get("map-year", ""), layout: store.get("map-layout", "geo"), glyph: store.get("map-glyph", "colour"),
   axes: jget("map-axes", ["hh_size", "income", "garden", "pool", "rain"]), sizeBy: store.get("map-size", "none"), pres: new Set(jget("map-pres", ["pools", "green"])),
-  labels: store.get("map-labels", "1") === "1", dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
+  labels: store.get("map-labels", "1") === "1", info: null, dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
 const cenOf = (s) => { const c = s.census || {}; const y = MAPV.year && c[MAPV.year] ? MAPV.year : Object.keys(c).sort().pop(); return y ? c[y] : {}; };
 // suburb statistics: [key, label, digits, value(s), sources, diverging]
 const FILLS = [
@@ -1852,6 +1852,29 @@ const FILLS = [
 ];
 const FILL_GROUP = (f) => !f[4] ? "" : f[4].some((k) => k.startsWith("cen_")) ? "Census" : f[4].includes("openmeteo") ? "Climate" : f[4].includes("imagery") ? "Imagery" : "Property (LINZ)";
 const fillOf = (k) => FILLS.find((x) => x[0] === k) || FILLS[0];
+const INFO = {
+  hh_size: "Mean number of usual residents per household. Census household composition by size, for each Statistical Area 2 (SA2), apportioned to suburbs by their share of each SA2's residential sections.",
+  income: "Median household income (total, all sources). SA2 medians from the census, combined per suburb weighted by residential sections; an approximation of the suburb median.",
+  owner: "Share of households whose dwelling is owned or partly owned, or held in a family trust, rather than rented. Census tenure by SA2, apportioned to suburbs by sections.",
+  separate: "Share of households living in a separate (stand-alone) house rather than a joined dwelling such as a unit, townhouse or apartment. Census dwelling type by SA2.",
+  bedrooms: "Mean number of bedrooms per occupied dwelling. Census dwellings by SA2, apportioned to suburbs by sections.",
+  density: "LINZ property titles per km² of suburb area. Counts units and cross-leases separately, so it tracks dwellings better than sections do.",
+  lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded.",
+  garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints.",
+  pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples).",
+  rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo.",
+  et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall.",
+  deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus.",
+  "size:none": "Every suburb is drawn at its real size and shape.",
+  "size:sections": "Each suburb shrinks about its own centre so that its area is proportional to its number of residential sections. Dense urban suburbs stay large; big, sparsely settled localities shrink. The suburb with the most sections per km² keeps its real size.",
+  "size:titles": "As for sections, but proportional to the number of property titles, which also counts units and cross-leased flats: closer to the number of dwellings.",
+  "size:pools": "Area proportional to the number of detected swimming pools, so the suburbs that contribute most pools stand out regardless of their land area.",
+  "size:tiles": "In the tile layout the same choice sets each tile's area (equal tiles when 'Real area' is chosen).",
+  "stretch:rank": "Rank: colour (or wedge length) shows a suburb's position among the suburbs shown, lowest to highest, evenly spread. Best for telling suburbs apart; the gaps between values are not shown.",
+  "stretch:value": "Value: colour is proportional to the actual value across the full range, on a logarithmic scale when the values are right-skewed (all positive, a long tail of high values). Shows true differences, but one outlier can make the rest look alike.",
+};
+const infoBtn = (k) => `<sup><button type="button" data-mvinfo="${k}" aria-expanded="${MAPV.info === k}" aria-label="What does this mean?" title="What does this mean?" style="border:1px solid var(--line);background:${MAPV.info === k ? "var(--accent)" : "var(--panel)"};color:${MAPV.info === k ? "#fff" : "var(--accent)"};border-radius:50%;width:14px;height:14px;padding:0;font:italic 700 9px/12px serif;cursor:pointer;vertical-align:1px">i</button></sup>`;
+const infoBox = (k) => MAPV.info === k && INFO[k] ? `<div class="small" style="margin:3px 0 6px;padding:5px 8px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;white-space:normal">${esc(INFO[k])}</div>` : "";
 const SIZES = [["none", "Real area"], ["sections", "Sections", (s) => s.sections, ["linz_parcels"]], ["titles", "Titles", (s) => s.titles, ["linz_titles"]], ["pools", "Pools", (s) => s.pools, ["imagery"]]];
 const AXIS_COL = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"];
 const MAKEUP = [["Building", "#8d7b6f", (s) => +s.Footprint || 0], ["Garden", "#4daf4a", (s) => +s.GardSize || 0], ["Pool", "#2b83ba", (s) => (+s.PercPool || 0) / 100 * (+s.PoolArea || 0)],
@@ -1908,8 +1931,9 @@ function normaliser(f) { const sc = scaleFor(f); return (x) => sc ? sc.t(x) : nu
 // a spectrum: name above, no printed values; hover shows the value under the cursor and the span, scroll narrows / widens
 const specInfo = (sc) => [sc.rank ? "rank" : sc.log ? "log scale" : sc.div ? "centred on 0" : "linear", sc.zoomed ? "narrowed" : "", "hover for values"].filter(Boolean).join(" · ");
 function spectrumHTML(sc, stops, label, src) {
+  const k = sc ? sc.key : null;
   if (!sc) return `<div style="margin:6px 0"><b>${esc(label)}</b>${srcRef(src || [])} <span class="muted">no data yet</span></div>`;
-  return `<div style="margin:6px 0"><div><b>${esc(label)}</b>${srcRef(src || [])}</div>
+  return `<div style="margin:6px 0"><div><b>${esc(label)}</b>${srcRef(src || [])}${INFO[k] ? infoBtn(k) : ""}</div>${infoBox(k)}
     <div data-spec="${sc.key}" role="img" aria-label="${esc(label)}: ${fmt(sc.inv(0), sc.digits)} to ${fmt(sc.inv(1), sc.digits)}" title="Hover for values; scroll to narrow or widen the range; double-click to reset"
       style="height:12px;margin-top:2px;border-radius:3px;border:1px solid var(--line);cursor:ew-resize;background:linear-gradient(90deg,${stops.join(",")})"></div>
     <div class="muted" data-specinfo="${sc.key}" style="height:1.35em;line-height:1.35em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px">${specInfo(sc)}</div></div>`;
@@ -2088,7 +2112,7 @@ function legendHTML() {
   const groups = ["Census", "Property (LINZ)", "Imagery", "Climate"], f = fillOf(MAPV.fill);
   let h = `${hd("Layout")}${seg("data-mvlayout", MAPV.layout, [["geo", "Geographic"], ["tiles", "Equal-area tiles"]])}
     ${hd("Suburb glyph")}${seg("data-mvglyph", MAPV.glyph, [["colour", "Colour"], ["radar", "Radar"], ["makeup", "Section make-up"]])}
-    ${MAPV.glyph !== "makeup" ? `${hd("Stretch")}${seg("data-mvstretch", MAPV.stretch, [["rank", "Rank"], ["value", "Value"]])} <span class="muted">${MAPV.stretch === "rank" ? "even spread by position" : "true values; log when skewed"}</span>` : ""}
+    ${MAPV.glyph !== "makeup" ? `${hd("Stretch")}${seg("data-mvstretch", MAPV.stretch, [["rank", "Rank"], ["value", "Value"]])}${infoBtn("stretch:" + MAPV.stretch)}${infoBox("stretch:" + MAPV.stretch)}` : ""}
     ${years.length ? `<div style="margin-top:6px"><label>Census year <select id="mv-year">${years.map((y) => `<option ${y === (MAPV.year || years[years.length - 1]) ? "selected" : ""}>${y}</option>`).join("")}</select></label></div>` : ""}`;
   if (MAPV.glyph === "colour") {
     h += f[3] ? spectrumHTML(scaleFor(f), f[5] ? DIV : RAMP, f[1] + (FILL_GROUP(f) === "Census" ? ` (census ${MAPV.year || years[years.length - 1] || "latest"})` : ""), f[4]) + (f[5] ? '<div class="muted">red = deficit, blue = surplus</div>' : "") : "";
@@ -2105,8 +2129,8 @@ function legendHTML() {
     h += `<p class="muted" style="margin:6px 0 2px">A square per suburb, sized by its median section and divided into what that section is made of.${srcRef(["linz_parcels", "linz_buildings", "imagery"])}</p>
       <div style="display:flex;flex-wrap:wrap;gap:2px 10px">${MAKEUP.map(([l, c]) => `<span><i style="display:inline-block;width:12px;height:10px;background:${c};vertical-align:-1px"></i> ${l}</span>`).join("")}</div>`;
   }
-  h += `${hd(MAPV.layout === "tiles" ? "Tile size" : "Scale suburbs by (cartogram)")}<select id="mv-size">${SIZES.map(([k, l]) => `<option value="${k}" ${k === MAPV.sizeBy ? "selected" : ""}>${MAPV.layout === "tiles" && k === "none" ? "Equal" : l}</option>`).join("")}</select>
-      ${MAPV.sizeBy !== "none" ? `<span class="muted"> area ∝ ${esc((SIZES.find((x) => x[0] === MAPV.sizeBy) || [])[1] || "").toLowerCase()}${srcRef((SIZES.find((x) => x[0] === MAPV.sizeBy) || [])[3] || [])}</span>` : ""}
+  h += `${hd(MAPV.layout === "tiles" ? "Tile size" : "Scale suburbs by (cartogram)")}${MAPV.layout === "tiles" ? infoBtn("size:tiles") + infoBox("size:tiles") : ""}
+    ${SIZES.map(([k, l, , src]) => `<label style="display:block"><input type="radio" name="mv-size" data-mvsize="${k}" ${k === MAPV.sizeBy ? "checked" : ""}> ${k === "none" ? (MAPV.layout === "tiles" ? "Equal tiles" : "Real area") : "Area ∝ " + l.toLowerCase()}${src ? srcRef(src) : ""}${infoBtn("size:" + k)}</label>${infoBox("size:" + k)}`).join("")}
     ${hd("Where they are")}${Object.entries(PRES).map(([k, [l, c]]) => `<label style="display:block"><input type="checkbox" data-mvpres="${k}" ${MAPV.pres.has(k) ? "checked" : ""}> <span style="color:${c};font-size:15px">●</span> ${l}${srcRef(["imagery", "linz_parcels"])} <span class="muted">${k === "pools" ? "dot ∝ number of pools" : "dot ∝ garden area"}</span></label>`).join("")}
     <label style="display:block;margin-top:4px"><input type="checkbox" id="mv-labels" ${MAPV.labels ? "checked" : ""}> Suburb names${srcRef("linz_suburbs")}</label>
     <div id="mv-note" class="muted" style="margin-top:6px">${esc(MAPV.note)}</div>`;
@@ -2163,7 +2187,7 @@ window.onZoomMap = (svg, box) => { if (svg.closest(".zmap").dataset.zmap !== "ov
 document.addEventListener("change", (e) => {
   const t = e.target;
   if (t.id === "mv-year") { MAPV.year = t.value; store.set("map-year", t.value); restyle(); if (MAPV.sel) suburbInfo(MAPV.sel); return; }
-  if (t.id === "mv-size") { MAPV.sizeBy = t.value; store.set("map-size", t.value); return restyle(); }
+  if (t.dataset && t.dataset.mvsize) { MAPV.sizeBy = t.dataset.mvsize; store.set("map-size", MAPV.sizeBy); return restyle(); }
   if (t.id === "mv-labels") { MAPV.labels = t.checked; store.set("map-labels", t.checked ? "1" : "0"); return restyle(); }
   if (t.dataset && t.dataset.mvpres) { t.checked ? MAPV.pres.add(t.dataset.mvpres) : MAPV.pres.delete(t.dataset.mvpres); store.set("map-pres", JSON.stringify([...MAPV.pres])); return restyle(); }
   if (t.dataset && t.dataset.mvaxis) { const k = t.dataset.mvaxis; MAPV.axes = t.checked ? [...MAPV.axes.filter((x) => x !== k), k].slice(0, 6) : MAPV.axes.filter((x) => x !== k); store.set("map-axes", JSON.stringify(MAPV.axes)); return restyle(); }
@@ -2172,6 +2196,7 @@ document.addEventListener("click", (e) => {
   const c = (q) => e.target.closest && e.target.closest(q);
   const fb = c("[data-mvfill]"); if (fb) { MAPV.fill = fb.dataset.mvfill; store.set("map-fill", MAPV.fill); return restyle(); }
   const lb = c("[data-mvlayout]"); if (lb) { MAPV.layout = lb.dataset.mvlayout; store.set("map-layout", MAPV.layout); return restyle(true); }
+  const ib = c("[data-mvinfo]"); if (ib) { e.preventDefault(); MAPV.info = MAPV.info === ib.dataset.mvinfo ? null : ib.dataset.mvinfo; return legendHTML(); }
   const sbtn = c("[data-mvstretch]"); if (sbtn) { MAPV.stretch = sbtn.dataset.mvstretch; store.set("map-stretch", MAPV.stretch); return restyle(); }
   const gb = c("[data-mvglyph]"); if (gb) { MAPV.glyph = gb.dataset.mvglyph; store.set("map-glyph", MAPV.glyph); return restyle(); }
   const p = c("[data-mvsub]"); if (!p || window._dragMoved) return;
