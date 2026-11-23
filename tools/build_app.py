@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Build app/index.html from demo/index.html + app/live.js (docs/SPEC.md section 14).
+The demo's simulated parts (sign-in dialog, simulated queue, static boot) are switched off and the live layer
+(Supabase auth, data, jobs, rates, labelling, admin) is appended. The project URL and publishable key come
+from .env (publishable keys are designed to be public; row-level security protects the data).
+Usage: python3 tools/build_app.py   -> app/index.html, app/data/demo.json (static reference parts)"""
+import json, os, re, shutil
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env = dict(l.strip().split("=", 1) for l in open(os.path.join(ROOT, ".env")) if "=" in l)
+url, key = env["VITE_SUPABASE_URL"], env["VITE_SUPABASE_ANON_KEY"]
+assert key.startswith("sb_publishable_"), "use the publishable key (not a secret or legacy key)"
+s = open(os.path.join(ROOT, "demo", "index.html"), encoding="utf-8").read()
+
+REPL = [
+    ('<span class="badge" title="Static demo: no database, no real sign-in">Static demo</span>', '<span class="badge" style="background:var(--ok-bg);color:var(--ok)">Live</span>'),
+    ('<a class="small" href="../" title="The live app, with Google sign-in">Live app</a>\n', '<a class="small" href="demo/">Static demo</a>\n'),
+    ('$("#signin").addEventListener("click", () => { if (user) { user = null; store.set("user", "null"); render(); } else $("#signin-dlg").showModal(); });', '/* live: sign-in handled by live.js */'),
+    ('if (t.id === "queue") {', 'if (t.id === "queue-sim") {'),
+    ("<title>Explore NZ Suburb Water</title>", "<title>Explore NZ Suburb Water</title>"),
+]
+for a, b in REPL:
+    assert a in s, a[:70]
+    s = s.replace(a, b, 1)
+# the demo's simulated sign-in dialog close handler and static boot are not used
+s = re.sub(r'\$\("#signin-dlg"\)\.addEventListener\("close".*?\n', "/* live: no simulated sign-in */\n", s, count=1)
+boot = s.index('fetch("data/demo.json").then((r) => { if (!r.ok)')
+end = s.index("</script>", boot)
+s = s[:boot] + "/* live: boot is in live.js */\n" + s[end:]
+s = s.replace('<main id="main"><p class="muted">Loading data…</p></main>', '<main id="main"><p class="muted">Checking sign-in…</p></main>')
+live = open(os.path.join(ROOT, "app", "live.js"), encoding="utf-8").read()
+inject = (f'<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>\n'
+          f'<script>\nconst SB_URL = {json.dumps(url)}, SB_KEY = {json.dumps(key)};\n{live}\n</script>\n</body>')
+s = s.replace("</body>", inject, 1)
+os.makedirs(os.path.join(ROOT, "app", "data"), exist_ok=True)
+open(os.path.join(ROOT, "app", "index.html"), "w", encoding="utf-8").write(s)
+shutil.copy(os.path.join(ROOT, "demo", "data", "demo.json"), os.path.join(ROOT, "app", "data", "demo.json"))
+print("app/index.html", len(s) // 1024, "KB")

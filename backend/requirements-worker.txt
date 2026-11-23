@@ -1,0 +1,5 @@
+# What the job worker needs (imagery steps add rasterio/geopandas/opencv: see requirements.txt)
+numpy==2.5.5
+pandas==3.1.1
+requests==2.34.2
+psycopg[binary]>=3.2

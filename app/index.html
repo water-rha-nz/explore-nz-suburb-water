@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explore NZ Suburb Water</title>
+<meta name="description" content="Static demo of explore-nz-suburb-water: suburb metadata for residential water-demand analysis (pools, gardens, sections, census, climate, water rates) for Taupō and Tauranga pilot regions.">
+<style>
+:root{--bg:#f5f6f4;--panel:#fff;--ink:#1b1e21;--muted:#5f656b;--line:#dfe1dc;--accent:#0b6bcb;--accent-ink:#fff;--accent-soft:#e3effb;
+--ok:#1a7f4b;--ok-bg:#e2f3e9;--bad:#b42318;--bad-bg:#fde7e5;--warn:#8a5a00;--warn-bg:#fcf0d4;
+--s1:#deebf7;--s2:#9ecae1;--s3:#4292c6;--s4:#08519c;--s5:#08306b;--land:#eceee9;--landline:#c9cdc4;--rain:#3d7cc9;--et0:#d9822b;--temp:#c0392b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121416;--panel:#1b1e21;--ink:#e7e8e6;--muted:#9aa0a6;--line:#2c3035;--accent:#5aa4f0;--accent-ink:#0b1a2a;--accent-soft:#16283b;
+--ok:#5fd394;--ok-bg:#15301f;--bad:#ff8a80;--bad-bg:#3a1916;--warn:#f2c46b;--warn-bg:#3a2d11;
+--s1:#16324a;--s2:#1f5a86;--s3:#3a86c4;--s4:#7ab8ea;--s5:#c6e2fb;--land:#23272b;--landline:#3a3f45;--rain:#6aa6ec;--et0:#f0a35a;--temp:#ff7a6b}}
+:root[data-theme="dark"]{--bg:#121416;--panel:#1b1e21;--ink:#e7e8e6;--muted:#9aa0a6;--line:#2c3035;--accent:#5aa4f0;--accent-ink:#0b1a2a;--accent-soft:#16283b;
+--ok:#5fd394;--ok-bg:#15301f;--bad:#ff8a80;--bad-bg:#3a1916;--warn:#f2c46b;--warn-bg:#3a2d11;
+--s1:#16324a;--s2:#1f5a86;--s3:#3a86c4;--s4:#7ab8ea;--s5:#c6e2fb;--land:#23272b;--landline:#3a3f45;--rain:#6aa6ec;--et0:#f0a35a;--temp:#ff7a6b}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar{max-width:1240px;margin:0 auto;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.brand{font-weight:700;font-size:1.02rem;margin-right:6px}
+.badge{font-size:.72rem;font-weight:600;border-radius:99px;padding:2px 9px;background:var(--warn-bg);color:var(--warn)}
+.spacer{flex:1}
+select,button,input{font:inherit;color:var(--ink)}
+select,input[type=text]{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.9rem}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+nav.stages{max-width:1240px;margin:0 auto;padding:0 16px 8px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:thin}
+nav.stages button{flex:0 0 auto;border:1px solid transparent;background:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--muted);font-size:.9rem;white-space:nowrap}
+nav.stages button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-soft);font-weight:600}
+nav.stages button .n{display:inline-block;width:1.4em;font-variant-numeric:tabular-nums}
+main{max-width:1240px;margin:0 auto;padding:18px 16px 64px}
+h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.12rem;margin:26px 0 10px}h3{font-size:.98rem;margin:0 0 8px}
+.lead{color:var(--muted);margin:0 0 16px;max-width:860px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.kpi b{display:block;font-size:1.45rem;font-variant-numeric:tabular-nums;line-height:1.25}
+.kpi span{color:var(--muted);font-size:.8rem}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.86rem;width:100%}
+th,td{padding:6px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.l,th.l{text-align:left}
+.tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:.76rem;font-weight:600}
+.ok{background:var(--ok-bg);color:var(--ok)}.bad{background:var(--bad-bg);color:var(--bad)}.warn{background:var(--warn-bg);color:var(--warn)}.info{background:var(--accent-soft);color:var(--accent)}
+.note{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel);border-radius:0 8px 8px 0;font-size:.88rem;margin:0 0 14px}
+.muted{color:var(--muted)}.small{font-size:.84rem}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+.map svg{width:100%;height:auto;display:block}
+.map path.sub{stroke:var(--panel);stroke-width:1.2;cursor:pointer}
+.map path.sub:hover,.map path.sub.sel{stroke:var(--ink);stroke-width:2}
+.map path.sa2{fill:none;stroke:var(--ink);stroke-opacity:.45;stroke-dasharray:3 3;stroke-width:1;pointer-events:none}
+.legend{display:flex;gap:4px;align-items:center;font-size:.78rem;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:22px;height:10px;border-radius:2px}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);padding:6px 9px;border-radius:7px;font-size:.8rem;opacity:0;transition:opacity .12s;z-index:30;max-width:260px}
+.tip.show{opacity:.95}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px}
+.key{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;background:var(--panel)}
+.key kbd{display:block;font-size:1.15rem;font-family:inherit}
+.k-up{grid-column:2}.k-left{grid-column:1;grid-row:2}.k-down{grid-column:2;grid-row:2}.k-right{grid-column:3;grid-row:2}
+.job{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.86rem}
+.job:last-child{border-bottom:none}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:.78rem;max-height:240px;margin:8px 0 0}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:420px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--panel);cursor:pointer}
+.locked{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--muted);font-size:.88rem}
+.dl-row{display:grid;grid-template-columns:150px minmax(0,1fr) 230px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.dl-row:last-child{border-bottom:none}
+@media (max-width:700px){.dl-row{grid-template-columns:1fr}}
+.bar-out{height:10px;background:var(--line);border-radius:99px;overflow:hidden}.bar-in{height:100%;background:var(--accent);transition:width .3s}
+.dl-row input[type=range]{width:100%}
+footer{max-width:1240px;margin:0 auto;padding:0 16px 40px;color:var(--muted);font-size:.8rem}
+[hidden]{display:none!important}
+@media (max-width:600px){.bar{gap:8px}.brand{width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="brand">Explore NZ Suburb Water</span>
+    <span class="badge" style="background:var(--ok-bg);color:var(--ok)">Live</span>
+    <label class="small muted">Region <select id="region"></select></label>
+    <span class="spacer"></span>
+    <span id="who" class="small"></span>
+    <a class="small" href="demo/">Static demo</a>
+    <button class="btn" id="signin" type="button">Sign in with Google</button>
+    <button class="btn" id="theme" type="button" aria-label="Toggle colour theme">◐</button>
+  </div>
+  <nav class="stages" id="stages" role="tablist" aria-label="Stages"></nav>
+</header>
+
+<main id="main"><p class="muted">Checking sign-in…</p></main>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<dialog id="signin-dlg">
+  <form method="dialog">
+    <h3>Sign in (demo)</h3>
+    <p class="small muted">The real app uses Supabase Auth with Google OAuth; your role comes from the <code>profiles</code> table and every query is filtered by row-level security. Here you pick a role to see what each one can do.</p>
+    <button class="gbtn" value="google" type="submit">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+      Continue with Google (simulated)
+    </button>
+    <p style="margin:14px 0 6px"><label>Role <select id="role-pick">
+      <option value="viewer">viewer: browse and export published regions</option>
+      <option value="labeller">labeller: viewer plus validation labelling</option>
+      <option value="editor">editor: labeller plus pipelines, allocation, rates, publish</option>
+      <option value="admin">admin: everything, users and schedules</option>
+    </select></label></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" value="cancel" type="submit">Cancel</button></div>
+  </form>
+</dialog>
+
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? "–" : Number(v).toLocaleString("en-NZ", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+const RANK = { viewer: 1, labeller: 2, editor: 3, admin: 4 };
+const STAGES = [["region", "Region"], ["load", "Load"], ["allocate", "Allocate"], ["imagery", "Imagery"], ["validate", "Validate"], ["context", "Context"], ["explore", "Explore"], ["export", "Export"]];
+const REPO = "https://github.com/water-rha-nz/explore-nz-suburb-water";
+let D = null, SECT = null, region = store.get("region", "taupo"), stage = store.get("stage", "region");
+let user = null; try { user = JSON.parse(store.get("user", "null")); } catch (e) {}
+let edits = {}; try { edits = JSON.parse(store.get("edits", "{}")) || {}; } catch (e) {}
+let jobs = []; try { jobs = JSON.parse(store.get("jobs", "[]")) || []; } catch (e) {}
+const can = (r) => user && RANK[user.role] >= RANK[r];
+const R = () => D.regions[region];
+const mName = (s) => (edits[region + ":" + s.linz_id]) || s.name;
+
+// ---------- metrics catalogue (paper variables, DWU excluded) ----------
+const C23 = (k) => (s) => s.census && s.census["2023"] ? s.census["2023"][k] : null;
+const METRICS = [
+  { id: "PercPool", label: "Sections with a pool (%)", get: (s) => s.PercPool, d: 1, src: "Imagery" },
+  { id: "GardSize", label: "Median garden (vegetated) m²", get: (s) => s.GardSize, d: 0, src: "Imagery" },
+  { id: "GardPct", label: "Median % of section vegetated", get: (s) => s.GardPct, d: 1, src: "Imagery" },
+  { id: "LotSize", label: "Median section m²", get: (s) => s.LotSize, d: 0, src: "LINZ" },
+  { id: "Footprint", label: "Median roof footprint m²", get: (s) => s.Footprint, d: 0, src: "LINZ" },
+  { id: "ImperviousProxy", label: "Median impervious proxy m²", get: (s) => s.ImperviousProxy, d: 0, src: "LINZ + imagery" },
+  { id: "SharedPct", label: "Shared sections (%)", get: (s) => s.SharedPct, d: 1, src: "LINZ titles" },
+  { id: "HhSize", label: "Household size (2023)", get: C23("hh_size_mean"), d: 2, src: "Stats NZ" },
+  { id: "Income", label: "Median household income $ (2023)", get: C23("income_median"), d: 0, src: "Stats NZ" },
+  { id: "BRooms", label: "Mean bedrooms (2023)", get: C23("bedrooms_mean_all"), d: 2, src: "Stats NZ" },
+  { id: "Owner", label: "Owner-occupied % (2023)", get: C23("pct_owner_all"), d: 1, src: "Stats NZ" },
+  { id: "PctDetached", label: "Separate houses % (2023)", get: C23("pct_separate"), d: 1, src: "Stats NZ" },
+  { id: "PctJoined", label: "Joined dwellings % (2023)", get: C23("pct_joined"), d: 1, src: "Stats NZ" },
+  { id: "Rain", label: "Annual rain mm (2008–2025)", get: (s) => s.climate_annual && s.climate_annual.rain_mm, d: 0, src: "Open-Meteo" },
+  { id: "ET0", label: "Annual ET0 mm (2008–2025)", get: (s) => s.climate_annual && s.climate_annual.et0_mm, d: 0, src: "Open-Meteo" },
+  { id: "Temp", label: "Mean temperature °C", get: (s) => s.climate_annual && s.climate_annual.tmean_c, d: 1, src: "Open-Meteo" },
+  { id: "Density", label: "Titles per km²", get: (s) => s.density_per_km2, d: 0, src: "LINZ" },
+];
+const M = Object.fromEntries(METRICS.map((m) => [m.id, m]));
+const resident = (s) => s.sections != null;
+
+// ---------- tiny SVG chart kit ----------
+const ramp = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)", "var(--s5)"];
+function classify(vals) {
+  const v = vals.filter((x) => x != null).sort((a, b) => a - b);
+  if (!v.length) return () => "var(--land)";
+  const q = [0.2, 0.4, 0.6, 0.8].map((p) => v[Math.min(v.length - 1, Math.floor(p * v.length))]);
+  return (x) => x == null ? "var(--land)" : ramp[q.filter((t) => x > t).length];
+}
+function mapSVG(feats, opts = {}) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const f of feats) for (const poly of f.geom) for (const ring of poly) for (const [x, y] of ring) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const W = 640, pad = 8, sc = (W - 2 * pad) / Math.max(x1 - x0, y1 - y0) * (x1 - x0 >= y1 - y0 ? 1 : 1);
+  const H = Math.round((y1 - y0) * sc + 2 * pad), Wd = Math.round((x1 - x0) * sc + 2 * pad);
+  const P = (ring) => ring.map(([x, y], i) => (i ? "L" : "M") + ((x - x0) * sc + pad).toFixed(1) + "," + ((y1 - y) * sc + pad).toFixed(1)).join("") + "Z";
+  const paths = feats.map((f, i) => `<path class="${f.cls || "sub"}" data-i="${i}" fill="${f.fill || "none"}" d="${f.geom.map((p) => p.map(P).join("")).join("")}"><title>${esc(f.title || "")}</title></path>`).join("");
+  const extra = (opts.overlay || []).map((f) => `<path class="sa2" d="${f.geom.map((p) => p.map(P).join("")).join("")}"/>`).join("");
+  return `<svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="${esc(opts.label || "Map")}">${paths}${extra}</svg>`;
+}
+function bars(series, opts) { // series: [{v, label}], optional line [{v}]
+  const W = 640, H = opts.h || 200, L = 40, B = 24, T = 10, n = series.length;
+  const vmax = Math.max(1, ...series.map((s) => s.v || 0), ...(opts.line || []).map((s) => s.v || 0));
+  const bw = (W - L - 8) / n, y = (v) => T + (H - T - B) * (1 - v / vmax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let k = 0; k <= 4; k++) { const v = vmax * k / 4; s += `<line x1="${L}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+  series.forEach((d, i) => { const h = (H - T - B) * (d.v || 0) / vmax; s += `<rect x="${L + i * bw + bw * 0.12}" y="${y(d.v || 0)}" width="${bw * 0.76}" height="${h}" fill="${opts.color || "var(--rain)"}"><title>${esc(d.label)}: ${fmt(d.v, 1)}</title></rect>`; if (opts.every ? i % opts.every === 0 : true) s += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${esc(d.short ?? d.label)}</text>`; });
+  if (opts.line) s += `<polyline fill="none" stroke="${opts.lineColor || "var(--et0)"}" stroke-width="2" points="${opts.line.map((d, i) => `${L + i * bw + bw / 2},${y(d.v || 0)}`).join(" ")}"/>`;
+  return s + "</svg>";
+}
+function line(vals, opts) {
+  const W = 640, H = opts.h || 160, L = 40, B = 22, T = 8, n = vals.length;
+  const vmax = Math.max(1, ...vals.filter((v) => v != null)), x = (i) => L + (W - L - 8) * i / Math.max(1, n - 1), y = (v) => T + (H - T - B) * (1 - v / vmax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let k = 0; k <= 3; k++) { const v = vmax * k / 3; s += `<line x1="${L}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+  (opts.ticks || []).forEach(([i, t]) => { s += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(t)}</text>`; });
+  if (opts.bars) vals.forEach((v, i) => { if (v) s += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(0)}" y2="${y(v)}" stroke="${opts.color}" stroke-width="1.2"/>`; });
+  else s += `<polyline fill="none" stroke="${opts.color}" stroke-width="1.5" points="${vals.map((v, i) => v == null ? "" : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"/>`;
+  return s + "</svg>";
+}
+function scatter(pts, xl, yl) {
+  const W = 640, H = 300, L = 54, B = 38, T = 10, R2 = 14;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const [xa, xb] = [Math.min(...xs), Math.max(...xs)], [ya, yb] = [Math.min(...ys), Math.max(...ys)];
+  const px = (v) => L + (W - L - R2) * (xb === xa ? 0.5 : (v - xa) / (xb - xa)), py = (v) => T + (H - T - B) * (yb === ya ? 0.5 : 1 - (v - ya) / (yb - ya));
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(yl)} against ${esc(xl)}">`;
+  for (let k = 0; k <= 4; k++) { const vx = xa + (xb - xa) * k / 4, vy = ya + (yb - ya) * k / 4;
+    s += `<line x1="${px(vx)}" x2="${px(vx)}" y1="${T}" y2="${H - B}" stroke="var(--line)"/><text x="${px(vx)}" y="${H - B + 14}" text-anchor="middle">${fmt(vx, 1)}</text>`;
+    s += `<line x1="${L}" x2="${W - R2}" y1="${py(vy)}" y2="${py(vy)}" stroke="var(--line)"/><text x="${L - 4}" y="${py(vy) + 4}" text-anchor="end">${fmt(vy, 1)}</text>`; }
+  s += `<text x="${(L + W) / 2}" y="${H - 4}" text-anchor="middle">${esc(xl)}</text>`;
+  pts.forEach((p) => { s += `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="${Math.max(4, Math.min(14, Math.sqrt(p.n || 100) / 5))}" fill="${p.c}" fill-opacity=".75" stroke="var(--panel)"><title>${esc(p.label)}: ${fmt(p.x, 1)}, ${fmt(p.y, 1)}</title></circle>`; });
+  return s + "</svg>";
+}
+function nzMap() {
+  const r = D.nz_regions; if (!r) return "";
+  const KX = Math.cos(41 * Math.PI / 180), q = r.q, W = 300;
+  const rings = []; let x0 = 180, x1 = 160, y0 = 0, y1 = -60;
+  for (const g of r.regions) for (const d of g.r) { let x = 0, y = 0; const a = []; for (let i = 0; i < d.length; i += 2) { x += d[i]; y += d[i + 1]; const lon = x / q, lat = y / q; a.push([lon, lat]); if (lon < x0) x0 = lon; if (lon > x1) x1 = lon; if (lat < y0) y0 = lat; if (lat > y1) y1 = lat; } rings.push(a); }
+  const sc = W / ((x1 - x0) * KX), H = Math.round((y1 - y0) * sc);
+  const P = ([lon, lat]) => [((lon - x0) * KX * sc).toFixed(1), ((y1 - lat) * sc).toFixed(1)];
+  let s = `<svg viewBox="-4 -4 ${W + 8} ${H + 8}" role="img" aria-label="New Zealand regional councils with pilot regions">`;
+  s += rings.map((a) => `<path d="${a.map((p, i) => (i ? "L" : "M") + P(p).join(",")).join("")}Z" fill="var(--land)" stroke="var(--landline)" stroke-width=".8"/>`).join("");
+  for (const [k, g] of Object.entries(D.regions)) { const [cx, cy] = P(g.lonlat); s += `<circle cx="${cx}" cy="${cy}" r="${k === region ? 7 : 5}" fill="var(--accent)" stroke="var(--panel)" stroke-width="2" data-reg="${k}" style="cursor:pointer"><title>${esc(g.label)}</title></circle><text x="${+cx + 10}" y="${+cy + 4}" style="fill:var(--ink);font-weight:600">${esc(g.label.split(" ")[0])}</text>`; }
+  return s + "</svg>";
+}
+function legend(vals, d) {
+  const v = vals.filter((x) => x != null).sort((a, b) => a - b); if (!v.length) return "";
+  const q = [0, 0.2, 0.4, 0.6, 0.8].map((p) => v[Math.min(v.length - 1, Math.floor(p * v.length))]);
+  return `<div class="legend">${ramp.map((c, i) => `<i style="background:${c}"></i>${i < 4 ? "" : ""}≥${fmt(q[i], d)}`).join(" ")}<i style="background:var(--land);border:1px solid var(--line)"></i>no data</div>`;
+}
+
+// ---------- tooltip for maps ----------
+const tip = $("#tip");
+document.addEventListener("mousemove", (e) => { if (tip.classList.contains("show")) { tip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; tip.style.top = (e.clientY + 14) + "px"; } });
+
+// ---------- header ----------
+function renderHeader() {
+  $("#region").innerHTML = Object.entries(D.regions).map(([k, g]) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("");
+  $("#stages").innerHTML = STAGES.map(([id, l], i) => `<button role="tab" type="button" data-stage="${id}" aria-selected="${id === stage}"><span class="n">${i + 1}</span>${l}</button>`).join("");
+  $("#who").innerHTML = user ? `${esc(user.email)} · <span class="tag info">${user.role}</span>` : `<span class="muted">Not signed in</span>`;
+  $("#signin").textContent = user ? "Sign out" : "Sign in with Google";
+}
+$("#region").addEventListener("change", (e) => { region = e.target.value; store.set("region", region); render(); });
+$("#stages").addEventListener("click", (e) => { const b = e.target.closest("[data-stage]"); if (b) { stage = b.dataset.stage; store.set("stage", stage); render(); scrollTo(0, 0); } });
+/* live: sign-in handled by live.js */
+/* live: no simulated sign-in */
+$("#theme").onclick = () => { const r = document.documentElement; const dk = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dk ? "light" : "dark"; };
+const lock = (role, what) => `<div class="locked">🔒 ${esc(what)} needs the <b>${role}</b> role. ${user ? `You are signed in as <b>${user.role}</b>.` : "Sign in (simulated) to try it."} In the full app this is enforced by Supabase row-level security, not by hiding buttons.</div>`;
+
+// ---------- stages ----------
+const V = {};
+V.region = () => {
+  const g = R();
+  const subs = g.suburbs.filter(resident);
+  return `<h1>1 · Region</h1><p class="lead">Choose a territorial authority and its suburbs. The full app checks which LINZ aerial captures cover the area with a near-infrared band, then queues the pipeline as background jobs. This demo has two pilot regions, prepared from local runs on 2026-11-23.</p>
+  <div class="grid g2">
+    <div class="card map" id="nz">${nzMap()}<p class="small muted" style="margin:6px 0 0">Click a marker to switch region. Outlines: Stats NZ regional councils 2025.</p></div>
+    <div class="card"><h3>${esc(g.label)}</h3>
+      <table><tbody>
+        <tr><td>Territorial authority</td><td>${esc(g.ta)}</td></tr>
+        <tr><td>LINZ suburbs (with housing)</td><td>${g.suburbs.length} (${subs.length})</td></tr>
+        <tr><td>Residential sections</td><td>${fmt(subs.reduce((a, s) => a + s.sections, 0))}</td></tr>
+        <tr><td>SA2 areas</td><td>${g.sa2.length}</td></tr>
+        <tr><td>Imagery capture</td><td class="l" style="white-space:normal">${esc(g.imagery)}<br><span class="muted small">s3://nz-imagery/${esc(g.imagery_prefix)}/rgbnir</span></td></tr>
+        <tr><td>Water provider (PRVDR)</td><td>${esc(g.provider)}</td></tr>
+        <tr><td>Status</td><td><span class="tag ok">published</span></td></tr>
+      </tbody></table>
+      <h3 style="margin-top:14px">Pipeline jobs</h3>
+      ${can("editor") ? `<div class="row"><button class="btn primary" id="queue" type="button">Queue full refresh</button><span class="small muted">Simulated; the worker would pick these up from the <code>jobs</code> table.</span></div>` : lock("editor", "Queuing pipeline jobs")}
+      <div id="jobs" style="margin-top:8px">${jobsHTML()}</div>
+    </div>
+  </div>
+  <h2>Download progress</h2>
+  <div class="card" id="dl-panel">${dlHTML()}</div>
+  ${sourcePlanHTML(g)}`;
+};
+function sourcePlanHTML(g) {
+  const p = g.source_plan, all = D.index_regions || [];
+  if (!p) return "";
+  const groups = {}; p.steps.forEach((s) => { const k = s.step.replace(/\[.*\]$/, ""); (groups[k] = groups[k] || { n: 0, s }).n++; });
+  const filt = store.get("ta-filter", "");
+  const lim = D.limits || { services: {}, run_caps: {} }, svc = lim.services || {};
+  const partRows = (p.run_parts || []).map((rp) => `<tr><td>Part ${rp.part}</td><td>${rp.sa2}</td><td>${fmt(rp.estimate.est_features)}</td>${["linz_wfs", "statsnz_datafinder", "statsnz_ade", "openmeteo"].map((k) => { const c = rp.estimate.calls[k], b = svc[k] && svc[k].budget_day; return `<td>${fmt(c)}${b ? ` <span class="muted">/ ${fmt(b)}</span>` : ""}</td>`; }).join("")}<td class="l">${rp.estimate.problems.length ? `<span class="tag bad">${esc(rp.estimate.problems[0])}</span>` : '<span class="tag ok">fits one day</span>'}</td></tr>`).join("");
+  return `<h2>Source plan for ${esc(g.ta)}</h2>
+  <p class="small muted">The worker runs these requests for the region, from <code>index/source_index.json</code>. The index holds templates only (keys are placeholders), and the same plan exists for every TA with a water provider. TA ${esc(p.ta_code)} · ${esc(p.regional_council)} · ${p.sa2_count} SA2s · imagery folders: ${p.imagery_folders.map(esc).join(", ")}.</p>
+  <div class="card scroll"><table><thead><tr><th>Step</th><th class="l">Service</th><th>Calls</th><th class="l">Depends on</th><th class="l">Output</th></tr></thead><tbody>
+  ${Object.entries(groups).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="l">${esc(v.s.service)}</td><td>${v.n}</td><td class="l">${esc(v.s.depends_on.join(", ") || "–")}</td><td class="l" style="white-space:normal;min-width:260px">${esc(v.s.output)}</td></tr>`).join("")}
+  </tbody></table></div>
+  <h2>Usage limits for this region</h2>
+  <div class="note">${esc(lim.rule || "")} Every request is paced and counted against a daily budget set below each service's free limit. Throttling (HTTP 429/503) is handled with Retry-After, then exponential backoff. Repeated throttling pauses the service and parks the job until it can resume.</div>
+  <div class="card scroll"><table><thead><tr><th>Run part</th><th>SA2s</th><th>Est. LINZ features</th><th>LINZ requests / day budget</th><th>Datafinder</th><th>Census API</th><th>Open-Meteo (weighted)</th><th class="l">Preflight</th></tr></thead><tbody>${partRows}</tbody></table>
+  <p class="small muted">Estimates are heuristics (5,000 LINZ features per SA2; climate from 2013, one request per grid cell). The worker re-checks actual counts before each run. Caps per run: ${fmt(lim.run_caps.max_sa2_per_run)} SA2s, ${fmt(lim.run_caps.max_suburbs_per_run)} suburbs, ${fmt(lim.run_caps.max_climate_cells_per_run)} climate cells, ${fmt(svc.linz_imagery_s3 && svc.linz_imagery_s3.max_tiles_run)} imagery tiles.</p></div>
+  <div class="card scroll" style="margin-top:10px"><table><thead><tr><th>Service</th><th class="l">Published free limit</th><th>App budget / day</th><th>Min interval</th></tr></thead><tbody>
+  ${Object.entries(svc).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="l" style="white-space:normal">${esc(v.published)}</td><td>${v.budget_day == null ? "–" : fmt(v.budget_day)}</td><td>${fmt(v.min_interval_s, 1)} s</td></tr>`).join("")}</tbody></table></div>
+  <h2>All regions with charging rates (${all.length} TAs)</h2><p class="small muted">Each TA runs on its own, one part at a time; there is no national run. Large TAs are split into parts of at most ${fmt((D.limits || {}).run_caps ? D.limits.run_caps.max_sa2_per_run : 80)} SA2s.</p>
+  <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="ta-filter" value="${esc(filt)}" placeholder="TA, provider or region"></label></div>
+  <div class="card scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>TA</th><th>Code</th><th class="l">Regional council</th><th class="l">PRVDR</th><th class="l">Charging</th><th>SA2s</th><th class="l">Imagery folders</th><th>Requests</th><th>Run parts</th><th>Open-Meteo / part</th></tr></thead><tbody id="ta-rows">${taRows(all, filt)}</tbody></table></div>`;
+}
+function taRows(all, f) {
+  const q = f.trim().toLowerCase();
+  return all.filter((r) => !q || [r.TA, r.PRVDR, r.PROVIDER, r.REGIONAL_COUNCIL].join(" ").toLowerCase().includes(q))
+    .map((r) => `<tr><td>${esc(r.TA)}</td><td>${esc(r.TA_CODE)}</td><td class="l">${esc(r.REGIONAL_COUNCIL)}</td><td class="l">${esc(r.PRVDR)}</td><td class="l">${esc(r.CHARGING_TYPE)}</td><td>${esc(r.SA2_COUNT)}</td><td class="l">${esc(r.IMAGERY_FOLDERS)}</td><td>${esc(r.REQUESTS)}</td><td>${r.RUN_PARTS > 1 ? `<span class="tag warn">${esc(r.RUN_PARTS)}</span>` : esc(r.RUN_PARTS)}</td><td>${fmt(+r.EST_OPENMETEO_CALLS_PER_PART)}</td></tr>`).join("");
+}
+document.addEventListener("input", (e) => { if (e.target.id === "ta-filter") { store.set("ta-filter", e.target.value); const el = $("#ta-rows"); if (el) el.innerHTML = taRows(D.index_regions || [], e.target.value); } });
+// ---------- download progress (simulated): live rate controls within free-tier ceilings ----------
+const DL_SERVICES = [["linz_wfs", "LINZ data service"], ["statsnz_datafinder", "Stats NZ Datafinder"], ["statsnz_ade", "Stats NZ census API"], ["openmeteo", "Open-Meteo"]];
+let DL = null; // { region, est:{svc:calls}, done:{}, rate:{}, log:[], timer }
+const lim = () => D.limits || { defaults: {}, ceilings: {} };
+const rateOf = (k) => (DL && DL.rate[k]) || (lim().defaults[k] || {}).per_min || 60;
+function dlHTML() {
+  if (!DL || DL.region !== region) return `<p class="small muted">No download running for this region. ${can("editor") ? "Press <b>Queue full refresh</b> to start one (simulated)." : "An editor starts downloads."}</p>
+    <p class="small muted">While a download runs, editors can raise each service's request rate up to its ceiling: the published free-tier limit, or a conservative fair-use maximum where none is published. If a raised rate gets throttled (HTTP 429), it is halved automatically.</p>`;
+  const ed = can("editor");
+  const rows = DL_SERVICES.map(([k, name]) => {
+    const est = DL.est[k] || 0, done = Math.min(est, DL.done[k] || 0), r = rateOf(k), ce = (lim().ceilings[k] || {}).per_min || r, de = (lim().defaults[k] || {}).per_min || r;
+    const pct = est ? 100 * done / est : 100, eta = est > done ? Math.ceil((est - done) / r) : 0;
+    return `<div class="dl-row"><div><b class="small">${name}</b><br><span class="small muted">${fmt(done)} / ${fmt(est)} calls${k === "openmeteo" ? " (weighted)" : ""}</span></div>
+      <div><div class="bar-out" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="${name} progress"><div class="bar-in" style="width:${pct.toFixed(1)}%"></div></div>
+      <span class="small muted">${pct >= 100 ? "done" : `about ${eta} min left at this rate`}</span></div>
+      <div><label class="small">${fmt(r)}/min <span class="muted">(default ${fmt(de)}, ceiling ${fmt(ce)})</span>
+      <input type="range" min="${Math.max(1, Math.round(de / 4))}" max="${ce}" step="1" value="${r}" data-rate="${k}" ${ed ? "" : "disabled"} aria-label="${name} requests per minute"></label></div></div>`;
+  }).join("");
+  return `${rows}<p class="small muted" style="margin:8px 0 0">${ed ? "Drag to change a rate; it applies to the next request." : "Rates can be changed by editors."} Simulated at 20× speed.</p>
+    ${DL.log.length ? `<pre style="max-height:120px">${DL.log.slice(-6).map(esc).join("\n")}</pre>` : ""}`;
+}
+function startDownload() {
+  const rp = (R().source_plan && R().source_plan.run_parts && R().source_plan.run_parts[0]) || { estimate: { calls: {} } };
+  DL = { region, est: { ...rp.estimate.calls }, done: {}, rate: {}, log: [], t0: Date.now() };
+  for (const [k] of DL_SERVICES) DL.rate[k] = (lim().defaults[k] || {}).per_min || 60;
+  clearInterval(window._dlTimer);
+  window._dlTimer = setInterval(() => {
+    if (!DL) return;
+    let all = true;
+    for (const [k, name] of DL_SERVICES) {
+      const est = DL.est[k] || 0; if ((DL.done[k] || 0) >= est) continue; all = false;
+      const r = rateOf(k), ce = (lim().ceilings[k] || {}).per_min || r, de = (lim().defaults[k] || {}).per_min || r;
+      // services without a published limit may throttle when pushed hard: simulate a 429 and the automatic step-down
+      if (k !== "openmeteo" && r > ce * 0.6 && Math.random() < 0.08) { DL.rate[k] = Math.max(de, Math.round(r / 2)); DL.log.push(`${new Date().toLocaleTimeString()} ${name}: HTTP 429; waited for Retry-After; rate lowered ${fmt(r)} → ${fmt(DL.rate[k])}/min`); continue; }
+      DL.done[k] = (DL.done[k] || 0) + r / 60 * 0.5 * 20;
+    }
+    const el = $("#dl-panel");
+    if (el && !(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.rate)) el.innerHTML = dlHTML();
+    if (all) { clearInterval(window._dlTimer); DL.log.push(`${new Date().toLocaleTimeString()} all downloads complete`); if (el) el.innerHTML = dlHTML(); }
+  }, 500);
+}
+document.addEventListener("input", (e) => { const k = e.target.dataset && e.target.dataset.rate; if (!k || !DL || !can("editor")) return;
+  const ce = (lim().ceilings[k] || {}).per_min || 60; const v = Math.min(+e.target.value, ce);
+  DL.rate[k] = v; DL.log.push(`${new Date().toLocaleTimeString()} ${k}: rate set to ${fmt(v)}/min by ${user.email}`);
+  const lab = e.target.closest("label"); if (lab) lab.firstChild.textContent = `${fmt(v)}/min `; });
+document.addEventListener("change", (e) => { if (e.target.dataset && e.target.dataset.rate) { const el = $("#dl-panel"); if (el) el.innerHTML = dlHTML(); } });
+function jobsHTML() {
+  const mine = jobs.filter((j) => j.region === region);
+  return mine.length ? mine.slice(-8).reverse().map((j) => `<div class="job"><span>${esc(j.type)}</span><span class="tag ${j.status === "done" ? "ok" : j.status === "running" ? "warn" : "info"}">${j.status}</span></div>`).join("") : `<p class="small muted">No jobs yet.</p>`;
+}
+V.load = () => {
+  const g = R(), a = g.area_check;
+  const rows = g.suburbs.map((s) => `<tr><td>${esc(s.name)}</td><td class="l">${esc(s.type)}</td><td>${fmt(s.area_km2, 2)}</td><td>${fmt(s.sections)}</td><td>${fmt(s.titles)}</td><td>${fmt(s.density_per_km2)}</td><td>${fmt(s.LotSize)}</td><td>${fmt(s.SurveyArea)}</td><td class="l">${s.urban_rural ? `<span class="tag ${s.urban_rural === "Urban" ? "info" : "warn"}">${s.urban_rural}</span>` : "–"}</td></tr>`).join("");
+  return `<h1>2 · Load</h1><p class="lead">Source layers are loaded by bounding box from LINZ and Stats NZ. Each row in the database keeps its source, version and fetch date, so any export can be reproduced for a past date.</p>
+  <div class="grid g3">
+    ${[["LINZ NZ Suburbs and Localities", "layer 113764", "WFS · LINZ key"], ["LINZ NZ Primary Parcels", "layer 50772", "WFS · LINZ key"], ["LINZ NZ Property Titles", "layer 50804 (type, issue date)", "WFS · LINZ key"], ["LINZ NZ Building Outlines", "layer 101290", "WFS · LINZ key"], ["Stats NZ SA2 2023 (clipped)", "Datafinder layer 111206", "WFS · Datafinder key"], ["LINZ aerial imagery RGB+NIR", "s3://nz-imagery", "Public, no key"]].map(([t, l, k]) => `<div class="card"><h3>${t}</h3><p class="small muted" style="margin:0">${l}<br>${k}</p></div>`).join("")}
+  </div>
+  ${a ? `<h2>Section area check</h2><div class="kpis"><div class="kpi"><span>Polygon within 1% of legal survey area</span><b>${a.within_1pct}%</b><span>${fmt(a.n)} sections</span></div><div class="kpi"><span>Within 5%</span><b>${a.within_5pct}%</b></div><div class="kpi"><span>Median difference</span><b>${a.median_abs_diff_m2} m²</b></div></div>` : ""}
+  <h2>Suburbs</h2><div class="card scroll"><table><thead><tr><th>Suburb</th><th class="l">LINZ type</th><th>km²</th><th>Sections</th><th>Titles</th><th>Titles/km²</th><th>Median section m²</th><th>Median survey m²</th><th class="l">Urban/rural</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="small muted">Urban/rural uses the reference builder's rule: a LINZ suburb is urban unless it is both sparse (under 300 per km²) and has a median section over 4,000 m².</p>`;
+};
+V.allocate = () => {
+  const g = R(), ed = can("editor"), w = D.water_rates.find((x) => x.PROVIDER === g.provider);
+  const rows = g.suburbs.map((s) => `<tr><td>${esc(s.name)}</td><td class="l">${ed ? `<input type="text" data-msub="${s.linz_id}" value="${esc(mName(s))}" aria-label="M_SUBURB for ${esc(s.name)}">` : esc(mName(s))}</td><td class="l">${esc(s.ta)}</td><td class="l">${esc(g.provider)}</td></tr>`).join("");
+  return `<h1>3 · Allocate</h1><p class="lead">This maps your own suburb names (<code>M_SUBURB</code>) to LINZ suburbs and assigns each suburb a water provider (<code>PRVDR</code>), as the reference builder does. ${ed ? "Edits are stored in this browser and flow through to the exports." : "Editors can rename M_SUBURB here."}</p>
+  <div class="grid g2">
+    <div class="card scroll"><table><thead><tr><th>LINZ suburb</th><th class="l">M_SUBURB</th><th class="l">M_TERRITORY</th><th class="l">PRVDR</th></tr></thead><tbody>${rows}</tbody></table>
+      ${ed ? `<div class="row" style="margin-top:8px"><button class="btn" id="reset-edits" type="button">Reset names</button></div>` : ""}</div>
+    <div class="card"><h3>Water rates: ${esc(w.name)} (${esc(w.PROVIDER)})</h3>
+      <table><tbody><tr><td>Charging</td><td>${esc(w.CHARGING_TYPE)}</td></tr><tr><td>Fixed $/yr</td><td>${w.FIXED_PA == null ? '<span class="tag warn">not verified</span>' : "$" + fmt(w.FIXED_PA, 2)}</td></tr>
+      <tr><td>Volumetric $/m³</td><td>${w.VOLUMETRIC_PA == null ? "–" : "$" + fmt(w.VOLUMETRIC_PA, 2)}</td></tr><tr><td>Year</td><td>${esc(w.year)}</td></tr><tr><td>Checked</td><td>${esc(w.DATE_EST)}</td></tr></tbody></table>
+      <p class="small muted">${esc(w.NOTE)}</p><p class="small"><a href="${esc(w.source)}" rel="noopener" target="_blank">Provider source</a></p>
+      <p class="small muted">The full app keeps a dated history per provider (<code>water_rates.valid_from</code>), so the price variable can vary by year.</p></div>
+  </div>`;
+};
+V.imagery = () => {
+  const g = R(), subs = g.suburbs.filter(resident);
+  const sel = subs.find((s) => s.linz_id == store.get("sub-" + region)) || subs[0];
+  const tot = subs.reduce((a, s) => a + s.pools, 0), sec = subs.reduce((a, s) => a + s.sections, 0);
+  const rows = subs.map((s) => `<tr data-sel="${s.linz_id}" style="cursor:pointer${s === sel ? ";background:var(--accent-soft)" : ""}"><td>${esc(s.name)}</td><td>${fmt(s.sections)}</td><td>${fmt(s.pools)}</td><td>${fmt(s.PercPool, 1)}</td><td>${fmt(s.PoolArea, 1)}</td><td>${fmt(s.Footprint)}</td><td>${fmt(s.Unbuilt)}</td><td>${fmt(s.GardSize)}</td><td>${fmt(s.GardPct, 1)}</td><td>${fmt(s.ImperviousProxy)}</td></tr>`).join("");
+  const h = (arr, bins, lab) => bars(arr.map((v, i) => ({ v, label: `${bins[i]}+ m²`, short: bins[i] >= 1000 ? bins[i] / 1000 + "k" : bins[i] })), { label: lab, h: 170, color: "var(--s3)" });
+  return `<h1>4 · Imagery</h1><p class="lead">The worker reads LINZ RGB + near-infrared tiles at 15–20 cm and measures each residential section, excluding roofs (LINZ building outlines). Water is bright and blue with very low near-infrared; vegetation has a high vegetation index and bright near-infrared. Pool candidates must pass size, shape and colour tests, calibrated per capture.</p>
+  <div class="note">Privacy: only suburb aggregates are published. Pool or garden values for individual properties stay in editor-only tables, and image chips are only shown to signed-in labellers.</div>
+  <div class="kpis"><div class="kpi"><span>Capture</span><b style="font-size:1rem">${esc(g.imagery)}</b></div><div class="kpi"><span>Pools detected</span><b>${fmt(tot)}</b><span>${fmt(100 * tot / sec, 1)}% of ${fmt(sec)} sections</span></div>
+  <div class="kpi"><span>Validated precision</span><b>${fmt(100 * g.validation.pool_user.precision, 1)}%</b><span>labeller-checked</span></div><div class="kpi"><span>Estimated recall</span><b>${fmt(100 * g.validation.pool_user.recall, 0)}%</b><span>pool counts are a lower bound</span></div></div>
+  <div class="card scroll"><table><thead><tr><th>Suburb</th><th>Sections</th><th>Pools</th><th>% with pool</th><th>Median pool m²</th><th>Median roof m²</th><th>Median unbuilt m²</th><th>Median garden m²</th><th>% vegetated</th><th>Impervious proxy m²</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <h2>Distributions: ${esc(sel.name)}</h2><p class="small muted">Click a suburb row to change. Histograms are aggregates only.</p>
+  <div class="grid g2"><div class="card"><h3>Section size (m²)</h3>${h(sel.hist_section, sel.hist_bins_section, "Section size histogram")}</div>
+  <div class="card"><h3>Vegetated (garden) area (m²)</h3>${h(sel.hist_garden, sel.hist_bins_garden, "Garden area histogram")}</div></div>`;
+};
+V.validate = () => {
+  const g = R(), v = g.validation, U = v.pool_user, Cl = v.pool_claude;
+  const gate = U.precision >= 0.95 && U.recall >= 0.8 && U.labelled >= 150;
+  const ct = (s) => `<table><thead><tr><th></th><th>Pool</th><th>Water, not pool</th><th>Not pool</th><th>Unknown</th></tr></thead><tbody>${["pool", "not_pool"].map((t) => `<tr><td>Tool: ${t === "pool" ? "pool" : "not pool"}</td>${["pool", "water", "not_pool", "unknown"].map((c) => `<td>${s.confusion[t][c]}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const gr = (o) => `${o.about_right} about right · ${o.over} too much · ${o.under} too little · ${o.unknown} unknown`;
+  return `<h1>5 · Validate</h1><p class="lead">Labellers check sample chips with the arrow keys. The labels give per-capture precision (on accepted detections) and estimated recall (from rejected candidates). A capture's pool metrics are published only when it passes the quality gate.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Labelling keys</h3>
+      <div class="keys"><div class="key k-up"><kbd>↑</kbd><span class="small">Water, not pool</span></div><div class="key k-left"><kbd>←</kbd><span class="small">Not pool</span></div><div class="key k-down"><kbd>↓</kbd><span class="small">Unknown</span></div><div class="key k-right"><kbd>→</kbd><span class="small">Pool</span></div></div>
+      <p class="small muted">Gardens: ← too much · ↑ about right · → too little · ↓ unknown. Backspace undoes.</p>
+      ${can("labeller") ? `<p class="small"><span class="tag ok">labeller</span> In the full app the labelling queue opens here, showing private image chips from Supabase Storage. The demo shows only the aggregate results below.</p>` : lock("labeller", "Labelling")}
+    </div>
+    <div class="card"><h3>Quality gate: ${esc(g.imagery)}</h3>
+      <p><span class="tag ${gate ? "ok" : "bad"}">${gate ? "passes" : "fails"}</span> precision ≥ 95%, recall ≥ 80%, ≥ 150 labels</p>
+      <table><tbody><tr><td>Labels (excluding unknown)</td><td>${U.labelled}</td></tr><tr><td>Precision</td><td>${fmt(100 * U.precision, 1)}%</td></tr><tr><td>Miss rate among rejects</td><td>${fmt(100 * U.miss_rate, 1)}%</td></tr>
+      <tr><td>Estimated pools found / missed</td><td>${fmt(U.est_found)} / ${fmt(U.est_missed)}</td></tr><tr><td>Estimated recall</td><td>${fmt(100 * U.recall, 0)}%</td></tr></tbody></table>
+      ${v.missed_pools_n ? `<p class="small muted">${v.missed_pools_green_lt_130} of ${v.missed_pools_n} missed pools fail the green-channel test (deep-blue water): the colour rule needs recalibrating for this capture.</p>` : ""}
+    </div>
+  </div>
+  <h2>Labeller vs tool</h2><div class="card scroll">${ct(U)}</div>
+  <h2>Second reviewer (Claude, blind) vs tool</h2><div class="card scroll">${ct(Cl)}<p class="small muted">The two reviewers agree on pool or not pool for ${v.agree.same} of ${v.agree.n} chips (${fmt(100 * v.agree.same / v.agree.n, 1)}%).</p></div>
+  <h2>Gardens</h2><div class="card"><p class="small">Labeller: ${gr(v.garden.user)}<br>Claude: ${gr(v.garden.claude)}</p></div>
+  ${valPackHTML()}`;
+};
+
+// ---------- validation pack: flagged tiles + outcome format ----------
+const POOL_LABELS = ["pool", "not_pool", "water", "unknown"], GARDEN_LABELS = ["over", "about_right", "under", "unknown"];
+const tilesOf = (k) => Object.entries(D.regions[k].validation_tiles).map(([id, t]) => ({ id, k, ...t })).sort((a, b) => a.priority - b.priority || b.items - a.items);
+const flaggedOnly = () => store.get("vp-flag", "all") === "flagged";
+const packTiles = () => scopeRegions().flatMap(tilesOf).filter((t) => !flaggedOnly() || t.priority === 1);
+const VALPACK = {
+  "validation_tiles.csv": { desc: "Imagery tiles flagged for visual validation: COG and STAC links, NZTM extent, item counts, flags, priority", make: () => csv([["TILE_ID", "REGION", "CAPTURE_ID", "COG_URL", "STAC_URL", "MINX", "MINY", "MAXX", "MAXY", "ITEMS", "POOL_ACCEPTED", "POOL_REJECTED", "GARDEN", "LABELLED", "FLAGS", "PRIORITY"],
+    ...packTiles().map((t) => [t.id, t.k, D.regions[t.k].capture_id, t.cog, t.stac, ...t.bbox, t.items, t.pool_accepted, t.pool_rejected, t.garden, t.labelled, t.flags.join("; "), t.priority])]) },
+  "validation_items.csv": { desc: "Items to check, per tile. In the public demo, IDs are opaque and coordinates are left out; the full app adds X_NZTM, Y_NZTM and CHIP_URL for signed-in labellers", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "REGION", "TASK", "GROUP", "TOOL_VERDICT", "CHIP_SIZE_M"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1])).map((r) => [r[0], r[1], k, r[2], r[3], r[4] || (r[2] === "garden" ? "measured" : ""), r[2] === "pool" ? 28 : "section+12"]))]); } },
+  "validation_outcome_template.csv": { desc: "Outcome format to fill in: one row per item. Labels: pool / not_pool / water / unknown (pools), over / about_right / under / unknown (gardens)", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT", "NOTES"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1])).map((r) => [r[0], r[1], r[2], "", "", "", ""]))]); } },
+  "validation_outcome_example.csv": { desc: "The same format, filled with the pilot labeller's results", make: () => { const ids = new Set(packTiles().map((t) => t.id));
+    return csv([["ITEM_ID", "TILE_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT", "NOTES"], ...scopeRegions().flatMap((k) => D.regions[k].validation_items.filter((r) => ids.has(r[1]) && r[5]).map((r) => [r[0], r[1], r[2], r[5], "pilot-labeller", D.generated + "T00:00:00+13:00", ""]))]); } },
+  "validation_outcome.schema.json": { desc: "JSON Schema (2020-12) for one outcome row; the app validates uploads against it", make: () => JSON.stringify({
+    $schema: "https://json-schema.org/draft/2020-12/schema", $id: "https://github.com/water-rha-nz/explore-nz-suburb-water/validation_outcome.schema.json", title: "Validation outcome row", type: "object",
+    required: ["ITEM_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT"], additionalProperties: false,
+    properties: { ITEM_ID: { type: "string", pattern: "^v[0-9a-f]{10}$" }, TILE_ID: { type: "string" }, TASK: { enum: ["pool", "garden"] }, LABEL: { enum: [...new Set([...POOL_LABELS, ...GARDEN_LABELS])] },
+      LABELLER: { type: "string", minLength: 1, description: "Email or user ID of the labeller" }, LABELLED_AT: { type: "string", format: "date-time" }, NOTES: { type: "string" } },
+    allOf: [{ if: { properties: { TASK: { const: "pool" } } }, then: { properties: { LABEL: { enum: POOL_LABELS } } } }, { if: { properties: { TASK: { const: "garden" } } }, then: { properties: { LABEL: { enum: GARDEN_LABELS } } } }] }, null, 2) },
+};
+function valPackHTML() {
+  const ts = tilesOf(region), top = ts.slice(0, 12);
+  return `<h2>Validation pack: flagged tiles and outcome format</h2>
+  <p class="small muted">Tiles are LINZ Cloud-Optimised GeoTIFFs, so a labeller or external reviewer can open each by its URL and window. The outcome file comes back in the format below, and the app imports it into <code>validation_labels</code>.</p>
+  ${can("labeller") ? `<div class="row" style="margin-bottom:8px"><label class="small">Scope <select id="scope"><option value="region" ${store.get("scope", "region") === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${store.get("scope", "region") === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+    <label class="small">Tiles <select id="vp-flag"><option value="all" ${flaggedOnly() ? "" : "selected"}>All with items</option><option value="flagged" ${flaggedOnly() ? "selected" : ""}>Priority 1 only</option></select></label></div>
+  <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
+  ${Object.entries(VALPACK).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-vpreview="${f}" type="button">Preview</button></td><td><button class="btn" data-vdl="${f}" type="button">Download</button></td></tr>`).join("")}
+  </tbody></table></div><pre id="vpreview" hidden></pre>
+  <div class="card" style="margin-top:10px"><h3>Check a completed outcome file</h3><p class="small muted">Choose a filled <code>validation_outcome.csv</code>. It's checked in your browser against the schema and item list; nothing is uploaded in this demo.</p>
+  <input type="file" id="vp-import" accept=".csv,text/csv"><div id="vp-result" class="small" style="margin-top:8px"></div></div>` : lock("labeller", "Downloading validation packs")}
+  <h3 style="margin-top:14px">Most-flagged tiles: ${esc(R().label)}</h3>
+  <div class="card scroll"><table><thead><tr><th>Tile</th><th>Items</th><th>Pool accepted</th><th>Pool rejected</th><th>Garden</th><th>Labelled</th><th class="l">Flags</th><th>Priority</th></tr></thead><tbody>
+  ${top.map((t) => `<tr><td><a href="${esc(t.stac)}" target="_blank" rel="noopener">${esc(t.id)}</a></td><td>${t.items}</td><td>${t.pool_accepted}</td><td>${t.pool_rejected}</td><td>${t.garden}</td><td>${t.labelled}</td><td class="l">${t.flags.map((f) => `<span class="tag ${f === "calibration sample" ? "info" : "warn"}">${esc(f)}</span>`).join(" ")}</td><td>${t.priority}</td></tr>`).join("")}
+  </tbody></table></div><p class="small muted">${ts.length} tiles with validation items in this region; ${ts.filter((t) => t.priority === 1).length} are priority 1.</p>`;
+}
+function parseCSV(text) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < text.length; i++) { const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+    else if (c === '"') q = true; else if (c === ",") { row.push(f); f = ""; } else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; } else f += c; }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x !== ""));
+}
+function checkOutcome(text) {
+  const rows = parseCSV(text); if (!rows.length) return { ok: false, msg: "Empty file." };
+  const h = rows[0].map((x) => x.trim().toUpperCase()), need = ["ITEM_ID", "TASK", "LABEL", "LABELLER", "LABELLED_AT"];
+  const miss = need.filter((n) => !h.includes(n)); if (miss.length) return { ok: false, msg: "Missing columns: " + miss.join(", ") };
+  const known = new Map(Object.values(D.regions).flatMap((r) => r.validation_items.map((x) => [x[0], x[2]])));
+  const col = (r, n) => (r[h.indexOf(n)] || "").trim();
+  let ok = 0, blank = 0; const errs = [], counts = {};
+  rows.slice(1).forEach((r, i) => { const id = col(r, "ITEM_ID"), task = col(r, "TASK"), lab = col(r, "LABEL");
+    if (!lab) { blank++; return; }
+    const e = []; if (!/^v[0-9a-f]{10}$/.test(id)) e.push("bad ITEM_ID"); else if (!known.has(id)) e.push("unknown ITEM_ID"); else if (known.get(id) !== task) e.push("TASK doesn't match item");
+    if (!(task === "pool" ? POOL_LABELS : task === "garden" ? GARDEN_LABELS : []).includes(lab)) e.push(`LABEL "${lab}" not allowed for ${task || "?"}`);
+    if (!col(r, "LABELLER")) e.push("LABELLER empty"); if (Number.isNaN(Date.parse(col(r, "LABELLED_AT")))) e.push("LABELLED_AT not a date-time");
+    if (e.length) errs.push(`row ${i + 2}: ${e.join(", ")}`); else { ok++; counts[task + ":" + lab] = (counts[task + ":" + lab] || 0) + 1; } });
+  return { ok: !errs.length, msg: `${ok} valid labels, ${blank} unlabelled rows, ${errs.length} errors.` + (errs.length ? "<br>" + errs.slice(0, 8).map(esc).join("<br>") : "") + (ok ? "<br>" + Object.entries(counts).map(([k, v]) => `${esc(k)}: ${v}`).join(" · ") : "") };
+}
+V.context = () => {
+  const g = R(), subs = g.suburbs.filter((s) => s.census && s.census["2023"]);
+  const sel = g.suburbs.find((s) => s.linz_id == store.get("csub-" + region) && s.grid) || g.suburbs.find((s) => s.grid);
+  const cell = g.climate_cells[sel.grid];
+  const yrs = ["2013", "2018", "2023"];
+  const crow = (s) => yrs.map((y) => { const c = s.census[y] || {}; return `<td>${fmt(c.hh_size_mean, 2)}</td><td>${fmt(c.income_median)}</td><td>${fmt(c.pct_owner_all, 1)}</td><td>${fmt(c.bedrooms_mean_all, 2)}</td><td>${fmt(c.pct_separate, 1)}</td>`; }).join("");
+  // monthly climatology
+  const clim = Array.from({ length: 12 }, (_, m) => { const idx = cell.months.map((x, i) => [x, i]).filter(([x]) => +x.slice(5, 7) === m + 1 && +x.slice(0, 4) <= 2025).map(([, i]) => i); const av = (a) => idx.reduce((t, i) => t + (a[i] || 0), 0) / Math.max(1, idx.length); return { rain: av(cell.rain), et0: av(cell.et0), t: av(cell.tmean) }; });
+  const mn = "JFMAMJJASOND".split("");
+  const dd = cell.daily, start = new Date(dd.start + "T00:00:00");
+  const ticks = []; for (let i = 0; i < dd.rain.length; i++) { const d = new Date(start.getTime() + i * 864e5); if (d.getDate() === 1 && d.getMonth() % 3 === 0) ticks.push([i, d.toLocaleDateString("en-NZ", { month: "short", year: "2-digit" })]); }
+  const seas = sel.climate_seasonal.filter((r) => r.year >= 2008 && r.year <= 2026);
+  return `<h1>6 · Context: census and climate</h1><p class="lead">Census tables come from the Stats NZ data API by SA2 (2013, 2018, 2023) and are shared out to suburbs by residential sections. Climate comes from the Open-Meteo archive (daily from 2008) per grid cell; suburbs sharing a cell are flagged. Earth Sciences NZ data is not used.</p>
+  <h2>Census by suburb</h2><div class="card scroll"><table><thead><tr><th rowspan="2">Suburb</th>${yrs.map((y) => `<th colspan="5" style="text-align:center">${y}</th>`).join("")}</tr><tr>${yrs.map(() => "<th>HH size</th><th>Median income $</th><th>Owner %</th><th>Bedrooms</th><th>Separate %</th>").join("")}</tr></thead><tbody>${subs.map((s) => `<tr><td>${esc(s.name)}</td>${crow(s)}</tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Bedrooms and ownership are also available split by separate house and joined dwelling (in the export). Household income isn't published by dwelling type at SA2 level.</p>
+  <h2>Climate</h2>
+  <div class="row" style="margin-bottom:8px"><label class="small">Suburb <select id="csub">${g.suburbs.filter((s) => s.grid).map((s) => `<option value="${s.linz_id}" ${s === sel ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>
+  <span class="small muted">Grid cell ${esc(sel.grid)} · shared by ${g.suburbs.filter((s) => s.grid === sel.grid).length} suburb(s)</span></div>
+  <div class="grid g2">
+    <div class="card"><h3>Monthly averages 2008–2025</h3>${bars(clim.map((c, i) => ({ v: c.rain, label: mn[i] + " rain mm", short: mn[i] })), { label: "Monthly rain with ET0 line", line: clim.map((c) => ({ v: c.et0 })), h: 200 })}
+      <div class="legend"><i style="background:var(--rain)"></i>rain mm <i style="background:var(--et0)"></i>reference evapotranspiration (ET0) mm</div></div>
+    <div class="card"><h3>Daily rain since ${esc(dd.start)}</h3>${line(dd.rain, { label: "Daily rain", color: "var(--rain)", bars: true, ticks, h: 200 })}
+      <h3 style="margin-top:8px">Daily maximum temperature °C</h3>${line(dd.tmax, { label: "Daily max temperature", color: "var(--temp)", ticks, h: 140 })}</div>
+  </div>
+  <h2>Seasonal values (paper: February = summer, June = winter)</h2>
+  <div class="card scroll"><table><thead><tr><th>Year</th><th>Feb rain</th><th>Feb ET0</th><th>Feb deficit</th><th>Feb T °C</th><th>Jun rain</th><th>Jun ET0</th><th>Jun T °C</th></tr></thead><tbody>
+  ${seas.map((r) => `<tr><td>${r.year}</td><td>${fmt(r.rain_mm_summer_feb)}</td><td>${fmt(r.et0_mm_summer_feb)}</td><td>${fmt(r.deficit_mm_summer_feb)}</td><td>${fmt(r.tmean_c_summer_feb, 1)}</td><td>${fmt(r.rain_mm_winter_jun)}</td><td>${fmt(r.et0_mm_winter_jun)}</td><td>${fmt(r.tmean_c_winter_jun, 1)}</td></tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Deficit = ET0 − rain (mm/month): positive means outdoor watering pressure.</p>`;
+};
+V.explore = () => {
+  const g = R(), mid = store.get("metric", "PercPool"), m = M[mid] || M.PercPool, showSA2 = store.get("sa2", "0") === "1";
+  const vals = g.suburbs.map((s) => resident(s) ? m.get(s) : null), col = classify(vals);
+  const feats = g.suburbs.map((s, i) => ({ geom: s.geom, fill: col(vals[i]), title: `${s.name}: ${fmt(vals[i], m.d)}` }));
+  const all = Object.entries(D.regions).flatMap(([k, r]) => r.suburbs.filter(resident).map((s) => ({ ...s, _r: k })));
+  const xid = store.get("sx", "LotSize"), yid = store.get("sy", "PercPool");
+  const pts = all.map((s) => ({ x: M[xid].get(s), y: M[yid].get(s), n: s.sections, label: s.name, c: s._r === "taupo" ? "var(--s3)" : "var(--et0)" })).filter((p) => p.x != null && p.y != null);
+  const opt = (sel) => METRICS.map((x) => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.label)}</option>`).join("");
+  const cols = ["LotSize", "Footprint", "GardSize", "PercPool", "HhSize", "Income", "Owner", "BRooms", "PctJoined", "Rain", "ET0"];
+  return `<h1>7 · Explore</h1><p class="lead">This is the <code>v_suburb_metadata</code> view: the example study's explanatory variables per suburb, ready to join to your water consumption.</p>
+  <div class="row" style="margin-bottom:10px"><label class="small">Map shows <select id="metric">${opt(mid)}</select></label><label class="small"><input type="checkbox" id="sa2" ${showSA2 ? "checked" : ""}> SA2 outlines</label></div>
+  <div class="grid g2">
+    <div class="card map" id="exmap">${mapSVG(feats, { label: m.label + " by suburb", overlay: showSA2 ? g.sa2 : [] })}${legend(vals, m.d)}<p class="small muted" style="margin:6px 0 0">Source: ${esc(m.src)}. Grey = suburbs with no residential sections.</p></div>
+    <div class="card"><h3>Compare suburbs across both regions</h3>
+      <div class="row small"><label>X <select id="sx">${opt(xid)}</select></label><label>Y <select id="sy">${opt(yid)}</select></label></div>
+      ${pts.length > 1 ? scatter(pts, M[xid].label, M[yid].label) : "<p class='muted'>Not enough data.</p>"}
+      <div class="legend"><i style="background:var(--s3)"></i>Taupō <i style="background:var(--et0)"></i>Tauranga · circle size = sections</div></div>
+  </div>
+  <h2>Suburb metadata</h2><div class="card scroll"><table><thead><tr><th>Suburb</th>${cols.map((c) => `<th title="${esc(M[c].label)}">${c}</th>`).join("")}</tr></thead><tbody>
+  ${g.suburbs.filter(resident).map((s) => `<tr><td>${esc(mName(s))}</td>${cols.map((c) => `<td>${fmt(M[c].get(s), M[c].d)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+};
+
+// ---------- exports (compatible with suburb_lookup.html) ----------
+const cq = (v) => { const s = v == null ? "" : String(v); return /[",\n\t]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const csv = (rows, sep = ",") => rows.map((r) => r.map(cq).join(sep)).join("\r\n") + "\r\n";
+const scopeRegions = () => store.get("scope", "region") === "all" ? Object.keys(D.regions) : [region];
+const SUBS = () => scopeRegions().flatMap((k) => D.regions[k].suburbs.map((s) => ({ s, k, g: D.regions[k] })));
+const censusFor = (s, y) => { const yrs = ["2013", "2018", "2023"].filter((c) => s.census && s.census[c]); const pick = y <= 2015 ? "2013" : y <= 2020 ? "2018" : "2023"; return [pick, s.census && s.census[pick] ? s.census[pick] : (yrs.length ? s.census[yrs[yrs.length - 1]] : {})]; };
+const EXPORTS = {
+  "nz_suburb_ref.csv": { desc: "M_SUBURB, TYPE, M_TERRITORY, M_SUBURB_HH_COUNT", make: () => csv([["M_SUBURB", "TYPE", "M_TERRITORY", "M_SUBURB_HH_COUNT"], ...SUBS().map(({ s }) => [mName(s), s.type, s.ta, s.hh_count_proxy ?? 0])]) },
+  "nz_household_ref.csv": { desc: "M_SUBURB, M_DWELLING_ID, SECTION_TYPE, SECTION_SIZE_M2, NUM_SECTIONS, SECTION_AVG_M2 (LINZ parcels; no imagery values)", lazy: true, make: async () => { await loadSections(); const ks = scopeRegions(); const nm = {}; for (const k of ks) for (const s of D.regions[k].suburbs) nm[k + ":" + s.name] = mName(s); return csv([["M_SUBURB", "M_DWELLING_ID", "SECTION_TYPE", "SECTION_SIZE_M2", "NUM_SECTIONS", "SECTION_AVG_M2"], ...SECT.rows.filter((r) => ks.includes(r[0])).map((r) => [nm[r[0] + ":" + r[1]] || r[1], r[2], r[3], r[4], r[5], r[6]])]); } },
+  "nz_urban_rural.csv": { desc: "Tab-separated: SUBURB, TYPE, PROVIDER, NOTE", make: () => csv([["SUBURB", "TYPE", "PROVIDER", "NOTE"], ...SUBS().map(({ s }) => [mName(s), s.urban_rural || "", "", s.sections != null ? `LINZ ${s.type.toLowerCase()}; ${s.titles} titles; ${fmt(s.density_per_km2)} per km²; median section ${fmt(s.LotSize)} m²` : `LINZ ${s.type.toLowerCase()}; no residential sections`])], "\t") },
+  "nz_water_rates.csv": { desc: "PROVIDER, CHARGING_TYPE, FIXED_PA, VOLUMETRIC_PA, THRESHOLD_Lpd, DATE_EST, NOTE", make: () => csv([["PROVIDER", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "NOTE"], ...D.water_rates.filter((w) => scopeRegions().some((k) => D.regions[k].provider === w.PROVIDER)).map((w) => [w.PROVIDER, w.CHARGING_TYPE, w.FIXED_PA, w.VOLUMETRIC_PA, w.THRESHOLD_Lpd, w.DATE_EST, w.NOTE])]) },
+  "nz_suburb_demographics.csv": { desc: "M_SUBURB, M_TERRITORY, PRVDR, then one column per metric", make: () => { const cols = METRICS.map((m) => m.id); return csv([["M_SUBURB", "M_TERRITORY", "PRVDR", ...cols], ...SUBS().filter(({ s }) => resident(s)).map(({ s, g }) => [mName(s), s.ta, g.provider, ...METRICS.map((m) => { const v = m.get(s); return v == null ? "" : +(+v).toFixed(m.d); })])]); } },
+  "sa2_census_wide.csv": { desc: "One row per SA2 × year, for the original tool's Demographics loader", make: () => { const keys = ["households", "hh_size_mean", "income_median", "pct_owner_all", "bedrooms_mean_all", "pct_separate", "pct_joined", "bedrooms_mean_separate", "bedrooms_mean_joined", "pct_owner_separate", "pct_owner_joined"]; const rows = [["SA2_CODE", "SA2_NAME", "YEAR", ...keys]]; for (const k of scopeRegions()) for (const a of D.regions[k].sa2) for (const [y, c] of Object.entries(a.census)) rows.push([a.code, a.name, y, ...keys.map((x) => c[x])]); return csv(rows); } },
+  "suburb_metadata_panel.csv": { desc: "Suburb × year × season panel (2008–2025, Feb/Jun) with the study's variables except DWU", make: () => {
+    const head = ["REGION", "M_SUBURB", "LINZ_ID", "PRVDR", "YEAR", "SEASON", "Temp", "Rain", "ET0", "Deficit", "CENSUS_YEAR", "HhSize", "Income", "BRooms", "Owner", "PctDetached", "PctJoined", "PercPool", "GardSize", "LotSize", "Footprint", "ImperviousProxy", "Price", "IMAGERY_CAPTURE"];
+    const rows = [head];
+    for (const { s, k, g } of SUBS()) { if (!resident(s)) continue; const w = D.water_rates.find((x) => x.PROVIDER === g.provider);
+      for (const r of s.climate_seasonal) { if (r.year < 2008 || r.year > 2025) continue;
+        for (const [season, suf] of [["summer", "summer_feb"], ["winter", "winter_jun"]]) { const [cy, c] = censusFor(s, r.year);
+          rows.push([k, mName(s), s.linz_id, g.provider, r.year, season, r["tmean_c_" + suf], r["rain_mm_" + suf], r["et0_mm_" + suf], r["deficit_mm_" + suf], cy, c.hh_size_mean, c.income_median, c.bedrooms_mean_all, c.pct_owner_all, c.pct_separate, c.pct_joined, s.PercPool, s.GardSize, s.LotSize, s.Footprint, s.ImperviousProxy, w && w.VOLUMETRIC_PA, g.imagery]); } } }
+    return csv(rows); } },
+  "DATA_DICTIONARY.csv": { desc: "Column definitions, units and sources", make: () => csv([["column", "definition", "unit", "source"], ["Temp", "Mean daily air temperature for the month", "°C", "Open-Meteo archive (CC BY 4.0)"], ["Rain", "Total rainfall for the month", "mm/month", "Open-Meteo"], ["ET0", "FAO-56 reference evapotranspiration", "mm/month", "Open-Meteo"], ["Deficit", "ET0 − Rain", "mm/month", "derived"],
+    ["HhSize", "Mean usual residents per household", "people", "Stats NZ CEN23_FHH_038"], ["Income", "Median total household income", "NZD/yr", "Stats NZ CEN23_HOU_001"], ["BRooms", "Mean bedrooms", "bedrooms", "Stats NZ CEN23_HOU_020"], ["Owner", "Owned/partly owned or family trust, of stated", "%", "Stats NZ CEN23_HOU_020"], ["PctDetached", "Households in separate houses", "%", "Stats NZ CEN23_HOU_020"], ["PctJoined", "Households in joined dwellings", "%", "Stats NZ CEN23_HOU_020"],
+    ["PercPool", "Residential sections with a detected pool", "%", "LINZ aerial imagery (CC BY 4.0), validated"], ["GardSize", "Median vegetated area per section (NDVI>0.2, NIR≥40, excluding roofs)", "m²", "LINZ aerial imagery"], ["LotSize", "Median residential section polygon area", "m²", "LINZ NZ Primary Parcels"], ["Footprint", "Median building outline area per section", "m²", "LINZ NZ Building Outlines"], ["ImperviousProxy", "Median unbuilt minus median vegetated area", "m²", "derived"],
+    ["Price", "Current volumetric water $/m³ (history to be added)", "NZD/m³", "Provider published rates"], ["CENSUS_YEAR", "Census used for the year (2013 for 2008–15, 2018 for 2016–20, 2023 after)", "", "derived"], ["DWU", "Not included: join your own water consumption", "L/dwelling/day", "provider data (outside this app)"]]) },
+  "ATTRIBUTION.md": { desc: "Required CC BY 4.0 attribution", make: () => ATTR },
+  "nz_suburb_builder_config.json": { desc: "Config for suburb_lookup.html (inputs, outputs, settings, PRVDR matches)", make: () => JSON.stringify({ tool: "NZ Suburb Reference Builder", version: 1, dataFolder: "", inputs: [{ role: "linz", file: "lds-new-zealand-2layers-SHP.zip" }], outputs: { suburb_ref: "nz_suburb_ref.csv", household_ref: "nz_household_ref.csv", urban_rural: "nz_urban_rural.csv", water_rates: "nz_water_rates.csv" }, settings: { keepMode: "any", dropNoProvider: true, hhCount: "addr", urbanDensityPerKm2: 300, urbanMedianSectionM2: 4000 }, prvdrMatches: Object.fromEntries(scopeRegions().map((k) => [D.regions[k].provider, D.water_rates.find((w) => w.PROVIDER === D.regions[k].provider).name])), suburbAllocations: SUBS().filter(({ s }) => mName(s) !== s.name).map(({ s }) => ({ row: mName(s), linz: [s.name], territory: s.ta })) }, null, 2) },
+};
+const ATTR = `# Attribution
+
+Data in this export is derived from the following sources, each licensed under Creative Commons Attribution 4.0 International (CC BY 4.0):
+
+- Toitū Te Whenua Land Information New Zealand (LINZ): NZ Suburbs and Localities, NZ Primary Parcels, NZ Property Titles, NZ Building Outlines. Released by LINZ under CC BY 4.0.
+- Aerial imagery via LINZ: Taupō 0.075m Urban Aerial Photos (2023) and Tauranga 0.1m Urban Aerial Photos (2025), sourced from LINZ and licensed for reuse under CC BY 4.0. Copyright of each survey rests with its supplier (see the LINZ imagery survey index).
+- Stats NZ (Tatauranga Aotearoa): 2013, 2018 and 2023 Census tables (Aotearoa Data Explorer) and Statistical Area 2 2023 boundaries, licensed by Stats NZ for reuse under CC BY 4.0.
+- Weather data by Open-Meteo.com (CC BY 4.0), based on ECMWF/Copernicus ERA5 and ERA5-Land reanalysis.
+- Water rates compiled from provider publications (see source links).
+
+Derived data © explore-nz-suburb-water contributors, licensed CC BY 4.0.
+`;
+async function loadSections() { if (!SECT) SECT = await fetch("data/sections.json").then((r) => r.json()); }
+function download(name, text) { const type = name.endsWith(".json") ? "application/json" : name.endsWith(".md") ? "text/markdown" : "text/csv"; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: type + ";charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+V.export = () => {
+  const sc = store.get("scope", "region");
+  return `<h1>8 · Export</h1><p class="lead">The exports use the same file names, columns and delimiters as <code>suburb_lookup.html</code>, so they load straight into the original tool, plus a panel file for the example study's models. Each bundle carries its attribution and a manifest.</p>
+  ${user ? "" : `<div class="note">Viewers can export published regions. ${lock("viewer", "Exporting")}</div>`}
+  <div class="row" style="margin-bottom:10px"><label class="small">Scope <select id="scope"><option value="region" ${sc === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${sc === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+  <button class="btn primary" id="dl-all" type="button" ${user ? "" : "disabled"}>Download all + manifest</button></div>
+  <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
+  ${Object.entries(EXPORTS).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-preview="${f}" type="button">Preview</button></td><td><button class="btn" data-dl="${f}" type="button" ${user ? "" : "disabled"}>Download</button></td></tr>`).join("")}
+  </tbody></table></div>
+  <pre id="preview" hidden></pre>
+  <p class="small muted">Demo notes: <code>M_SUBURB_HH_COUNT</code> uses residential title counts as a stand-in for dwellings, and <code>M_DWELLING_ID</code> is the LINZ parcel ID. The full app uses the reference builder's dwelling logic (rating units and titles, addresses).</p>`;
+};
+async function makeExport(f) { return await EXPORTS[f].make(); }
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.closest("[data-reg]")) { region = t.closest("[data-reg]").dataset.reg; store.set("region", region); render(); return; }
+  if (t.id === "queue-sim") { const rp = (R().source_plan && R().source_plan.run_parts) || []; const bad = rp.flatMap((p) => p.estimate.problems); if (bad.length) { jobs.push({ region, type: "Preflight refused: " + bad[0], status: "scheduled" }); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML(); return; }
+    const types = ["Preflight: fits today's budgets (part 1 of " + Math.max(1, rp.length) + ")", "LINZ layers (WFS, paged)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo, per grid cell)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); startDownload(); const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML(); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
+    let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
+  if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
+  const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
+  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…"; const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
+  if (t.dataset.dl) { download(t.dataset.dl, await makeExport(t.dataset.dl)); return; }
+  if (t.dataset.vpreview) { const p = $("#vpreview"); p.hidden = false; const txt = VALPACK[t.dataset.vpreview].make(); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.vpreview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
+  if (t.dataset.vdl) { download(t.dataset.vdl, VALPACK[t.dataset.vdl].make()); return; }
+  if (t.id === "dl-all") { const man = { app: "explore-nz-suburb-water demo", generated: new Date().toISOString(), data_as_of: D.generated, scope: scopeRegions(), files: [] };
+    for (const f of Object.keys(EXPORTS)) { const txt = await makeExport(f); man.files.push({ file: f, bytes: new Blob([txt]).size }); download(f, txt); await new Promise((r) => setTimeout(r, 250)); }
+    man.sources = { linz: "LDS layers 113764, 50772, 50804, 101290; nz-imagery " + scopeRegions().map((k) => D.regions[k].imagery_prefix).join(", "), statsnz: "ADE CEN23_HOU_020, CEN23_FHH_038, CEN23_HOU_001, CEN23_HOU_018; Datafinder 111206", climate: "Open-Meteo archive (best match)" };
+    download("manifest.json", JSON.stringify(man, null, 2)); }
+});
+document.addEventListener("change", async (e) => {
+  const t = e.target;
+  if (t.dataset.msub) { const k = region + ":" + t.dataset.msub; const s = R().suburbs.find((x) => x.linz_id == t.dataset.msub); if (t.value.trim() && t.value.trim() !== s.name) edits[k] = t.value.trim(); else delete edits[k]; store.set("edits", JSON.stringify(edits)); }
+  if (t.id === "csub") { store.set("csub-" + region, t.value); render(); }
+  if (["metric", "sx", "sy", "scope"].includes(t.id)) { store.set(t.id, t.value); render(); }
+  if (t.id === "sa2") { store.set("sa2", t.checked ? "1" : "0"); render(); }
+  if (t.id === "vp-flag") { store.set("vp-flag", t.value); render(); }
+  if (t.id === "vp-import" && t.files && t.files[0]) { const r = checkOutcome(await t.files[0].text()); $("#vp-result").innerHTML = `<span class="tag ${r.ok ? "ok" : "bad"}">${r.ok ? "valid" : "problems"}</span> ${r.msg}`; }
+});
+document.addEventListener("mouseover", (e) => { const p = e.target.closest && e.target.closest("#exmap path.sub"); if (p) { const s = R().suburbs[+p.dataset.i]; const m = M[store.get("metric", "PercPool")] || M.PercPool; tip.innerHTML = `<b>${esc(s.name)}</b><br>${esc(m.label)}: ${fmt(resident(s) ? m.get(s) : null, m.d)}${s.sections != null ? `<br>${fmt(s.sections)} sections` : ""}`; tip.classList.add("show"); } });
+document.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest("#exmap path.sub")) tip.classList.remove("show"); });
+
+function render() {
+  if (!D.regions[region]) region = Object.keys(D.regions)[0];
+  if (!V[stage]) stage = "region";
+  renderHeader();
+  $("#main").innerHTML = V[stage]();
+}
+/* live: boot is in live.js */
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
+<script>
+const SB_URL = "https://uthodoiocvnwxwfzahwd.supabase.co", SB_KEY = "sb_publishable_cbXyUC7cfOKlYRtsmQyFKQ_lpKZJW22";
+// Live layer for the real app: replaces the demo's simulated parts with Supabase (auth, data, jobs, rates,
+// labelling, admin). Loaded after the demo script; uses its helpers ($, esc, fmt, V, STAGES, render, ...).
+"use strict";
+const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true } });
+let SESSION = null, PROFILE = null, STATIC = null;
+const LIVE = { jobs: [], runs: [], usage: [], rates: {}, labelQueue: [], labelPos: 0, labelling: false, chipUrls: {} };
+STAGES.push(["admin", "Admin"]);
+const multi = (g) => (g.type === "Polygon" ? [g.coordinates] : g.coordinates);
+const q = async (p) => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
+const today = () => new Date().toISOString().slice(0, 10);
+
+// ---------------------------------------------------------------- auth gate
+function gate(kind, msg) {
+  document.querySelector("nav.stages").hidden = true;
+  $("#region").closest("label").hidden = true;
+  $("#who").innerHTML = SESSION ? esc(SESSION.user.email) : "";
+  $("#signin").textContent = SESSION ? "Sign out" : "Sign in with Google";
+  const g = '<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>';
+  const body = {
+    signin: `<h1>Explore NZ Suburb Water</h1><p class="lead">Suburb metadata for residential water-demand analysis: pools, gardens, sections, census, climate and water charges. Sign in with your Google account to continue.</p>
+      <div class="card" style="max-width:420px"><button class="gbtn" id="go-google" type="button">${g} Sign in with Google</button>
+      <p class="small muted" style="margin:10px 0 0">Only your name, email and Google account ID are used. New accounts need an admin's approval.</p></div>
+      <p class="small muted">No account? See the <a href="demo/">static demo</a>.</p>`,
+    pending: `<h1>Waiting for approval</h1><p class="lead">You're signed in as <b>${esc(SESSION && SESSION.user.email)}</b>. An admin needs to approve your account before you can see data. Your current status is <b>${esc(PROFILE ? PROFILE.status : "unknown")}</b>.</p>`,
+    error: `<h1>Something went wrong</h1><p class="lead">${esc(msg || "")}</p><p><button class="btn" type="button" onclick="location.reload()">Try again</button></p>`,
+  }[kind];
+  $("#main").innerHTML = body;
+  const b = $("#go-google"); if (b) b.onclick = signIn;
+}
+const signIn = () => sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + location.pathname } });
+$("#signin").addEventListener("click", async () => { if (SESSION) { await sb.auth.signOut(); location.reload(); } else signIn(); });
+sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") location.reload(); });
+
+// ---------------------------------------------------------------- data (DB -> the structure the stages already use)
+async function loadRegion(r) {
+  const mets = await q(sb.from("suburb_metrics").select("*").eq("region_id", r.id));
+  const outl = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs" }));
+  const sa2o = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "sa2", p_tol: 15 }));
+  const ids = mets.map((m) => m.linz_id);
+  const cens = ids.length ? await q(sb.from("suburb_census").select("*").in("linz_id", ids)) : [];
+  const cm = sa2o.length ? await q(sb.from("census_metrics").select("*").in("sa2_code", sa2o.map((x) => x.id))) : [];
+  const cells = [...new Set(mets.map((m) => m.climate_cell).filter(Boolean))];
+  const monthly = cells.length ? await q(sb.from("v_climate_monthly").select("*").in("cell_id", cells).order("month")) : [];
+  const vs = await q(sb.from("validation_summary").select("*").eq("region_id", r.id));
+  const caps = await q(sb.from("imagery_captures").select("*").in("id", r.imagery_captures || []));
+  const st = (STATIC.regions || {})[r.id] || {};
+  const climate_cells = {};
+  for (const c of cells) {
+    const rows = monthly.filter((m) => m.cell_id === c);
+    const daily = await q(sb.from("climate_daily").select("date,rain_mm,et0_mm,tmax_c").eq("cell_id", c).gte("date", "2024-07-01").order("date"));
+    climate_cells[c] = { months: rows.map((m) => m.month.slice(0, 7)), rain: rows.map((m) => +m.rain_mm), et0: rows.map((m) => +m.et0_mm), tmean: rows.map((m) => +m.tmean_c), tmax: rows.map((m) => +m.tmax_c),
+      daily: { start: daily.length ? daily[0].date : today(), rain: daily.map((d) => +d.rain_mm), et0: daily.map((d) => +d.et0_mm), tmax: daily.map((d) => +d.tmax_c) } };
+  }
+  const seasonal = (cell) => {
+    const rows = monthly.filter((m) => m.cell_id === cell), byY = {};
+    for (const m of rows) { const y = +m.month.slice(0, 4), mo = +m.month.slice(5, 7); if (mo !== 2 && mo !== 6) continue; const s = mo === 2 ? "summer_feb" : "winter_jun";
+      const o = byY[y] = byY[y] || { year: y }; o["rain_mm_" + s] = +m.rain_mm; o["et0_mm_" + s] = +m.et0_mm; o["deficit_mm_" + s] = +m.et0_mm - +m.rain_mm; o["tmean_c_" + s] = +m.tmean_c; }
+    return Object.values(byY).sort((a, b) => a.year - b.year);
+  };
+  const annual = (cell) => { const rows = monthly.filter((m) => m.cell_id === cell && +m.month.slice(0, 4) >= 2008 && +m.month.slice(0, 4) <= 2025); const yrs = new Set(rows.map((m) => m.month.slice(0, 4))).size || 1;
+    return rows.length ? { rain_mm: rows.reduce((t, m) => t + +m.rain_mm, 0) / yrs, et0_mm: rows.reduce((t, m) => t + +m.et0_mm, 0) / yrs, tmean_c: rows.reduce((t, m) => t + +m.tmean_c, 0) / rows.length } : null; };
+  const censusOf = (rows, keyf) => { const o = {}; for (const c of rows) { const y = String(c.year); o[y] = { ...c }; } return o; };
+  const suburbs = outl.map((o) => {
+    const m = mets.find((x) => String(x.linz_id) === String(o.id)) || {};
+    return { linz_id: +o.id, name: o.name, type: m.type, ta: m.territorial_authority, area_km2: m.area_km2, geom: multi(o.geom),
+      sections: m.sections ?? null, titles: m.titles, hh_count_proxy: m.titles, density_per_km2: m.density_per_km2, urban_rural: m.urban_rural,
+      PercPool: m.perc_pool, PoolArea: m.pool_area, pools: m.pools, LotSize: m.lot_size, SurveyArea: m.survey_area, Footprint: m.footprint,
+      Unbuilt: m.unbuilt, GardSize: m.gard_size, GardPct: m.gard_pct, ImperviousProxy: m.impervious_proxy, UnbuiltPerTitle: m.unbuilt_per_title,
+      SharedPct: m.shared_pct, hist_section: m.hist_section || [], hist_bins_section: m.hist_section_bins || [], hist_garden: m.hist_garden || [], hist_bins_garden: m.hist_garden_bins || [],
+      census: censusOf(cens.filter((c) => c.linz_id === +o.id)), climate_seasonal: m.climate_cell ? seasonal(m.climate_cell) : [], grid: m.climate_cell || null,
+      climate_annual: m.climate_cell ? annual(m.climate_cell) : null };
+  });
+  const cap = caps[0] || {};
+  return { label: r.name, ta: (r.territorial_authorities || [])[0], imagery: cap.id ? `${cap.id} (LINZ, ${cap.bands || "RGB+NIR"})` : "–", imagery_prefix: cap.s3_prefix || "",
+    capture_id: cap.id, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || [174.8, -41.3], status: r.status, suburbs,
+    sa2: sa2o.map((a) => ({ code: a.id, name: a.name, geom: multi(a.geom), census: censusOf(cm.filter((c) => c.sa2_code === a.id)) })),
+    climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
+    source_plan: st.source_plan, area_check: st.area_check };
+}
+async function loadAll() {
+  const regions = await q(sb.from("regions").select("*").order("id"));
+  const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
+  const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
+    water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
+      THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
+  for (const r of regions) d.regions[r.id] = await loadRegion(r);
+  // M_SUBURB names saved by editors
+  const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
+  edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
+  return d;
+}
+// household_ref export: sections from the database (paged; PostgREST returns at most 1,000 rows per request)
+loadSections = async function () {
+  if (SECT) return;
+  const names = {}; for (const [k, g] of Object.entries(D.regions)) for (const s of g.suburbs) names[s.linz_id] = [k, s.name];
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const page = await q(sb.from("sections").select("parcel_id,polygon_m2,n_titles,suburb_id,region_id").order("parcel_id").range(from, from + 999));
+    for (const r of page) { const n = Math.max(1, r.n_titles || 1), nm = names[r.suburb_id] || [r.region_id, ""];
+      rows.push([nm[0], nm[1], r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10]); }
+    if (page.length < 1000) break;
+  }
+  SECT = { rows };
+};
+
+// ---------------------------------------------------------------- allocate: persist M_SUBURB names (editors)
+document.addEventListener("change", async (e) => {
+  const t = e.target; if (!t.dataset || !t.dataset.msub || !can("editor")) return;
+  const s = R().suburbs.find((x) => String(x.linz_id) === t.dataset.msub); const name = t.value.trim();
+  try {
+    const old = await q(sb.from("m_suburb_links").select("m_suburb_id").eq("linz_id", s.linz_id));
+    if (old.length) await q(sb.from("m_suburbs").delete().in("id", old.map((o) => o.m_suburb_id)));
+    if (name && name !== s.name) {
+      const [m] = await q(sb.from("m_suburbs").insert({ region_id: region, m_suburb: name, m_territory: s.ta, prvdr: R().provider }).select("id"));
+      await q(sb.from("m_suburb_links").insert({ m_suburb_id: m.id, linz_id: s.linz_id, share_rule: "full" }));
+    }
+    toastMsg(`Saved M_SUBURB for ${s.name}`);
+  } catch (err) { toastMsg("Not saved: " + err.message); }
+});
+function toastMsg(m) { let el = $("#live-toast"); if (!el) { el = document.createElement("div"); el.id = "live-toast"; el.className = "tip"; el.style.cssText = "left:50%;bottom:20px;top:auto;transform:translateX(-50%)"; document.body.appendChild(el); }
+  el.textContent = m; el.classList.add("show"); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove("show"), 2200); }
+
+// ---------------------------------------------------------------- jobs + download panel (editors)
+async function refreshJobs() {
+  if (!can("editor")) return;
+  LIVE.jobs = await q(sb.from("jobs").select("id,type,status,reason,params,created_at,finished_at,not_before").eq("region_id", region).order("id", { ascending: false }).limit(8));
+  const ids = LIVE.jobs.map((j) => j.id);
+  LIVE.runs = ids.length ? await q(sb.from("job_runs").select("job_id,step,status,log,started_at").in("job_id", ids).order("id")) : [];
+  LIVE.usage = await q(sb.from("api_usage").select("service,cost,bytes").eq("period", "day").eq("bucket", today()));
+  const r = await q(sb.from("app_settings").select("value").eq("key", "rates").maybeSingle()); LIVE.rates = (r && r.value) || {};
+  const el = $("#jobs"); if (el) el.innerHTML = jobsHTML();
+  const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML();
+}
+jobsHTML = function () {
+  if (!can("editor")) return "";
+  if (!LIVE.jobs.length) return `<p class="small muted">No jobs for this region yet.</p>`;
+  const tag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "running" ? "warn" : "info"}">${esc(s)}</span>`;
+  return LIVE.jobs.map((j) => `<div class="job" style="display:block"><div class="row" style="justify-content:space-between"><span>#${j.id} ${esc(j.type)} · ${esc(((j.params || {}).steps || []).join(", "))}</span>${tag(j.status)}</div>
+    ${LIVE.runs.filter((r) => r.job_id === j.id).map((r) => `<div class="small muted">${esc(r.step)}: ${tag(r.status)} ${esc((r.log || "").slice(0, 160))}</div>`).join("")}
+    ${j.not_before && j.status !== "done" ? `<div class="small muted">resumes after ${esc(new Date(j.not_before).toLocaleString())}</div>` : ""}</div>`).join("");
+};
+const LIVE_SVCS = [["openmeteo", "Open-Meteo"], ["statsnz_ade", "Stats NZ census API"], ["statsnz_datafinder", "Stats NZ Datafinder"], ["linz_wfs", "LINZ data service"]];
+dlHTML = function () {
+  if (!can("editor")) return `<p class="small muted">Download rates and today's usage are visible to editors.</p>`;
+  const L = D.limits || {}, de = L.defaults || {}, ce = L.ceilings || {};
+  return LIVE_SVCS.map(([k, name]) => {
+    const used = +((LIVE.usage.find((u) => u.service === k) || {}).cost || 0), rate = Math.min((LIVE.rates[k] || {}).per_min || (de[k] || {}).per_min || 60, (ce[k] || {}).per_min || 60);
+    const budget = Math.min((LIVE.rates[k] || {}).budget_day || (de[k] || {}).budget_day || 0, (ce[k] || {}).budget_day || 0), pct = budget ? Math.min(100, 100 * used / budget) : 0;
+    return `<div class="dl-row"><div><b class="small">${name}</b><br><span class="small muted">${fmt(used)} / ${fmt(budget)} today${k === "openmeteo" ? " (weighted)" : ""}</span></div>
+      <div><div class="bar-out" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="${name} usage today"><div class="bar-in" style="width:${pct.toFixed(1)}%;${pct >= 100 ? "background:var(--bad)" : ""}"></div></div>
+      <span class="small muted">${pct >= 100 ? "daily budget used: jobs needing it are parked until tomorrow (UTC)" : `${fmt(budget - used)} left today`}</span></div>
+      <div><label class="small">${fmt(rate)}/min <span class="muted">(default ${fmt((de[k] || {}).per_min)}, ceiling ${fmt((ce[k] || {}).per_min)})</span>
+      <input type="range" min="${Math.max(1, Math.round(((de[k] || {}).per_min || 4) / 4))}" max="${(ce[k] || {}).per_min || 60}" step="1" value="${rate}" data-live-rate="${k}" aria-label="${name} requests per minute"></label></div></div>`;
+  }).join("") + `<p class="small muted" style="margin:8px 0 0">Rates are saved to <code>app_settings.rates</code> and read by the worker before each request, capped at each ceiling. A rate that gets throttled is halved automatically.</p>`;
+};
+document.addEventListener("change", async (e) => {
+  const k = e.target.dataset && e.target.dataset.liveRate; if (!k || !can("editor")) return;
+  const ce = ((D.limits || {}).ceilings || {})[k] || {}; const v = Math.min(+e.target.value, ce.per_min || 60);
+  const next = { ...LIVE.rates, [k]: { ...(LIVE.rates[k] || {}), per_min: v, changed_at: new Date().toISOString(), reason: "user: " + user.email } };
+  try { await q(sb.from("app_settings").upsert({ key: "rates", value: next })); LIVE.rates = next; toastMsg(`${k}: ${fmt(v)}/min saved`); }
+  catch (err) { toastMsg("Not saved: " + err.message); }
+  const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML();
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "queue-live" || !can("editor")) return;
+  const steps = [...document.querySelectorAll("[data-step]:checked")].map((x) => x.value);
+  if (!steps.length) return toastMsg("Choose at least one step");
+  try { await q(sb.from("jobs").insert({ type: "refresh", region_id: region, params: { steps }, status: "queued" })); toastMsg("Job queued: the worker picks it up on its next run"); refreshJobs(); }
+  catch (err) { toastMsg("Not queued: " + err.message); }
+});
+const _vRegion = V.region;
+V.region = () => {
+  const h = _vRegion().replace(/<h3 style="margin-top:14px">Pipeline jobs<\/h3>[\s\S]*?<div id="jobs"/, `<h3 style="margin-top:14px">Pipeline jobs</h3>
+    ${can("editor") ? `<div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
+    <div class="row" style="margin-top:6px"><button class="btn primary" id="queue-live" type="button">Queue job</button><button class="btn" type="button" onclick="refreshJobs()">Refresh</button></div>
+    <p class="small muted">One region per job. The worker (GitHub Actions) runs queued jobs within each service's free-tier budget. LINZ re-loads and imagery runs use the pilot pipeline for now.</p>` : lock("editor", "Queuing jobs")}
+    <div id="jobs"`);
+  setTimeout(refreshJobs, 0);
+  return h;
+};
+
+// ---------------------------------------------------------------- validation: real labelling (labellers)
+const KEYMAP = { pool: { ArrowLeft: "not_pool", ArrowUp: "water", ArrowDown: "unknown", ArrowRight: "pool" }, garden: { ArrowLeft: "over", ArrowUp: "about_right", ArrowDown: "unknown", ArrowRight: "under" } };
+const KEYTXT = { not_pool: "Not pool", water: "Water, not pool", unknown: "Unknown", pool: "Pool", over: "Too much garden", about_right: "About right", under: "Too little garden" };
+async function startLabelling() {
+  const cap = R().capture_id;
+  const items = await q(sb.from("validation_items").select("id,task,grp,chip_path,tool_verdict").eq("capture_id", cap).order("id"));
+  const mine = await q(sb.from("validation_labels").select("item_id").eq("user_id", SESSION.user.id));
+  const done = new Set(mine.map((m) => m.item_id));
+  LIVE.labelQueue = items.filter((i) => !done.has(i.id)); LIVE.labelPos = 0; LIVE.labelling = true; LIVE.total = items.length;
+  await showLabel();
+}
+async function chipUrl(path) {
+  if (!LIVE.chipUrls[path]) { const { data, error } = await sb.storage.from("chips").createSignedUrl(path, 3600); if (error) throw error; LIVE.chipUrls[path] = data.signedUrl; }
+  return LIVE.chipUrls[path];
+}
+async function showLabel() {
+  const el = $("#label-panel"); if (!el) return;
+  const it = LIVE.labelQueue[LIVE.labelPos];
+  if (!it) { el.innerHTML = `<p>Nothing left to label in this capture. Thank you!</p>`; LIVE.labelling = false; return; }
+  const img = await chipUrl(it.chip_path), img2 = it.task === "garden" ? await chipUrl(it.chip_path.replace(/\.jpg$/, "_veg.jpg")).catch(() => null) : null;
+  const keys = KEYMAP[it.task];
+  el.innerHTML = `<p class="small muted">${LIVE.total - LIVE.labelQueue.length + LIVE.labelPos} of ${LIVE.total} labelled by you · ${esc(it.task)} item #${it.id}${it.task === "pool" ? " · candidate in the red circle" : " · section in yellow; green = measured vegetation"}</p>
+    <div class="grid ${img2 ? "g2" : ""}" style="max-width:${img2 ? 720 : 380}px"><div style="position:relative"><img src="${img}" alt="Validation chip" style="width:100%;border-radius:8px;display:block">${it.task === "pool" ? '<span style="position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:2px solid #ff3b30;border-radius:50%"></span>' : ""}</div>
+    ${img2 ? `<img src="${img2}" alt="Vegetation overlay" style="width:100%;border-radius:8px;display:block">` : ""}</div>
+    <div class="keys" style="margin-top:10px">${Object.entries(keys).map(([k, v]) => `<button class="key ${{ ArrowUp: "k-up", ArrowLeft: "k-left", ArrowDown: "k-down", ArrowRight: "k-right" }[k]}" data-label="${v}" type="button"><kbd>${{ ArrowUp: "↑", ArrowLeft: "←", ArrowDown: "↓", ArrowRight: "→" }[k]}</kbd><span class="small">${KEYTXT[v]}</span></button>`).join("")}</div>
+    <p class="small muted">Arrow keys label and advance; Backspace goes back. Labels are saved to your account.</p>`;
+}
+async function saveLabel(label) {
+  const it = LIVE.labelQueue[LIVE.labelPos]; if (!it) return;
+  try { await q(sb.from("validation_labels").upsert({ item_id: it.id, user_id: SESSION.user.id, label }, { onConflict: "item_id,user_id" })); }
+  catch (err) { return toastMsg("Not saved: " + err.message); }
+  LIVE.labelPos++; showLabel();
+}
+document.addEventListener("keydown", (e) => {
+  if (!LIVE.labelling || stage !== "validate" || e.target.matches("input,select,textarea")) return;
+  const it = LIVE.labelQueue[LIVE.labelPos]; if (!it) return;
+  const v = KEYMAP[it.task][e.key];
+  if (v) { e.preventDefault(); saveLabel(v); } else if (e.key === "Backspace" && LIVE.labelPos > 0) { e.preventDefault(); LIVE.labelPos--; showLabel(); }
+});
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-label]"); if (b && LIVE.labelling) return saveLabel(b.dataset.label);
+  if (e.target.id === "start-label") startLabelling().catch((err) => toastMsg(err.message));
+});
+const _vValidate = V.validate;
+V.validate = () => _vValidate().replace(/<div class="card"><h3>Labelling keys<\/h3>[\s\S]*?<\/div>\s*<div class="card"><h3>Quality gate/, () =>
+  `<div class="card"><h3>Label this capture</h3>${can("labeller") ? `<div id="label-panel"><p class="small muted">Image chips are private: they're served to signed-in labellers through short-lived signed links.</p><button class="btn primary" id="start-label" type="button">Start labelling</button></div>` : lock("labeller", "Labelling")}</div>
+  <div class="card"><h3>Quality gate`);
+
+// ---------------------------------------------------------------- admin: approve users, set roles
+V.admin = () => {
+  if (!can("admin")) return lock("admin", "User administration");
+  setTimeout(loadUsers, 0);
+  return `<h1>Admin</h1><p class="lead">New Google sign-ins arrive as <b>viewer</b> / <b>pending</b>. Approve them by setting status to <b>active</b>, and choose a role. Changes are recorded in the audit log.</p><div class="card scroll" id="users"><p class="muted">Loading users…</p></div>`;
+};
+async function loadUsers() {
+  const el = $("#users"); if (!el) return;
+  const us = await q(sb.from("profiles").select("id,email,display_name,role,status,created_at").order("created_at"));
+  el.innerHTML = `<table><thead><tr><th>User</th><th class="l">Role</th><th class="l">Status</th><th>Joined</th><th></th></tr></thead><tbody>${us.map((u) => `<tr>
+    <td class="l">${esc(u.display_name || "")}<br><span class="small muted">${esc(u.email)}</span></td>
+    <td class="l"><select data-urole="${u.id}">${["viewer", "labeller", "editor", "admin"].map((r) => `<option ${r === u.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+    <td class="l"><select data-ustatus="${u.id}">${["pending", "active", "disabled"].map((s) => `<option ${s === u.status ? "selected" : ""}>${s}</option>`).join("")}</select></td>
+    <td>${esc(new Date(u.created_at).toLocaleDateString())}</td><td><button class="btn" data-usave="${u.id}" type="button">Save</button></td></tr>`).join("")}</tbody></table>`;
+}
+document.addEventListener("click", async (e) => {
+  const id = e.target.dataset && e.target.dataset.usave; if (!id || !can("admin")) return;
+  const role = $(`[data-urole="${id}"]`).value, status = $(`[data-ustatus="${id}"]`).value;
+  if (id === SESSION.user.id && (role !== "admin" || status !== "active") && !confirm("This removes your own admin access. Continue?")) return;
+  try { await q(sb.from("profiles").update({ role, status }).eq("id", id)); toastMsg("Saved"); loadUsers(); } catch (err) { toastMsg("Not saved: " + err.message); }
+});
+
+// ---------------------------------------------------------------- header + boot
+const _renderHeader = renderHeader;
+renderHeader = function () {
+  _renderHeader();
+  if (!can("admin")) { const b = document.querySelector('[data-stage="admin"]'); if (b) b.remove(); }
+  $("#who").innerHTML = `${esc(PROFILE.email)} · <span class="tag info">${esc(PROFILE.role)}</span>`;
+  $("#signin").textContent = "Sign out";
+};
+(async function boot() {
+  try {
+    STATIC = await fetch("data/demo.json").then((r) => r.json());
+    const { data: { session } } = await sb.auth.getSession(); SESSION = session;
+    if (!session) return gate("signin");
+    PROFILE = await q(sb.from("profiles").select("email,role,status").eq("id", session.user.id).maybeSingle());
+    if (!PROFILE || PROFILE.status !== "active") return gate("pending");
+    user = { email: PROFILE.email, role: PROFILE.role };
+    $("#main").innerHTML = `<p class="muted">Loading regions…</p>`;
+    D = await loadAll();
+    if (!D.regions[region]) region = Object.keys(D.regions)[0];
+    $("#foot").innerHTML = `Explore NZ Suburb Water · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · <a href="demo/">static demo</a>. Water consumption isn't handled here.`;
+    render();
+  } catch (err) { gate("error", err.message); }
+})();
+
+</script>
+</body>
+</html>
