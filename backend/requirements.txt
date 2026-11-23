@@ -1,0 +1,11 @@
+# Versions the Taupō / Tauranga pilot ran with (2026-11-23)
+numpy==2.5.5
+pandas==3.1.1
+geopandas==1.2.0
+shapely==2.2.0
+pyproj==3.8.0
+pyogrio==0.13.0
+rasterio==1.5.2
+opencv-python-headless==5.1.0.95
+requests==2.34.2
+psycopg[binary]>=3.2

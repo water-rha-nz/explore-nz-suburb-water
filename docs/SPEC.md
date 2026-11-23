@@ -100,6 +100,7 @@ The stage layout of the original tool is kept and extended.
 3. **Allocate:** suburbs, providers and duplicates, as in the reference builder; saved to `m_suburb_links` and `providers`.
 4. **Imagery:** worker runs pools and vegetation per capture, with progress. Calibration is per capture.
 5. **Validate:** the arrow-key labeller (← not pool, ↑ water not pool, ↓ unknown, → pool; gardens ← too much, ↑ about right, → too little, ↓ unknown). Multiple labellers; agreement and per-capture precision / recall shown. Labels feed calibration: thresholds, or a small classifier trained on blob features with a held-out test split.
+   - **Validation pack** (labeller role): exports the imagery tiles flagged for visual validation and the matching outcome format, so validation can also be done outside the app, e.g. in QGIS or by a contractor. See section 19.
 6. **Context:** census (ADE) and climate (Open-Meteo) fetch and refresh; SA2 → suburb apportioning.
 7. **Explore:** maps and tables of `v_suburb_metadata`; distributions; comparison across regions.
 8. **Export:** section 7. A region must be **published** (editor) before viewers can export it.
@@ -223,6 +224,7 @@ Keys live only in Supabase secrets and the worker's environment. They are never 
   - `exports`: read for the owner or editors. Writes only via service role.
 
 ### 12.3 Edge Functions
+> **Revised (section 17):** data connectors run in the Python worker, so the codebase stays single and matches the pilot. Edge Functions stay thin: auth checks, `queue-job`, signed export URLs, and starting worker runs. The `fetch-*` functions below remain an option for light refreshes if a TypeScript port is wanted later.
 | Function | Role required | Does |
 |---|---|---|
 | `fetch-linz` | editor | WFS by region bbox (suburbs, parcels, titles, buildings); upserts with `source_version` |
@@ -272,6 +274,10 @@ ATTRIBUTION.md          source credits (also shipped in every export)
 docs/SPEC.md            this document
 supabase/migrations/    SQL migrations (schema, RLS, functions)
 demo/                   static demo (GitHub Pages): index.html + data/*.json
+index/                  per-region source index: API request templates for 67 TAs (section 18)
+tools/                  build_source_index.py (and, from M2, build_demo_data.py)
+backend/                Python worker: Dockerfile, requirements, package layout (section 17)
+docs/examples/          example GitHub Actions workflow for the worker
 .env.example            client and worker configuration names (no values)
 ```
 **Static demo (`demo/`):** a single HTML page that exemplifies this spec without the stack.
@@ -284,7 +290,7 @@ demo/                   static demo (GitHub Pages): index.html + data/*.json
 ## 15. Milestones
 1. **M1 Foundation:** Supabase project, PostGIS schema, Google Auth, roles and RLS, jobs table, CI.
 2. **M2 Port reference builder:** Load / Allocate / Explore / Export against the database; compatible exports (7a) byte-compatible with the HTML tool, with golden-file tests against `nz_suburb_lookup/data`.
-3. **M3 Connectors:** Edge Functions for ADE, Datafinder, LINZ WFS, Open-Meteo; census metrics; climate daily.
+3. **M3 Connectors:** Python worker connectors driven by `index/source_index.json` (LINZ WFS, Datafinder, ADE, Open-Meteo, imagery STAC); census metrics; climate daily.
 4. **M4 Worker:** imagery pipeline (pools, vegetation) as a containerised job; per-capture calibration.
 5. **M5 Validation:** labeller in the app, multi-user; calibration from labels; quality gates.
 6. **M6 Panel and exports:** `v_suburb_metadata`, panel export, data dictionary, manifests.
@@ -293,8 +299,108 @@ demo/                   static demo (GitHub Pages): index.html + data/*.json
 Pilot data (Taupō and Tauranga: regions, outputs, 552 user labels, 552 Claude labels) is migrated in M1–M5 as seed and test data.
 
 ## 16. Open questions
-1. Hosting for the worker (GitHub Actions minutes vs a small VM vs your machine).
+1. Hosting for the worker. **Recommendation (section 17.4):** GitHub Actions first, then Cloud Run Jobs for national runs. Confirm.
 2. Should viewers need approval, or is any Google account a viewer?
 3. Publish national metadata openly (e.g. a public read-only export bucket) or keep it behind sign-in?
 4. Low-rise vs high-rise split: add LINZ LiDAR heights (M8)?
 5. Supabase plan size: national sections (~2M) plus climate daily (cells × days) fit in Pro; the free tier will not hold national data.
+
+## 17. Back-end: running the Python worker
+### 17.1 Why Python, and what runs where
+The pilot pipeline is Python: GDAL/rasterio, OpenCV, geopandas, pandas and requests. Supabase Edge Functions run Deno (TypeScript) and can't host these libraries. They also have short time limits. So:
+
+| Component | Runtime | Responsibilities |
+|---|---|---|
+| Browser app | static JS | UI; reads data through supabase-js under RLS |
+| Edge Functions | Deno | thin: check the caller's role, insert `jobs`, start a worker run, sign export URLs |
+| **Worker** | **Python 3.12 container** | everything heavy or keyed: connectors (via the source index), imagery (pools, vegetation), census metrics, climate, aggregation, export bundles, validation packs |
+| Postgres (Supabase) | SQL | storage, RLS, `claim_job()`, materialised aggregates |
+
+### 17.2 Package layout (`backend/`)
+```
+backend/
+  Dockerfile              python:3.12-slim + wheels (rasterio, geopandas and pyogrio ship their own GDAL)
+  requirements.txt
+  nzsw/
+    cli.py                nzsw run --ta "Taupo District" --steps linz,census,climate,imagery,aggregate
+                          nzsw worker   (claim and run queued jobs until none remain)
+    index.py              loads index/source_index.json, resolves {placeholders}, runs steps in dependency order
+    keys.py               secrets from env (GitHub/Cloud secrets) or ~/.config files; redact() for logs
+    connectors/           linz.py, statsnz.py, openmeteo.py, imagery_stac.py   (pilot: suburb_pilot/connectors)
+    imagery/              detect.py (windowed COG reads, pools + vegetation), calibrate.py (labels -> thresholds/model)
+    metrics/              census.py (SA2 -> suburb), aggregate.py (section -> suburb), panel.py
+    exports/              writers shared with the demo formats (section 7), validation pack (section 19)
+    db.py                 psycopg via the Supabase connection pooler; COPY for bulk upserts; PostGIS from WKB
+```
+
+### 17.3 Job flow
+1. An editor presses **Queue** in the app. The `queue-job` Edge Function checks `has_role('editor')` and inserts `jobs(type, region_id, params)`.
+2. The function **starts a worker run**, either with a GitHub `repository_dispatch` or `workflow_dispatch` event, or with a Cloud Run Jobs execution. An always-on worker polls instead.
+3. The worker claims work atomically:
+   ```sql
+   create function claim_job() returns jobs language sql as $$
+     update jobs set status = 'running' where id = (
+       select id from jobs where status = 'queued' order by created_at for update skip locked limit 1)
+     returning *; $$;
+   ```
+4. It runs the steps for the region from the source index (section 18). Every write is an **idempotent upsert** keyed on natural keys plus `source_version`, so a failed run can simply be re-run. Per-tile imagery results are kept, so reruns skip finished tiles.
+5. It writes `job_runs` (log, counts, durations) and sets `jobs.status` to `done` or `failed`. The app shows progress through Supabase Realtime on `jobs`.
+6. Database access uses a dedicated Postgres role `worker`, granted insert/update on the data tables and nothing on `profiles` or `audit_log`. That avoids handing the full service-role key to the worker. Storage uploads (chips, exports) use a Storage key scoped to those buckets.
+
+### 17.4 Where to run it
+The **same Docker image** runs on all of these:
+
+| Option | Fit | Limits / cost | Use for |
+|---|---|---|---|
+| **GitHub Actions** (`workflow_dispatch`, `repository_dispatch`, `schedule`) | No infrastructure; the repo is public, so standard runners are free | 6 h per job; about 4 vCPU / 16 GB on public-repo runners; secrets in repo or environment secrets | **M1–M5**: per-TA runs (Taupō imagery about 10 min, Tauranga about 2 min on 4 CPUs); daily climate cron |
+| **Google Cloud Run Jobs** (Sydney region) | Scales out: one task per tile batch, so a national run is parallel; uses the existing Google Cloud account | pay per vCPU-second; long task timeouts; secrets in Secret Manager | **National runs** and large TAs (Auckland) |
+| Small always-on VM (Fly.io, Railway, a Lightsail-type host) | Simplest polling worker | monthly fee even when idle | If runs become frequent |
+| Your own machine | Zero cost; same CLI | manual | One-off national backfills, debugging |
+
+**Recommendation:** start with GitHub Actions, using `docs/examples/worker.yml`. Add Cloud Run Jobs when national coverage begins. Keep the queue in Postgres, so the trigger mechanism can change without touching the app.
+
+Note: pushing files under `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). The example is kept in `docs/examples/` until then.
+
+### 17.5 Scheduled work
+| Task | Trigger |
+|---|---|
+| Climate append (yesterday) | GitHub Actions `schedule` daily, or pg_cron → Edge Function → dispatch |
+| LINZ changesets, STAC poll for new captures | weekly schedule; new captures create a `jobs` row for an editor to approve |
+| Census refresh | manual, per census release |
+
+### 17.6 Local development
+`supabase start` runs the local stack (Postgres + Auth + Storage), then `docker build backend && docker run --env-file .env nzsw run --ta "Taupo District"`. Integration tests use the pilot regions as fixtures. Golden-file tests check that exports are byte-compatible with `suburb_lookup.html`.
+
+## 18. Source index (per-region API requests)
+`index/source_index.json`, generated by `tools/build_source_index.py`, holds every API request needed to prepare each of the **67 TAs served by the 64 providers** in the reference builder's water-rates table. That's 1,002 request templates, and **generating the index calls no data API**. Each entry has:
+- the TA and its Stats NZ TA code, regional council and imagery folders;
+- PRVDR and charging type;
+- the TA's SA2 codes;
+- `requests[]` (service, URL, params/headers, auth, `depends_on`, paging, expected output).
+
+The run order is: LINZ suburbs (filter by TA name; yields the bbox and suburb points) → parcels / titles / buildings / addresses (bbox, paged) → Datafinder SA2 and ADE census (chunks of 150 SA2s) → imagery collection list → STAC items → imagery job → Open-Meteo (at most 100 points per call) → provider pages for rate review. Keys are placeholders resolved from secrets at run time. See `index/README.md` for caveats.
+
+## 19. Validation pack and outcome format
+Labellers can export the tiles flagged for visual validation and get results back in a fixed format. The same item IDs are used in the app, the public demo and the local pilot app.
+
+| File | Contents |
+|---|---|
+| `validation_tiles.csv` | `TILE_ID, REGION, CAPTURE_ID, COG_URL, STAC_URL, MINX, MINY, MAXX, MAXY` (NZTM), `ITEMS, POOL_ACCEPTED, POOL_REJECTED, GARDEN, LABELLED, FLAGS, PRIORITY` |
+| `validation_items.csv` | `ITEM_ID, TILE_ID, REGION, TASK, GROUP, TOOL_VERDICT`, plus `X_NZTM, Y_NZTM, PARCEL_ID, CHIP_URL` **only for signed-in labellers** (omitted in public outputs) |
+| `validation_outcome_template.csv` | `ITEM_ID, TILE_ID, TASK, LABEL, LABELLER, LABELLED_AT, NOTES`, with labels blank |
+| `validation_outcome.schema.json` | JSON Schema 2020-12 for one outcome row; `LABEL` must suit `TASK` |
+
+- **Flags:**
+  - `calibration sample` (every tile with items);
+  - `high miss rate` (at least 3 real pools among rejected candidates, and at least half of them);
+  - `false positives`;
+  - `unlabelled items`.
+- **Priority:** 1 when a tile has any flag beyond the calibration sample.
+- **Item ID:** `v` + the first 10 hex characters of SHA-1 of the internal item key, so IDs are stable and opaque.
+- **Labels:**
+  - pools: `pool`, `not_pool`, `water`, `unknown`;
+  - gardens: `over`, `about_right`, `under`, `unknown`.
+- `LABELLED_AT` is ISO 8601 with a time zone. `unknown` is discarded from the scores.
+- **Import:** an uploaded outcome file is checked against the schema and item list (task match, allowed labels, labeller, timestamp). It's applied to `validation_labels` only if every labelled row is valid. Imported rows record `source = 'outcome-import'` and the labeller.
+- Pilot check: the local app's pack and the demo's pack share all 552 item IDs. The pilot outcome file round-trips with 0 errors, and a corrupted row is rejected.
+

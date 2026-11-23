@@ -1,0 +1,68 @@
+TA,TA_CODE,REGIONAL_COUNCIL,PRVDR,PROVIDER,CHARGING_TYPE,SA2_COUNT,IMAGERY_FOLDERS,REQUESTS
+Far North District,001,Northland Region,FNDC,Far North District Council,Flat + metered,47,northland,15
+Whangarei District,002,Northland Region,WDC_WHG,Whangarei District Council,Metered,45,northland,15
+Kaipara District,003,Northland Region,KDC_KPR,Kaipara District Council,Metered,11,northland,15
+Thames-Coromandel District,011,Waikato Region,TCDC,Thames-Coromandel District Council,Metered,23,waikato,15
+Hauraki District,012,Waikato Region,HDC_HRK,Hauraki District Council,Metered,11,waikato,14
+Waikato District,013,Waikato Region,IAWAI_WDC,IAWAI (Waikato District),Volumetric,43,waikato,14
+Matamata-Piako District,015,Waikato Region,WWL_MPDC,Waikato Waters (Matamata-Piako),Metered,19,waikato,15
+Hamilton City,016,Waikato Region,IAWAI_HAM,IAWAI (Hamilton),Capital value,68,waikato,15
+Waipa District,017,Waikato Region,WWL_WAIPA,Waikato Waters (Waipā),Metered,37,waikato,14
+Otorohanga District,018,Waikato Region,WWL_OTODC,Waikato Waters (Ōtorohanga),Flat,7,waikato,14
+South Waikato District,019,Waikato Region,WWL_SWDC,Waikato Waters (South Waikato),Flat,11,waikato,14
+Waitomo District,020,Waikato Region,WWL_WTMO,Waikato Waters (Waitomo),Flat + excess,8,waikato manawatu-whanganui,15
+Taupo District,021,Waikato Region,TDC,Taupo District Council,Flat,29,waikato bay-of-plenty hawkes-bay manawatu-whanganui,18
+Western Bay of Plenty District,022,Bay of Plenty Region,WBOPDC,Western Bay of Plenty District Council,Metered,28,bay-of-plenty,15
+Tauranga City,023,Bay of Plenty Region,TCC,Tauranga City Council,Volumetric,58,bay-of-plenty,15
+Rotorua District,024,Bay of Plenty Region,RLC,Rotorua Lakes Council,Flat + metered,42,bay-of-plenty waikato,15
+Whakatane District,025,Bay of Plenty Region,WHKDC,Whakatāne District Council,Metered,18,bay-of-plenty,14
+Kawerau District,026,Bay of Plenty Region,KAWDC,Kawerau District Council,Flat,4,bay-of-plenty,14
+Opotiki District,027,Bay of Plenty Region,OPDC,Ōpōtiki District Council,Flat + metered,7,bay-of-plenty,14
+Gisborne District,028,Gisborne Region,GDC_GIS,Gisborne District Council,Flat (metered commercial),28,gisborne,15
+Wairoa District,029,Hawke's Bay Region,WAIRDC,Wairoa District Council,Flat + metered,6,hawkes-bay,14
+Hastings District,030,Hawke's Bay Region,HDC_HST,Hastings District Council,Flat,44,hawkes-bay,14
+Napier City,031,Hawke's Bay Region,NCC_NPR,Napier City Council,Flat,32,hawkes-bay,14
+Central Hawke's Bay District,032,Hawke's Bay Region,CHBDC,Central Hawke's Bay District Council,Flat,7,hawkes-bay,14
+New Plymouth District,033,Taranaki Region,NPDC,New Plymouth District Council,Volumetric,38,taranaki,15
+Stratford District,034,Taranaki Region,SDC_STR,Stratford District Council,Flat,7,taranaki manawatu-whanganui,15
+South Taranaki District,035,Taranaki Region,STDC,South Taranaki District Council,Flat + metered,20,taranaki,15
+Ruapehu District,036,Manawatū-Whanganui Region,RDC_RPH,Ruapehu District Council,Flat,10,manawatu-whanganui,15
+Whanganui District,037,Manawatū-Whanganui Region,WDC_WGN,Whanganui District Council,Flat,28,manawatu-whanganui,14
+Rangitikei District,038,Manawatū-Whanganui Region,RDC_RNG,Rangitīkei District Council,Flat + metered,10,manawatu-whanganui hawkes-bay,16
+Manawatu District,039,Manawatū-Whanganui Region,MDC_MNW,Manawatū District Council,Flat,17,manawatu-whanganui,14
+Palmerston North City,040,Manawatū-Whanganui Region,PNCC,Palmerston North City Council,Flat,41,manawatu-whanganui,14
+Tararua District,041,Manawatū-Whanganui Region,TDC_TRR,Tararua District Council,Flat + metered,12,manawatu-whanganui wellington,15
+Horowhenua District,042,Manawatū-Whanganui Region,HDC_HRW,Horowhenua District Council,Flat + excess,22,manawatu-whanganui,15
+Kapiti Coast District,043,Wellington Region,KCDC,Kapiti Coast District Council,Volumetric,25,wellington,14
+Porirua City,044,Wellington Region,TIAKIWAI,Tiaki Wai,Capital value,27,wellington,15
+Upper Hutt City,045,Wellington Region,TIAKIWAI,Tiaki Wai,Capital value,19,wellington,15
+Hutt City,046,Wellington Region,TIAKIWAI,Tiaki Wai,Capital value,45,wellington,15
+Wellington City,047,Wellington Region,TIAKIWAI,Tiaki Wai,Capital value,86,wellington,15
+Masterton District,048,Wellington Region,MSTN,Masterton District Council,Flat + metered,15,wellington,14
+Carterton District,049,Wellington Region,CDC_CTN,Carterton District Council,Flat + excess,5,wellington,14
+South Wairarapa District,050,Wellington Region,SWDC_SWR,South Wairarapa District Council,Flat + excess,7,wellington,14
+Tasman District,051,Tasman Region,TSDC,Tasman District Council,Metered,36,tasman,14
+Nelson City,052,Nelson Region,NCC,Nelson City Council,Volumetric,27,nelson,14
+Marlborough District,053,Marlborough Region,MDC_MLB,Marlborough District Council,Flat + metered,26,marlborough,15
+Kaikoura District,054,Canterbury Region,KHWS_KKR,Kaikōura Hurunui Water Services (Kaikōura),Flat,2,canterbury,14
+Buller District,055,West Coast Region,BDC_BLR,Buller District Council,Flat + metered,9,west-coast,15
+Grey District,056,West Coast Region,GDC_GRY,Grey District Council,Flat,14,west-coast,14
+Westland District,057,West Coast Region,WSTDC,Westland District Council,Flat,9,west-coast,14
+Hurunui District,058,Canterbury Region,KHWS_HRN,Kaikōura Hurunui Water Services (Hurunui),Flat,9,canterbury,15
+Waimakariri District,059,Canterbury Region,WMKDC,Waimakariri District Council,Flat,37,canterbury,14
+Christchurch City,060,Canterbury Region,CCC,Christchurch City Council,Capital value + excess,179,canterbury,20
+Selwyn District,062,Canterbury Region,SELWYN,Selwyn Water,Volumetric + fixed,36,canterbury,15
+Ashburton District,063,Canterbury Region,ADC_ASH,Ashburton District Council,Flat,20,canterbury,14
+Timaru District,064,Canterbury Region,TDC_TMR,Timaru District Council,Flat,29,canterbury,14
+Mackenzie District,065,Canterbury Region,MCKDC,Mackenzie District Council,Flat,6,canterbury,15
+Waimate District,066,Canterbury Region,WMTDC,Waimate District Council,Flat,8,canterbury,14
+Chatham Islands Territory,067,Area Outside Region,CIC,Chatham Islands Council,Flat,2,chatham-islands,15
+Waitaki District,068,Canterbury Region,WTKDC,Waitaki District Council,Flat,17,otago canterbury,16
+Central Otago District,069,Otago Region,CODC,Central Otago District Council,Flat + metered,11,otago,15
+Queenstown-Lakes District,070,Otago Region,QLDC,Queenstown Lakes District Council,Flat,32,otago,14
+Dunedin City,071,Otago Region,DCC,Dunedin City Council,Flat,68,otago,14
+Clutha District,072,Otago Region,CLDC,Clutha District Council,Flat + metered,12,otago,14
+Southland District,073,Southland Region,SDC_STH,Southland District Council,Flat,26,southland,15
+Gore District,074,Southland Region,GDC_GOR,Gore District Council,Flat,9,southland,15
+Invercargill City,075,Southland Region,ICC,Invercargill City Council,Flat,28,southland,14
+Auckland,076,Auckland Region,WATERCARE,Watercare,Volumetric,633,auckland,34
