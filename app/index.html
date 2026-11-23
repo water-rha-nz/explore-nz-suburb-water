@@ -810,7 +810,7 @@ const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
 V.region = () => {
-  setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
+  setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel, MAPV.selSet); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
   const regs = studyRegions(), st = studyOf();
   if (!regs.length) return `<h1>1 · Overview</h1><p class="lead">${st ? `The study <b>${esc(st.name)}</b> has no prepared data in the database yet. Its ${(st.ta_codes || []).length} TA(s) are outlined on the map; prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.` : "No prepared data in the database yet. Prepare regions in <b>2 · Configure</b> and <b>3 · Load</b>."}</p>
     <div style="margin-top:12px">${dataMapHTML()}</div>${sourcesHTML()}`;
@@ -1830,8 +1830,10 @@ const SRC_N = Object.fromEntries(Object.keys(SRC).map((k, i) => [k, i + 1]));
 const srcRef = (keys) => `<sup class="muted">${[].concat(keys).filter((k) => SRC_N[k]).map((k) => `<a href="#src-${k}" title="${esc(SRC[k][0])}" style="text-decoration:none">${SRC_N[k]}</a>`).join(",")}</sup>`;
 const srcLink = (k) => SRC[k] ? `<a href="${SRC[k][1]}" target="_blank" rel="noopener">${esc(SRC[k][0])}</a>` : "";
 const jget = (k, d) => { try { return JSON.parse(store.get(k, JSON.stringify(d))); } catch (_) { return d; } };
+// radar wedges: statistics about the built and lived-in space; climate, pools and green space have their own symbols
+const SPATIAL = ["owner", "separate", "bedrooms", "density", "lot"];
 const MAPV = { fill: store.get("map-fill", "hh_size"), year: store.get("map-year", ""), layout: store.get("map-layout", "geo"), glyph: store.get("map-glyph", "colour"),
-  axes: jget("map-axes", ["hh_size", "income", "garden", "pool", "rain"]), sizeBy: store.get("map-size", "none"), pres: new Set(jget("map-pres", ["pools", "green"])),
+  axes: (() => { const a = jget("map-axes", SPATIAL).filter((k) => SPATIAL.includes(k)); return a.length ? a : SPATIAL.slice(); })(), sizeBy: store.get("map-size", "none"), pres: new Set(jget("map-pres", ["pools", "green", "rain", "temp", "et0", "radar"])),
   labels: store.get("map-labels", "1") === "1", info: null, dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
 const cenOf = (s) => { const c = s.census || {}; const y = MAPV.year && c[MAPV.year] ? MAPV.year : Object.keys(c).sort().pop(); return y ? c[y] : {}; };
 // suburb statistics: [key, label, digits, value(s), sources, diverging]
@@ -1847,6 +1849,7 @@ const FILLS = [
   ["garden", "Median garden per section (m²)", 0, (s) => s.GardSize, ["imagery", "linz_parcels", "linz_buildings"]],
   ["pool", "Sections with a pool (%)", 1, (s) => s.PercPool, ["imagery", "linz_parcels"]],
   ["rain", "Annual rainfall (mm)", 0, (s) => s.climate_annual && s.climate_annual.rain_mm, ["openmeteo"]],
+  ["tmean", "Mean temperature (°C)", 1, (s) => s.climate_annual && s.climate_annual.tmean_c, ["openmeteo"]],
   ["et0", "Annual evapotranspiration ET₀ (mm)", 0, (s) => s.climate_annual && s.climate_annual.et0_mm, ["openmeteo"]],
   ["deficit", "Rainfall − ET₀ (mm/yr)", 0, (s) => s.climate_annual && s.climate_annual.rain_mm - s.climate_annual.et0_mm, ["openmeteo"], true],
 ];
@@ -1862,6 +1865,7 @@ const INFO = {
   lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded.",
   garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints.",
   pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples).",
+  tmean: "Mean air temperature for the suburb's climate grid cell (about 9 km), averaged over 2008–2025, from ERA5 reanalysis via Open-Meteo.",
   rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo.",
   et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall.",
   deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus.",
@@ -2009,7 +2013,7 @@ async function drawDataMap() {
   const stTas = (BATCH.tas || []).filter(inStudy);
   const all = subs.length ? mapBox(subs.map(({ s }) => s.geom)) : stTas.length ? mapBox(stTas.map((t) => t.geom.coordinates)) : mapBox((BATCH.tas || []).map((t) => t.geom.coordinates));
   const nz = (BATCH.tas || []).length ? mapBox(BATCH.tas.map((t) => t.geom.coordinates)) : all;
-  host.innerHTML = zoomMap("ovw", [...base, ...outl], nz).replace("</svg>", '<g id="mv-glyph"></g><g id="mv-pres" style="pointer-events:none"></g><g id="mv-lab" style="pointer-events:none"></g></svg>').replace('data-zoom="sel">Selection', 'data-zoom="sel">Data');
+  host.innerHTML = zoomMap("ovw", [...base, ...outl], nz).replace("</svg>", '<g id="mv-glyph"></g><g id="mv-pres"></g><g id="mv-lab" style="pointer-events:none"></g></svg>').replace('data-zoom="sel">Selection', 'data-zoom="sel">Data');
   const svg = host.querySelector("svg"), sk = st ? String(st.id) : "";
   if (svg) { if (!(BATCH.view && BATCH.view.id === "ovw") || MAPV.study !== sk) { MAPV.study = sk; setView(svg, all); } else dynLayers(svg, BATCH.view.box); }
   legendHTML();
@@ -2073,7 +2077,7 @@ async function fetchPresence(svg, regs, step) {
 function dynLayers(svg, box) {
   const gG = svg.querySelector("#mv-glyph"), gP = svg.querySelector("#mv-pres"), gL = svg.querySelector("#mv-lab"); if (!gG) return;
   const px = box[2] / Math.max(1, svg.getBoundingClientRect().width || 800);   // metres per screen pixel
-  gG.innerHTML = glyphs(box, px);
+  gG.innerHTML = glyphs(box, px); const level = zoomLevel(box, px);
   let chips = "";
   if (box[2] <= 2500) {   // full zoom: single pools and gardens, and imagery chips (property-level: editors / labellers)
     const key = box.map((v) => Math.round(v / 250)).join(","), it = MAPV.items[key];
@@ -2081,8 +2085,8 @@ function dynLayers(svg, box) {
         chips += `<g><image href="${esc(u)}" x="${c.x - w / 2}" y="${-c.y - w / 2}" width="${w}" height="${w}" preserveAspectRatio="xMidYMid slice" opacity=".95"/><rect x="${c.x - w / 2}" y="${-c.y - w / 2}" width="${w}" height="${w}" fill="none" stroke="${c.task === "pool" ? PRES.pools[1] : PRES.green[1]}" stroke-width="${2 * px}"><title>${c.task === "pool" ? "Pool" : "Garden"} validation chip (placement approximate)${c.tool_verdict ? ": tool says " + esc(c.tool_verdict) : ""}</title></rect></g>`; }
       MAPV.note = (it.pools.length + (it.greens || []).length + it.chips.length) ? `In view: ${fmt(it.pools.length)} pools, ${fmt((it.greens || []).length)} gardens, ${fmt(it.chips.length)} imagery chips.` : can("editor") ? "No pools, gardens or imagery chips in view." : "Single pools and gardens are visible to editors; zoom out for grouped dots.";
     } else { MAPV.note = "Loading pools, gardens and imagery in view…"; clearTimeout(MAPV.fetchT); MAPV.fetchT = setTimeout(() => fetchItems(svg, box, key), 250); }
-  } else MAPV.note = MAPV.pres.size ? `Dots grouped per ${fmt(Math.max(100, niceStep(30 * px)))} m cell.` : "";
-  gP.innerHTML = chips + presenceLayer(svg, box, px);
+  } else MAPV.note = !MAPV.pres.size ? "" : level === "cells" ? `Pools and green space grouped per ${fmt(Math.max(100, niceStep(30 * px)))} m cell; one symbol per suburb.` : "Nearby suburbs merged into one symbol; hover to enlarge, click for the summary.";
+  gP.innerHTML = chips + (level === "groups" ? "" : `<g style="pointer-events:none">${presenceLayer(svg, box, px)}</g>`) + (level === "items" ? "" : `<g id="mv-sym" style="pointer-events:auto">${symbolLayer(box, px, level)}</g>`);
   let lab = "";
   if (MAPV.labels && box[2] < 80000) { const G = MAPV.layout === "tiles" ? tileGrid() : null;
     for (const { s } of allSubs()) { const [x, y] = G ? G.pos.get(s.linz_id) || centroid(s) : centroid(s); if (x < box[0] || x > box[0] + box[2] || -y < box[1] || -y > box[1] + box[3]) continue;
@@ -2121,8 +2125,8 @@ function legendHTML() {
         return `<button type="button" data-mvfill="${x[0]}" aria-pressed="${on}" style="display:block;width:100%;text-align:left;border:1px solid ${on ? "var(--accent)" : "transparent"};background:${on ? "var(--accent-soft)" : "transparent"};border-radius:6px;padding:1px 6px;cursor:pointer;font:inherit;color:inherit">${esc(x[1])}${srcRef(x[4])}</button>`; }).join("")}`; }).join("")}</div>`;
   } else if (MAPV.glyph === "radar") {
     const axes = MAPV.axes.map(fillOf).filter((x) => x[3]);
-    h += `<p class="muted" style="margin:6px 0 2px">Each wedge is one statistic, reaching from the suburb's centre toward its edge: the further, the higher the value among the suburbs shown (up to 6).</p>
-      ${FILLS.filter((x) => x[3]).map((x) => { const i = axes.findIndex((a) => a[0] === x[0]), on = i >= 0;
+    h += `<p class="muted" style="margin:6px 0 2px">Each wedge is one spatial statistic, reaching from the suburb's centre toward its edge: the further, the higher the value among the suburbs shown. Climate, pools and green space are shown as their own symbols.</p>
+      ${FILLS.filter((x) => SPATIAL.includes(x[0])).map((x) => { const i = axes.findIndex((a) => a[0] === x[0]), on = i >= 0;
         return `<label style="display:block"><input type="checkbox" data-mvaxis="${x[0]}" ${on ? "checked" : ""} ${!on && axes.length >= 6 ? "disabled" : ""}> ${on ? `<i style="display:inline-block;width:10px;height:10px;background:${AXIS_COL[i]};vertical-align:-1px"></i> ` : ""}${esc(x[1])}</label>`; }).join("")}
       ${axes.map((x, i) => spectrumHTML(scaleFor(x), [interp(["#ffffff", AXIS_COL[i]], 0.3), AXIS_COL[i]], x[1], x[4])).join("")}`;
   } else {
@@ -2131,24 +2135,137 @@ function legendHTML() {
   }
   h += `${hd(MAPV.layout === "tiles" ? "Tile size" : "Scale suburbs by (cartogram)")}${MAPV.layout === "tiles" ? infoBtn("size:tiles") + infoBox("size:tiles") : ""}
     ${SIZES.map(([k, l, , src]) => `<label style="display:block"><input type="radio" name="mv-size" data-mvsize="${k}" ${k === MAPV.sizeBy ? "checked" : ""}> ${k === "none" ? (MAPV.layout === "tiles" ? "Equal tiles" : "Real area") : "Area ∝ " + l.toLowerCase()}${src ? srcRef(src) : ""}${infoBtn("size:" + k)}</label>${infoBox("size:" + k)}`).join("")}
-    ${hd("Where they are")}${Object.entries(PRES).map(([k, [l, c]]) => `<label style="display:block"><input type="checkbox" data-mvpres="${k}" ${MAPV.pres.has(k) ? "checked" : ""}> <span style="color:${c};font-size:15px">●</span> ${l}${srcRef(["imagery", "linz_parcels"])} <span class="muted">${k === "pools" ? "dot ∝ number of pools" : "dot ∝ garden area"}</span></label>`).join("")}
+    ${hd("Symbols")}<p class="muted" style="margin:0 0 3px">Merge with nearby suburbs as you zoom out; hover to enlarge, click for the summary.</p>
+    ${Object.entries(SYM).map(([k, [l, c]]) => `<label style="display:block"><input type="checkbox" data-mvpres="${k}" ${MAPV.pres.has(k) ? "checked" : ""}> ${symIcon(k)} ${l}${srcRef(k === "pools" || k === "green" ? ["imagery", "linz_parcels"] : k === "radar" ? ["cen_hou020", "linz_titles", "linz_parcels"] : ["openmeteo"])} <span class="muted">${{ pools: "size ∝ pools", green: "size ∝ green area", rain: "fill ∝ rainfall", temp: "fill ∝ temperature", et0: "more wisps = more ET₀", radar: "wedges: spatial statistics" }[k]}</span></label>`).join("")}
     <label style="display:block;margin-top:4px"><input type="checkbox" id="mv-labels" ${MAPV.labels ? "checked" : ""}> Suburb names${srcRef("linz_suburbs")}</label>
     <div id="mv-note" class="muted" style="margin-top:6px">${esc(MAPV.note)}</div>`;
   el.innerHTML = h;
 }
-function suburbInfo(id) {
+// ---------------------------------------------------------------- summary symbols (aggregate with zoom)
+// One symbol per group of suburbs: a radar of the spatial statistics, a pool dot and a green-space dot on its left, and the
+// climate on its right (a water drop filled by rainfall, a thermometer filled by temperature, rising vapour for ET₀).
+// Zoomed out, nearby suburbs merge into one symbol; zoomed in, one per suburb; a symbol expands on hover.
+const SYM = { pools: ["Pools", "#0b6fb8"], green: ["Green space", "#2f9a3e"], rain: ["Rainfall", "#2b7bba"], temp: ["Temperature", "#d7301f"], et0: ["Evapotranspiration (ET₀)", "#7a5195"], radar: ["Spatial radar", "#555"] };
+const weightOf = (s) => Math.max(1, +s.sections || 0);
+// section-weighted means of every statistic, and totals of pools, green space and sections
+function aggregate(list) {
+  const out = { n: list.length, sections: 0, pools: 0, green: 0, names: list.map((s) => s.name) };
+  for (const s of list) { out.sections += +s.sections || 0; out.pools += +s.pools || 0; out.green += (+s.sections || 0) * (+s.GardSize || 0); }
+  for (const f of FILLS) { if (!f[3]) continue; let t = 0, w = 0; for (const s of list) { const v = f[3](s); if (finite(v)) { t += v * weightOf(s); w += weightOf(s); } } out[f[0]] = w ? t / w : null; }
+  return out;
+}
+let SYMSTYLE = false;
+function symStyle() { if (SYMSTYLE || !document.head || !document.createElement) return; SYMSTYLE = true; const st = document.createElement("style");
+  st.textContent = ".mv-sym{transform-box:fill-box;transform-origin:center;transition:transform .15s ease;cursor:pointer}.mv-sym:hover{transform:scale(2.2)}#mv-sym g.mv-sym:hover{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}";
+  document.head.appendChild(st); }
+const tOf = (key, v) => { const sc = scaleFor(fillOf(key)); return sc ? sc.t(v) : null; };
+function symbolSVG(x, y, a, px, ids, maxPools, maxGreen) {
+  const P = MAPV.pres, R = 13 * px, parts = [];
+  const axes = MAPV.axes.map(fillOf).filter((f) => f[3]);
+  if (P.has("radar") && axes.length) {
+    parts.push(`<circle cx="${x}" cy="${-y}" r="${R}" fill="var(--panel)" fill-opacity=".9" stroke="var(--ink)" stroke-opacity=".35" stroke-width="${0.8 * px}"/>`);
+    axes.forEach((f, i) => { const t = tOf(f[0], a[f[0]]); if (t == null) return; const r = R * (0.22 + 0.78 * t), a0 = (90 - i * 360 / axes.length) * Math.PI / 180, a1 = (90 - (i + 1) * 360 / axes.length) * Math.PI / 180;
+      parts.push(`<path d="M${x},${-y}L${x + Math.cos(a0) * r},${-(y + Math.sin(a0) * r)}A${r},${r} 0 0 1 ${x + Math.cos(a1) * r},${-(y + Math.sin(a1) * r)}Z" fill="${AXIS_COL[i % AXIS_COL.length]}" fill-opacity=".9" stroke="#fff" stroke-width="${0.5 * px}"/>`); }); }
+  const L = x - R - 9 * px, Rt = x + R + 8 * px;
+  if (P.has("pools") && a.pools > 0) parts.push(`<circle cx="${L}" cy="${-(y + 6 * px)}" r="${Math.max(2.5, 8 * Math.sqrt(a.pools / maxPools)) * px}" fill="${SYM.pools[1]}" stroke="#fff" stroke-width="${0.8 * px}"/>`);
+  if (P.has("green") && a.green > 0) parts.push(`<circle cx="${L}" cy="${-(y - 7 * px)}" r="${Math.max(2.5, 8 * Math.sqrt(a.green / maxGreen)) * px}" fill="${SYM.green[1]}" fill-opacity=".8" stroke="#fff" stroke-width="${0.8 * px}"/>`);
+  if (P.has("rain") && finite(a.rain)) { const t = tOf("rain", a.rain) ?? 0.5, top = -(y + 13 * px), h = 13 * px, cid = `dr${ids[0]}`;
+    const drop = `M${Rt},${top} C${Rt + 6 * px},${top + 6 * px} ${Rt + 6 * px},${top + h} ${Rt},${top + h} C${Rt - 6 * px},${top + h} ${Rt - 6 * px},${top + 6 * px} ${Rt},${top}Z`;
+    parts.push(`<clipPath id="${cid}"><path d="${drop}"/></clipPath><path d="${drop}" fill="#fff" stroke="${SYM.rain[1]}" stroke-width="${1.1 * px}"/><rect clip-path="url(#${cid})" x="${Rt - 7 * px}" y="${top + h * (1 - (0.15 + 0.85 * t))}" width="${14 * px}" height="${h}" fill="${SYM.rain[1]}"/>`); }
+  if (P.has("temp") && finite(a.tmean)) { const t = tOf("tmean", a.tmean) ?? 0.5, tx = Rt + 9 * px, top = -(y + 12 * px), h = 17 * px;
+    parts.push(`<rect x="${tx - 1.8 * px}" y="${top}" width="${3.6 * px}" height="${h}" rx="${1.8 * px}" fill="#fff" stroke="${SYM.temp[1]}" stroke-width="${0.9 * px}"/><rect x="${tx - 1 * px}" y="${top + h * (1 - (0.2 + 0.8 * t))}" width="${2 * px}" height="${h * (0.2 + 0.8 * t)}" fill="${SYM.temp[1]}"/><circle cx="${tx}" cy="${top + h + 1.5 * px}" r="${3 * px}" fill="${SYM.temp[1]}"/>`); }
+  if (P.has("et0") && finite(a.et0)) { const t = tOf("et0", a.et0) ?? 0.5, n = 1 + Math.round(2 * t), bx = Rt - 4 * px, by = -(y - 9 * px);
+    parts.push(`<line x1="${bx - 1 * px}" y1="${by + 6 * px}" x2="${bx + 16 * px}" y2="${by + 6 * px}" stroke="${SYM.et0[1]}" stroke-width="${1.6 * px}"/>`);
+    for (let i = 0; i < n; i++) { const wx = bx + (2 + i * 5) * px; parts.push(`<path d="M${wx},${by + 4 * px} q${2.5 * px},${-2.5 * px} 0,${-5 * px} q${-2.5 * px},${-2.5 * px} 0,${-5 * px}" fill="none" stroke="${SYM.et0[1]}" stroke-opacity="${0.55 + 0.45 * t}" stroke-width="${1.4 * px}" stroke-linecap="round"/>`); } }
+  if (!parts.length) return "";
+  const tip = `${a.n > 1 ? `${a.n} suburbs: ${a.names.slice(0, 6).join(", ")}${a.n > 6 ? "…" : ""}` : a.names[0]}\n${fmt(a.sections)} sections · ${fmt(a.pools)} pools · ≈ ${fmt(a.green / 1e4, 1)} ha green\n`
+    + axes.map((f) => `${f[1]}: ${finite(a[f[0]]) ? fmt(a[f[0]], f[2]) : "–"}`).join("\n")
+    + `\nRain ${finite(a.rain) ? fmt(a.rain) + " mm" : "–"} · temperature ${finite(a.tmean) ? fmt(a.tmean, 1) + " °C" : "–"} · ET₀ ${finite(a.et0) ? fmt(a.et0) + " mm" : "–"}\nClick for the summary`;
+  return `<g class="mv-sym" data-mvsub="${ids[0]}" data-mvset="${ids.join(",")}"><title>${esc(tip)}</title>${parts.join("")}</g>`;
+}
+// small legend icons matching the map symbols
+const symIcon = (k) => `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="vertical-align:-3px">${{
+  pools: `<circle cx="8" cy="8" r="5" fill="${SYM.pools[1]}"/>`, green: `<circle cx="8" cy="8" r="5" fill="${SYM.green[1]}" fill-opacity=".8"/>`,
+  rain: `<path d="M8,1 C12,6 12,14 8,14 C4,14 4,6 8,1Z" fill="#fff" stroke="${SYM.rain[1]}"/><rect x="4" y="8" width="8" height="6" fill="${SYM.rain[1]}" clip-path="inset(0 round 3px)"/>`,
+  temp: `<rect x="6.5" y="1" width="3" height="11" rx="1.5" fill="#fff" stroke="${SYM.temp[1]}"/><rect x="7.2" y="5" width="1.6" height="7" fill="${SYM.temp[1]}"/><circle cx="8" cy="13" r="2.5" fill="${SYM.temp[1]}"/>`,
+  et0: `<line x1="2" y1="14" x2="14" y2="14" stroke="${SYM.et0[1]}" stroke-width="1.5"/>${[4, 8, 12].map((x) => `<path d="M${x},12 q2,-2 0,-4 q-2,-2 0,-4" fill="none" stroke="${SYM.et0[1]}" stroke-width="1.3" stroke-linecap="round"/>`).join("")}`,
+  radar: `<circle cx="8" cy="8" r="6.5" fill="none" stroke="#999"/>${[0, 1, 2, 3, 4].map((i) => { const a0 = (-90 + i * 72) * Math.PI / 180, a1 = (-90 + (i + 1) * 72) * Math.PI / 180, r = [6, 4, 5, 3, 5.5][i]; return `<path d="M8,8L${8 + Math.cos(a0) * r},${8 + Math.sin(a0) * r}A${r},${r} 0 0 1 ${8 + Math.cos(a1) * r},${8 + Math.sin(a1) * r}Z" fill="${AXIS_COL[i]}"/>`; }).join("")}`,
+}[k] || ""}</svg>`;
+// screen-space grouping: suburbs whose centres fall within ~60 px merge (largest first)
+function clusters(subs, px) {
+  const out = [], R = 60 * px;
+  for (const o of subs.slice().sort((a, b) => weightOf(b.s) - weightOf(a.s))) { const [x, y] = centroid(o.s);
+    const c = out.find((k) => Math.hypot(k.x - x, k.y - y) < R);
+    if (c) { const w0 = c.w, w1 = weightOf(o.s); c.x = (c.x * w0 + x * w1) / (w0 + w1); c.y = (c.y * w0 + y * w1) / (w0 + w1); c.w += w1; c.subs.push(o.s); }
+    else out.push({ x, y, w: weightOf(o.s), subs: [o.s] }); }
+  return out;
+}
+// the zoom level decides how much is merged: single items (full zoom), per-cell dots plus a symbol per suburb (suburbs large on
+// screen), or one merged symbol per group of nearby suburbs
+function zoomLevel(box, px) {
+  if (box[2] <= 2500) return "items";
+  const d = allSubs().map(({ s }) => Math.sqrt(areaOf(s)) / px).sort((a, b) => a - b), med = d.length ? d[Math.floor(d.length / 2)] : 0;
+  return med >= 260 ? "cells" : "groups";
+}
+function symbolLayer(box, px, level) {
+  if (!MAPV.pres.size || MAPV.layout === "tiles") return "";
+  symStyle();
+  const subs = allSubs().filter(({ s }) => inView(bboxOf(s), box, 0.05));
+  const groups = level === "groups" ? clusters(subs, px) : subs.map(({ s }) => { const [x, y] = centroid(s); return { x, y, subs: [s] }; });
+  const aggs = groups.map((c) => aggregate(c.subs));
+  const maxPools = Math.max(1, ...aggs.map((a) => a.pools)), maxGreen = Math.max(1, ...aggs.map((a) => a.green));
+  if (level === "cells") { const keep = MAPV.pres; MAPV.pres = new Set([...keep].filter((k) => k !== "pools" && k !== "green")); const h = groups.map((c, i) => symbolSVG(c.x, c.y, aggs[i], px, c.subs.map((s) => s.linz_id), maxPools, maxGreen)).join(""); MAPV.pres = keep; return h; }
+  return groups.map((c, i) => symbolSVG(c.x, c.y, aggs[i], px, c.subs.map((s) => s.linz_id), maxPools, maxGreen)).join("");
+}
+
+// ---------------------------------------------------------------- summary of a clicked suburb
+// Radars for the suburb, its provider, its island and all suburbs in the database, and a table placing the suburb in each
+// group's distribution (box and whisker, with its rank).
+const COMPARE_AXES = [...SPATIAL, "garden", "pool"];
+const islandOf = (g) => !g || !g.ta_code ? null : +g.ta_code < 50 ? "North Island" : "South Island";
+const everySub = () => Object.entries(D.regions || {}).flatMap(([k, g]) => g.suburbs.map((s) => ({ s, k, g })));
+const quant = (v, p) => { const i = (v.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i); return v[lo] + (v[hi] - v[lo]) * (i - lo); };
+function boxHTML(vals, x, digits, label) {
+  const v = vals.filter(finite).sort((a, b) => a - b); if (v.length < 2 || !finite(x)) return `<span class="muted">${v.length < 2 ? "too few" : "–"}</span>`;
+  const lo = v[0], hi = v[v.length - 1], sp = hi - lo || 1, W = 110, X = (z) => 4 + (W - 8) * (z - lo) / sp;
+  const q1 = quant(v, 0.25), md = quant(v, 0.5), q3 = quant(v, 0.75), rank = v.filter((z) => z > x).length + 1;
+  return `<span style="white-space:nowrap"><svg width="${W}" height="16" viewBox="0 0 ${W} 16" role="img" aria-label="${esc(label)}: rank ${rank} of ${v.length}" style="vertical-align:middle">
+    <title>${esc(label)}: min ${fmt(lo, digits)}, lower quartile ${fmt(q1, digits)}, median ${fmt(md, digits)}, upper quartile ${fmt(q3, digits)}, max ${fmt(hi, digits)}; this suburb ${fmt(x, digits)} (rank ${rank} of ${v.length})</title>
+    <line x1="${X(lo)}" y1="8" x2="${X(hi)}" y2="8" stroke="var(--muted,#888)" stroke-width="1"/><line x1="${X(lo)}" y1="4" x2="${X(lo)}" y2="12" stroke="var(--muted,#888)"/><line x1="${X(hi)}" y1="4" x2="${X(hi)}" y2="12" stroke="var(--muted,#888)"/>
+    <rect x="${X(q1)}" y="3" width="${Math.max(1, X(q3) - X(q1))}" height="10" fill="var(--accent-soft)" stroke="var(--accent)"/><line x1="${X(md)}" y1="3" x2="${X(md)}" y2="13" stroke="var(--accent)" stroke-width="1.5"/>
+    <path d="M${X(x)},2 l4,6 -4,6 -4,-6z" fill="#d7301f" stroke="#fff" stroke-width=".8"/></svg> <span class="muted">${rank}/${v.length}</span></span>`;
+}
+function miniRadar(title, colour, vals, ref) {
+  const S = 150, c = S / 2, R = 52, k = COMPARE_AXES.length, pt = (i, t) => { const a = (-90 + i * 360 / k) * Math.PI / 180; return [c + Math.cos(a) * R * t, c + Math.sin(a) * R * t]; };
+  const poly = (vs) => vs.map((t, i) => pt(i, t == null ? 0 : 0.08 + 0.92 * t).map((z) => z.toFixed(1)).join(",")).join(" ");
+  let h = `<svg width="${S}" height="${S + 18}" viewBox="0 0 ${S} ${S + 18}" role="img" aria-label="${esc(title)}"><text x="${c}" y="12" text-anchor="middle" font-size="11" font-weight="600" fill="var(--ink)">${esc(title)}</text><g transform="translate(0,14)">`;
+  for (const r of [0.25, 0.5, 0.75, 1]) h += `<polygon points="${poly(Array(k).fill(r - 0.08 * (1 - r)))}" fill="none" stroke="var(--line)" stroke-width=".7"/>`;
+  COMPARE_AXES.forEach((key, i) => { const [x, y] = pt(i, 1.18), f = fillOf(key); h += `<line x1="${c}" y1="${c}" x2="${pt(i, 1)[0]}" y2="${pt(i, 1)[1]}" stroke="var(--line)" stroke-width=".7"/><text x="${x}" y="${y + 3}" font-size="8.5" text-anchor="middle" fill="var(--muted,#777)">${esc(f[1].split(" (")[0].replace("Median ", "").replace(" per dwelling", "").replace("Owner-occupied households", "Owner-occ.").replace("Sections with a pool", "Pools").replace("Separate houses", "Separate").replace(" per section", ""))}</text>`; });
+  if (ref) h += `<polygon points="${poly(ref)}" fill="none" stroke="#d7301f" stroke-width="1.3" stroke-dasharray="3 2"/>`;
+  h += `<polygon points="${poly(vals)}" fill="${colour}" fill-opacity=".35" stroke="${colour}" stroke-width="1.6"/></g></svg>`;
+  return h;
+}
+function suburbInfo(id, set) {
   const el = $("#mv-info"); if (!el) return;
-  const hit = allSubs().find(({ s }) => String(s.linz_id) === String(id)); if (!hit) { el.innerHTML = ""; return; }
-  const { s, g } = hit, c = cenOf(s), w = (D.water_rates || []).find((x) => x.PROVIDER === g.provider) || {};
-  const row = (l, v, d, src) => `<tr><td class="l">${l}${src ? srcRef(src) : ""}</td><td>${v == null || v === "" || (typeof v === "number" && !isFinite(v)) ? "–" : typeof v === "number" ? fmt(v, d) : esc(v)}</td></tr>`;
-  el.innerHTML = `<h3 style="margin:0 0 4px">${esc(s.name)}</h3><span class="muted">${esc(g.label)} · ${esc(g.provider || "")}</span>
-    <table style="margin-top:6px"><tbody>
-    ${row("LINZ type", s.type, 0, "linz_suburbs")}${row("Sections", s.sections, 0, "linz_parcels")}${row("Titles per km²", s.density_per_km2, 0, "linz_titles")}${row("Median section m²", s.LotSize, 0, "linz_parcels")}
-    ${row("Sections with a pool %", s.PercPool, 1, "imagery")}${row("Median garden m²", s.GardSize, 0, "imagery")}
-    ${row("Household size", c.hh_size_mean, 2, "cen_fhh038")}${row("Median income $", c.income_median, 0, "cen_hou001")}${row("Owner-occupied %", c.pct_owner_all, 0, "cen_hou020")}${row("Separate houses %", c.pct_separate, 0, "cen_hou020")}
-    ${row("Rain mm/yr", s.climate_annual && s.climate_annual.rain_mm, 0, "openmeteo")}${row("ET₀ mm/yr", s.climate_annual && s.climate_annual.et0_mm, 0, "openmeteo")}
-    <tr><td class="l">Water charges${w.source ? `<sup><a href="#src-rate-${esc(w.PROVIDER)}" style="text-decoration:none">R</a></sup>` : ""}</td><td class="l" style="white-space:normal">${w.PROVIDER ? `${esc(w.CHARGING_TYPE || "–")}${w.VOLUMETRIC_PA != null ? `, $${fmt(w.VOLUMETRIC_PA, 2)}/m³` : ""}` : "–"}</td></tr>
-    </tbody></table>${g.imagery_prefix ? `<p class="muted" style="margin:4px 0 0">Imagery: <a href="https://nz-imagery.s3-ap-southeast-2.amazonaws.com/${esc(g.imagery_prefix)}/rgbnir/collection.json" target="_blank" rel="noopener">${esc(g.capture_id || "capture")} (STAC)</a></p>` : ""}`;
+  const all = everySub(), hit = all.find(({ s }) => String(s.linz_id) === String(id)); if (!hit) { el.innerHTML = ""; return; }
+  const { s, g } = hit, isl = islandOf(g), w = (D.water_rates || []).find((x) => x.PROVIDER === g.provider) || {};
+  const groups = [["Provider " + (g.provider || ""), all.filter((o) => o.g.provider === g.provider)], [(isl || "Island") + " (in database)", all.filter((o) => islandOf(o.g) === isl)], ["All suburbs in database", all]];
+  // radar values: each statistic's position among all suburbs in the database (0 = lowest, 1 = highest)
+  const nat = Object.fromEntries(COMPARE_AXES.map((k) => [k, all.map((o) => fillOf(k)[3](o.s)).filter(finite).sort((a, b) => a - b)]));
+  const pos = (k, v) => { const a = nat[k]; if (!finite(v) || !a.length) return null; if (a.length === 1) return 1; let i = 0; while (i < a.length && a[i] < v) i++; return Math.min(1, i / (a.length - 1)); };
+  const vec = (src) => COMPARE_AXES.map((k) => pos(k, typeof src === "function" ? src(k) : src[k]));
+  const mine = vec((k) => fillOf(k)[3](s));
+  const others = (set || "").split(",").filter((x) => x && x !== String(id)).map((x) => all.find((o) => String(o.s.linz_id) === x)).filter(Boolean);
+  const rows = [...FILLS.filter((f) => f[3]), ["pools_n", "Pools (count)", 0, (z) => z.pools, ["imagery"]], ["sections_n", "Residential sections", 0, (z) => z.sections, ["linz_parcels"]]];
+  el.innerHTML = `<div class="card" style="margin-top:4px"><div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(s.name)}</h3><span class="muted">${esc(g.label)} · ${esc(g.provider || "")}${isl ? " · " + isl : ""}</span></div>
+    ${others.length ? `<p class="small" style="margin:4px 0">Also in this symbol: ${others.map((o) => `<button class="btn" type="button" data-mvpick="${o.s.linz_id}" data-mvset="${esc(set)}" style="padding:0 6px">${esc(o.s.name)}</button>`).join(" ")}</p>` : ""}
+    <div class="row" style="gap:6px;flex-wrap:wrap;margin:6px 0">${miniRadar(s.name, "#d7301f", mine)}${groups.map(([lab, list], i) => miniRadar(lab, ["#2b8cbe", "#7a5195", "#66a61e"][i], vec(aggregate(list.map((o) => o.s))), mine)).join("")}</div>
+    <p class="small muted" style="margin:0 0 6px">Radar: each statistic's position among all suburbs in the database (centre = lowest, edge = highest). Groups use section-weighted means; the red dashed outline is ${esc(s.name)}. "In database" means the suburbs prepared so far, not all of New Zealand.</p>
+    <div class="scroll"><table><thead><tr><th class="l">Statistic</th><th>${esc(s.name)}</th>${groups.map(([lab, list]) => `<th class="l">${esc(lab)} <span class="muted" style="font-weight:normal">(${list.length})</span></th>`).join("")}</tr></thead><tbody>
+    ${rows.map((f) => { const v = f[3](s); return `<tr><td class="l">${esc(f[1])}${srcRef(f[4] || [])}</td><td>${finite(v) ? fmt(v, f[2]) : "–"}</td>${groups.map(([lab, list]) => `<td class="l">${boxHTML(list.map((o) => f[3](o.s)), v, f[2], `${f[1]} in ${lab}`)}</td>`).join("")}</tr>`; }).join("")}
+    <tr><td class="l">Water charges${w.source ? `<sup><a href="#src-rate-${esc(w.PROVIDER)}" style="text-decoration:none">R</a></sup>` : ""}</td><td class="l" colspan="${groups.length + 1}" style="white-space:normal">${w.PROVIDER ? `${esc(w.CHARGING_TYPE || "–")}${w.FIXED_PA != null ? ` · fixed $${fmt(w.FIXED_PA, 2)}/yr` : ""}${w.VOLUMETRIC_PA != null ? ` · $${fmt(w.VOLUMETRIC_PA, 2)}/m³` : ""}` : "–"}</td></tr>
+    </tbody></table></div>
+    <p class="small muted" style="margin:4px 0 0">Bars: whiskers = lowest to highest, box = middle half, line = median, <span style="color:#d7301f">◆</span> = ${esc(s.name)}, with its rank (1 = highest).${g.imagery_prefix ? ` Imagery: <a href="https://nz-imagery.s3-ap-southeast-2.amazonaws.com/${esc(g.imagery_prefix)}/rgbnir/collection.json" target="_blank" rel="noopener">${esc(g.capture_id || "capture")} (STAC)</a>.` : ""}</p></div>`;
 }
 // all sources used on this page
 function sourcesHTML() {
@@ -2186,7 +2303,7 @@ document.addEventListener("dblclick", (e) => { const el = e.target.closest && e.
 window.onZoomMap = (svg, box) => { if (svg.closest(".zmap").dataset.zmap !== "ovw") return; clearTimeout(MAPV.raf); MAPV.raf = setTimeout(() => dynLayers(svg, BATCH.view ? BATCH.view.box : box), 90); };
 document.addEventListener("change", (e) => {
   const t = e.target;
-  if (t.id === "mv-year") { MAPV.year = t.value; store.set("map-year", t.value); restyle(); if (MAPV.sel) suburbInfo(MAPV.sel); return; }
+  if (t.id === "mv-year") { MAPV.year = t.value; store.set("map-year", t.value); restyle(); if (MAPV.sel) suburbInfo(MAPV.sel, MAPV.selSet); return; }
   if (t.dataset && t.dataset.mvsize) { MAPV.sizeBy = t.dataset.mvsize; store.set("map-size", MAPV.sizeBy); return restyle(); }
   if (t.id === "mv-labels") { MAPV.labels = t.checked; store.set("map-labels", t.checked ? "1" : "0"); return restyle(); }
   if (t.dataset && t.dataset.mvpres) { t.checked ? MAPV.pres.add(t.dataset.mvpres) : MAPV.pres.delete(t.dataset.mvpres); store.set("map-pres", JSON.stringify([...MAPV.pres])); return restyle(); }
@@ -2199,8 +2316,9 @@ document.addEventListener("click", (e) => {
   const ib = c("[data-mvinfo]"); if (ib) { e.preventDefault(); MAPV.info = MAPV.info === ib.dataset.mvinfo ? null : ib.dataset.mvinfo; return legendHTML(); }
   const sbtn = c("[data-mvstretch]"); if (sbtn) { MAPV.stretch = sbtn.dataset.mvstretch; store.set("map-stretch", MAPV.stretch); return restyle(); }
   const gb = c("[data-mvglyph]"); if (gb) { MAPV.glyph = gb.dataset.mvglyph; store.set("map-glyph", MAPV.glyph); return restyle(); }
+  const pk = c("[data-mvpick]"); if (pk) { MAPV.sel = pk.dataset.mvpick; return suburbInfo(MAPV.sel, pk.dataset.mvset); }
   const p = c("[data-mvsub]"); if (!p || window._dragMoved) return;
-  MAPV.sel = p.dataset.mvsub; setTimeout(() => suburbInfo(MAPV.sel), 0);   // region switch (data-reg) re-renders the page first
+  MAPV.sel = p.dataset.mvsub; MAPV.selSet = p.dataset.mvset || ""; setTimeout(() => { suburbInfo(MAPV.sel, MAPV.selSet); const i = $("#mv-info"); if (i && i.scrollIntoView) i.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 0);   // region switch (data-reg) re-renders the page first
 });
 
 // Account: per-user API keys (stored encrypted in Supabase Vault). Loaded after live.js.
