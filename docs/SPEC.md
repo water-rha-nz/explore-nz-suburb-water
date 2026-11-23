@@ -246,7 +246,7 @@ Each function checks the caller's JWT and role first (`has_role` via RPC), then 
 
 1. **Google Cloud console:**
    - Create a project `explore-nz-suburb-water`.
-   - Under **APIs & Services → OAuth consent screen**, choose user type **External**. Fill in app name, support email, the app domain (GitHub Pages or a custom domain) and the privacy-policy link.
+   - Under **APIs & Services → OAuth consent screen**, choose user type **External**. Fill in app name, support email, the app domain (GitHub Pages or a custom domain) and the privacy-policy link. The authorised domains are `water-rha-nz.github.io` and `<project-ref>.supabase.co`, not `supabase.co`: both `github.io` and `supabase.co` are public suffixes.
    - Scopes: `openid`, `email`, `profile` only.
    - Publish the app. While it is in "testing", only listed test users can sign in.
 2. **Credentials → Create OAuth client ID:** type **Web application**.

@@ -35,7 +35,7 @@ This covers the steps between "accounts exist" and "a signed-in admin". The desi
    2. Menu ☰ → **APIs & Services → OAuth consent screen**, which opens the **Google Auth Platform**. Press **Get started**, then **Branding** (OAuth consent screen):
       - app name `Explore NZ Suburb Water`, with your support email;
       - app home page `https://water-rha-nz.github.io/explore-nz-suburb-water/`;
-      - authorised domain `supabase.co`;
+      - authorised domains `water-rha-nz.github.io` and **`uthodoiocvnwxwfzahwd.supabase.co`**. `github.io` and `supabase.co` are public suffixes, so Google only accepts the subdomain, and rejects `supabase.co` with "must be a top private domain";
       - developer contact email.
    3. **Audience:** External. While in *Testing*, add the Google accounts that may sign in as test users; publish when ready. The `openid`, `email` and `profile` scopes need no Google verification.
    4. **Data access → scopes:** `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile` only.
