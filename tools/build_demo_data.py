@@ -192,9 +192,11 @@ if os.path.exists(f"{REPO}/index/source_index.json"):
     for k, ta in (("taupo", "Taupo District"), ("tauranga", "Tauranga City")):
         e = next(x for x in idx["regions"] if x["ta"] == ta)
         bundle["regions"][k]["source_plan"] = dict(ta_code=e["ta_code"], regional_council=e["regional_council"], sa2_count=e["sa2_count"],
-            imagery_folders=e["imagery_folders"], steps=[dict(step=r["step"], service=r["service"], url=r["url"].split("?")[0],
+            imagery_folders=e["imagery_folders"], run_parts=[dict(part=p["part"], sa2=len(p["sa2_codes"]), estimate=p["estimate"]) for p in e["run_parts"]],
+            steps=[dict(step=r["step"], service=r["service"], url=r["url"].split("?")[0],
             depends_on=r["depends_on"], output=r["output"]) for r in e["requests"]])
     bundle["index_regions"] = list(_csv.DictReader(open(f"{REPO}/index/regions.csv")))
+    bundle["limits"] = idx["meta"]["limits"]
 json.dump(bundle, open(f"{OUT}/demo.json", "w"), separators=(",", ":"))
 json.dump({"columns": ["region", "M_SUBURB", "M_DWELLING_ID", "SECTION_TYPE", "SECTION_SIZE_M2", "NUM_SECTIONS", "SECTION_AVG_M2"],
            "rows": sections_export}, open(f"{OUT}/sections.json", "w"), separators=(",", ":"))

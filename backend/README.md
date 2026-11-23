@@ -11,4 +11,6 @@ nzsw worker                                                                    #
 
 **Environment** (names in `.env.example`): `SUPABASE_DB_URL` (pooler connection for the `worker` role), `SUPABASE_URL`, `SUPABASE_STORAGE_KEY`, `LINZ_API_KEY`, `STATSNZ_ADE_KEY`, `STATSNZ_DATAFINDER_KEY`.
 
-**Hosting:** GitHub Actions first (`docs/examples/worker.yml`), then Cloud Run Jobs for national runs.
+**Hosting:** GitHub Actions (`docs/examples/worker.yml`), one region per run; there are no national runs.
+
+**Limits:** `nzsw/limits.py` enforces per-service daily budgets (below the free tiers), pacing, Retry-After / exponential backoff, a circuit breaker and per-run region caps. Every external request goes through `limits.Client.request`. Tests: `python3 backend/tests/test_limits.py`.

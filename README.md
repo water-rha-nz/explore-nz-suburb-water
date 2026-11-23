@@ -14,7 +14,8 @@ Results export in the formats of the original `suburb_lookup.html` reference bui
 - **Specification:** [`docs/SPEC.md`](docs/SPEC.md), covering architecture, data model, workflows, exports, Supabase project and Google sign-in setup, and milestones.
 - **Database:** a draft migration is in [`supabase/migrations/0001_init.sql`](supabase/migrations/0001_init.sql). No Supabase project exists yet (SPEC section 12).
 - **Source index:** [`index/`](index/) has, for all 67 TAs served by the 64 water providers, every API request needed to prepare that region (1,002 templates; nothing executed). Regenerate with `tools/build_source_index.py`.
-- **Back-end:** a Python worker ([`backend/`](backend/), SPEC section 17). Recommended hosting: GitHub Actions first ([`docs/examples/worker.yml`](docs/examples/worker.yml)), then Cloud Run Jobs for national runs.
+- **Back-end:** a Python worker ([`backend/`](backend/), SPEC section 17). Hosted on GitHub Actions ([`docs/examples/worker.yml`](docs/examples/worker.yml)), one region per run.
+- **Usage limits:** the app runs on the free keys of every service, one region at a time. There are no national runs. Budgets, pacing and throttling (Retry-After, backoff, circuit breaker) are enforced by [`backend/nzsw/limits.py`](backend/nzsw/limits.py) (SPEC section 20).
 - **Validation pack:** labellers export flagged imagery tiles plus an outcome template and schema, and import completed outcome files (SPEC section 19).
 - **Static demo:** [`demo/`](demo/) exemplifies the full spec without the stack, using the Taupō and Tauranga pilot data. Sign-in and roles are simulated, and exports are generated in the browser.
   - Live: https://water-rha-nz.github.io/explore-nz-suburb-water/.

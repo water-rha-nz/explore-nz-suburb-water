@@ -24,7 +24,27 @@ Placeholders in templates (resolved by the worker at run time):
   {count} {startIndex}  WFS paging
 """
 import argparse, json, re, unicodedata, csv, os, datetime as dt
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET, math, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
+from nzsw import limits as LIM
+
+FEATURES_PER_SA2 = 5000      # pilot: LINZ parcels+titles+buildings+addresses per SA2 (Taupo/Tauranga suburbs)
+CLIMATE_START = LIM.RUN_CAPS["climate_backfill_start"]
+
+
+def estimate(n_sa2, end):
+    """Heuristic cost of one run over n_sa2 SA2s (actual counts are re-checked at run time by preflight)."""
+    cells = min(LIM.RUN_CAPS["max_climate_cells_per_run"], max(1, math.ceil(n_sa2 / 6)))
+    pf = LIM.preflight(n_tas=1, n_sa2=n_sa2, n_suburbs=0, n_climate_cells=cells, climate_start=CLIMATE_START, climate_end=end,
+                     est_features=n_sa2 * FEATURES_PER_SA2, ledger=_EmptyLedger())
+    return dict(est_features=n_sa2 * FEATURES_PER_SA2, est_climate_cells=cells,
+                calls={k: v["estimated_calls"] for k, v in pf["services"].items()}, problems=pf["problems"])
+
+
+class _EmptyLedger:
+    def remaining(self, service, period="day"):
+        b = LIM.SERVICES[service].get("budget_" + period)
+        return b
 
 LINZ_WFS = "https://data.linz.govt.nz/services;key={LINZ_API_KEY}/wfs"
 DF_WFS = "https://datafinder.stats.govt.nz/services;key={STATSNZ_DATAFINDER_KEY}/wfs"
@@ -200,7 +220,14 @@ def main():
             for s in p["sources"]:
                 reqs.append(dict(step="water_rates.source", service="Provider website (manual review)", method="GET", url=s["url"], params={},
                                  auth=None, depends_on=[], output=f"published charges: {s['title']}"))
-            entries.append(dict(ta=ta, ta_code=code, ta_name_statsnz=ta_codes[code]["name"], regional_council_code=rc,
+            # run parts: a TA bigger than the per-run cap is split into contiguous SA2 groups (codes are spatially ordered)
+            cap = LIM.RUN_CAPS["max_sa2_per_run"]
+            n_parts = max(1, math.ceil(len(codes) / cap))
+            size = math.ceil(len(codes) / n_parts) if codes else 0
+            end = (dt.date.today().replace(day=1) - dt.timedelta(days=1)).isoformat()
+            parts = [dict(part=i + 1, sa2_codes=codes[i * size:(i + 1) * size], estimate=estimate(len(codes[i * size:(i + 1) * size]), end))
+                     for i in range(n_parts)]
+            entries.append(dict(run_parts=parts, ta=ta, ta_code=code, ta_name_statsnz=ta_codes[code]["name"], regional_council_code=rc,
                                 regional_council=geo.get(rc, {}).get("name"), imagery_folders=folders, prvdr=p["prvdr"],
                                 legacy_prvdr=p["legacy_prvdr"] if p["legacy_prvdr"] != p["prvdr"] else None, provider=p["provider"],
                                 charging_type=p["charging"], sa2_count=len(codes), sa2_codes=codes, requests=reqs))
@@ -209,6 +236,9 @@ def main():
                 unmatched_territories=unmatched, linz_layers={k: dict(id=v[0], name=v[1]) for k, v in LAYERS.items()},
                 datafinder_sa2_layer=SA2_LAYER, ade_tables=ADE_TABLES, ade_dimension_order=ADE_DIMS, imagery_bucket=S3,
                 keys_required=["LINZ_API_KEY", "STATSNZ_DATAFINDER_KEY", "STATSNZ_ADE_KEY"],
+                limits=dict(services={k: {kk: vv for kk, vv in v.items()} for k, v in LIM.SERVICES.items()}, run_caps=LIM.RUN_CAPS,
+                            features_per_sa2_heuristic=FEATURES_PER_SA2,
+                            rule="One region per run. TAs over the cap run as parts (contiguous SA2 groups). National or multi-region runs are not possible."),
                 run_order=["linz.suburbs", "linz.parcels|titles|buildings|addresses", "statsnz.sa2", "statsnz.ade.*", "imagery.list -> imagery.items -> worker imagery job",
                            "climate.daily", "water_rates.source (editor review)"])
     json.dump(dict(meta=meta, regions=entries), open(os.path.join(a.out, "source_index.json"), "w"), indent=1, ensure_ascii=False)
@@ -219,10 +249,13 @@ def main():
             w.writerow([p["prvdr"], p["legacy_prvdr"] if p["legacy_prvdr"] != p["prvdr"] else "", p["provider"], p["charging"], "; ".join(p["territories"])])
     with open(os.path.join(a.out, "regions.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["TA", "TA_CODE", "REGIONAL_COUNCIL", "PRVDR", "PROVIDER", "CHARGING_TYPE", "SA2_COUNT", "IMAGERY_FOLDERS", "REQUESTS"])
+        w.writerow(["TA", "TA_CODE", "REGIONAL_COUNCIL", "PRVDR", "PROVIDER", "CHARGING_TYPE", "SA2_COUNT", "IMAGERY_FOLDERS", "REQUESTS",
+                    "RUN_PARTS", "EST_LINZ_FEATURES_PER_PART", "EST_OPENMETEO_CALLS_PER_PART", "EST_ADE_CALLS_PER_PART"])
         for e in sorted(entries, key=lambda e: e["ta_code"]):
             w.writerow([e["ta"], e["ta_code"], e["regional_council"], e["prvdr"], e["provider"], e["charging_type"], e["sa2_count"],
-                        " ".join(e["imagery_folders"]), len(e["requests"])])
+                        " ".join(e["imagery_folders"]), len(e["requests"]), len(e["run_parts"]),
+                        max(p["estimate"]["est_features"] for p in e["run_parts"]), max(p["estimate"]["calls"]["openmeteo"] for p in e["run_parts"]),
+                        max(p["estimate"]["calls"]["statsnz_ade"] for p in e["run_parts"])])
     print(f"{len(entries)} TAs, {meta['providers']} providers, {sum(e['sa2_count'] for e in entries)} SA2s, "
           f"{sum(len(e['requests']) for e in entries)} request templates; unmatched: {unmatched}")
 

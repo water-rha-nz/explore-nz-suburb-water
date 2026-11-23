@@ -18,6 +18,8 @@ Each request has `step`, `service`, `method`, `url`, `params` / `headers`, `auth
 6. `climate.daily`: Open-Meteo archive per suburb point, at most 100 points per call, deduplicated by grid cell.
 7. `water_rates.source`: provider pages for an editor to review. These aren't machine-parsed.
 
+**Limits:** each TA has `run_parts`, contiguous SA2 groups of at most 80, with a heuristic cost estimate per part (`estimate.calls` per service). Only Auckland (8 parts), Christchurch (3) and Wellington City (2) need more than one part. Budgets, pacing and throttling are in `meta.limits` and `backend/nzsw/limits.py` (SPEC section 20). The index never implies a national run: parts are queued one at a time.
+
 **Secrets:** `{LINZ_API_KEY}`, `{STATSNZ_DATAFINDER_KEY}` and `{STATSNZ_ADE_KEY}` are placeholders. They're filled from Supabase / worker secrets at run time and never written to the index, logs or exports.
 
 **Regenerate** (needs the census geography code list, which is reference metadata; one call):

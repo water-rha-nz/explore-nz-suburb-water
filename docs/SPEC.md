@@ -46,7 +46,7 @@ Supabase
   │                       keys held in Supabase secrets; never sent to the browser
   └─ pg_cron              schedules refresh jobs (section 6)
 Worker (Python container: GitHub Actions runner, Fly.io, or a local machine)
-  └─ heavy jobs: imagery tiles → pools / vegetation; LINZ bulk layers; national runs
+  └─ heavy jobs, one region at a time: imagery tiles → pools / vegetation; LINZ layers (no national runs, section 20)
      polls a `jobs` table, writes results back with a service-role key held only by the worker
 ```
 
@@ -178,7 +178,7 @@ Keys live only in Supabase secrets and the worker's environment. They are never 
 ### 12.1 Create the project
 1. In the Supabase dashboard, create a new project in the organisation. Name it `explore-nz-suburb-water`.
    - **Region:** Sydney (`ap-southeast-2`), the closest to NZ. LINZ imagery is also in `ap-southeast-2`, so the worker's reads stay in-region.
-   - **Plan:** Free is enough for the two pilot regions. National data needs Pro (database size; see section 16).
+   - **Plan:** Free is enough for the pilot regions. As regions accumulate one at a time, Pro may be needed for database size (section 16).
    - Save the generated database password in a password manager. Don't commit it.
 2. Install the Supabase CLI locally and link it:
    ```bash
@@ -193,7 +193,7 @@ Keys live only in Supabase secrets and the worker's environment. They are never 
 |---|---|---|
 | `exports` | no (signed URLs) | export bundles |
 | `chips` | no | validation image chips (labellers only) |
-| `public-exports` | optional, yes | published national metadata, if section 16 Q3 is "public" |
+| `public-exports` | optional, yes | published region metadata, if section 16 Q3 is "public" |
 
 5. **Secrets** (Project settings → Edge Functions → Secrets, or `supabase secrets set`): `LINZ_API_KEY`, `STATSNZ_ADE_KEY`, `STATSNZ_DATAFINDER_KEY`, and `OPENMETEO_API_KEY` (only for commercial use).
 6. **Keys used by clients:**
@@ -299,11 +299,11 @@ docs/examples/          example GitHub Actions workflow for the worker
 Pilot data (Taupō and Tauranga: regions, outputs, 552 user labels, 552 Claude labels) is migrated in M1–M5 as seed and test data.
 
 ## 16. Open questions
-1. Hosting for the worker. **Recommendation (section 17.4):** GitHub Actions first, then Cloud Run Jobs for national runs. Confirm.
+1. Hosting for the worker. **Decision:** GitHub Actions; there are no national runs (section 20).
 2. Should viewers need approval, or is any Google account a viewer?
-3. Publish national metadata openly (e.g. a public read-only export bucket) or keep it behind sign-in?
+3. Publish completed regions' metadata openly (e.g. a public read-only export bucket) or keep it behind sign-in?
 4. Low-rise vs high-rise split: add LINZ LiDAR heights (M8)?
-5. Supabase plan size: national sections (~2M) plus climate daily (cells × days) fit in Pro; the free tier will not hold national data.
+5. Supabase plan size: the free tier holds a handful of regions; move to Pro as more regions are prepared.
 
 ## 17. Back-end: running the Python worker
 ### 17.1 Why Python, and what runs where
@@ -335,7 +335,7 @@ backend/
 
 ### 17.3 Job flow
 1. An editor presses **Queue** in the app. The `queue-job` Edge Function checks `has_role('editor')` and inserts `jobs(type, region_id, params)`.
-2. The function **starts a worker run**, either with a GitHub `repository_dispatch` or `workflow_dispatch` event, or with a Cloud Run Jobs execution. An always-on worker polls instead.
+2. The function **starts a worker run** with a GitHub `repository_dispatch` or `workflow_dispatch` event. An always-on worker would poll instead.
 3. The worker claims work atomically:
    ```sql
    create function claim_job() returns jobs language sql as $$
@@ -353,11 +353,11 @@ The **same Docker image** runs on all of these:
 | Option | Fit | Limits / cost | Use for |
 |---|---|---|---|
 | **GitHub Actions** (`workflow_dispatch`, `repository_dispatch`, `schedule`) | No infrastructure; the repo is public, so standard runners are free | 6 h per job; about 4 vCPU / 16 GB on public-repo runners; secrets in repo or environment secrets | **M1–M5**: per-TA runs (Taupō imagery about 10 min, Tauranga about 2 min on 4 CPUs); daily climate cron |
-| **Google Cloud Run Jobs** (Sydney region) | Scales out: one task per tile batch, so a national run is parallel; uses the existing Google Cloud account | pay per vCPU-second; long task timeouts; secrets in Secret Manager | **National runs** and large TAs (Auckland) |
+| ~~Google Cloud Run Jobs~~ | **Not used.** Scaling out would only help national runs, which are ruled out (section 20). | — | — |
 | Small always-on VM (Fly.io, Railway, a Lightsail-type host) | Simplest polling worker | monthly fee even when idle | If runs become frequent |
-| Your own machine | Zero cost; same CLI | manual | One-off national backfills, debugging |
+| Your own machine | Zero cost; same CLI and the same limits | manual | Debugging; single-region runs |
 
-**Recommendation:** start with GitHub Actions, using `docs/examples/worker.yml`. Add Cloud Run Jobs when national coverage begins. Keep the queue in Postgres, so the trigger mechanism can change without touching the app.
+**Decision:** GitHub Actions, using `docs/examples/worker.yml`. A run is one region (or one part of a large TA) and fits well within the 6 h job limit. The queue stays in Postgres, so the trigger can change without touching the app. `concurrency: worker` keeps one run at a time, so two runs never share a free key's budget at once.
 
 Note: pushing files under `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). The example is kept in `docs/examples/` until then.
 
@@ -376,11 +376,7 @@ Note: pushing files under `.github/workflows/` needs a token with the `workflow`
    - The workflow runs `docker pull ghcr.io/…-worker:<sha>` (about 30–60 s), then `docker run` with the secrets passed as environment variables.
    - Inside the container, `nzsw worker` calls `claim_job()`, runs the steps, writes results to Supabase, and claims the next job until the queue is empty.
    - The container exits and the VM is destroyed. Nothing stays running and there is no idle cost.
-4. **Spin-up (Cloud Run Jobs, for national runs).**
-   - The same image is mirrored to Google **Artifact Registry** in `australia-southeast1` (Sydney).
-   - The Edge Function calls the Cloud Run Admin API (`jobs.run`) with a service-account key held as a Supabase secret.
-   - Google starts N task containers in seconds; each takes a share of the tiles (`CLOUD_RUN_TASK_INDEX`). They exit when done, billed per second.
-   - Sydney is the same AWS/GCP metro as the LINZ imagery bucket (`ap-southeast-2`), which keeps reads fast.
+4. **No fan-out.** One container processes one claimed job: one region, or one part of a large TA. It processes tiles at most 4 at a time, and every external call goes through the limits client (section 20). There is no multi-container or national execution path.
 5. **Data paths** during a run:
    - imagery is read straight from public S3 by COG window, with no download to disk;
    - LINZ, Stats NZ and Open-Meteo are reached over HTTPS;
@@ -433,3 +429,55 @@ Labellers can export the tiles flagged for visual validation and get results bac
 - **Import:** an uploaded outcome file is checked against the schema and item list (task match, allowed labels, labeller, timestamp). It's applied to `validation_labels` only if every labelled row is valid. Imported rows record `source = 'outcome-import'` and the labeller.
 - Pilot check: the local app's pack and the demo's pack share all 552 item IDs. The pilot outcome file round-trips with 0 errors, and a corrupted row is rejected.
 
+## 20. Usage limits and throttling (free keys only)
+The app must work on the **free** keys and tiers of every service it depends on, and must never pull data at national scale. These limits are enforced in code by `backend/nzsw/limits.py`, which is tested in `backend/tests/test_limits.py`. They're also recorded in `index/source_index.json → meta.limits`.
+
+### 20.1 One region per run, no national runs
+- A run covers **one TA**. A TA larger than the per-run caps (**80 SA2s**, 60 suburbs, about 400,000 LINZ features, 12 climate cells, 250 imagery tiles) runs as **parts**: contiguous groups of SA2s, which Stats NZ codes in spatial order. The source index lists the parts.
+  - 64 of 67 TAs run in one part.
+  - Wellington City needs 2, Christchurch 3 and Auckland 8, which are queued separately and run on different days if budgets require.
+- Multi-region and national requests are rejected before any call is made (`preflight` → `RunTooLarge` / problems). The app offers no "run all" action, and the worker has no national code path.
+- Only one worker runs at a time (`concurrency: worker`), so the budgets apply to the whole project.
+
+### 20.2 Budgets per service (per UTC day, set below the free limits)
+| Service | Published free limit | App budget | Pacing | Cost model |
+|---|---|---|---|---|
+| Open-Meteo (no key) | 600/min, 5,000/h, **10,000/day**; non-commercial | **6,000/day, 3,000/h** | 1 request/s | weighted: locations × max(1, variables/10) × max(1, days/14) |
+| LINZ LDS WFS | none published; 3,000 features/request default; ≤ 250,000/request advised | 1,500 requests/day; ≤ 400,000 features/run | 1 request/s, pages of 10,000 | 1 per page |
+| Stats NZ Datafinder | none published (same platform as LINZ) | 300/day | 1 request/s | 1 per request (≤ 150 SA2s) |
+| Stats NZ ADE | none published; fair use, shared keys may be throttled | 400/day | 1 request / 2 s | 1 per request (≤ 150 SA2s) |
+| LINZ imagery (public S3) | no key | ≤ 250 tiles/run; ≤ 25 GB read/day | ≤ 4 parallel reads | bytes read (overview level only) |
+
+**Climate cost control.** Open-Meteo counts long histories as many calls: 19 years for one location is about 491 calls. So:
+- suburbs are grouped into grid cells (0.1°) before any call, and each cell is fetched once;
+- the backfill starts in **2013**, the first census year used, which is about 361 calls per cell;
+- cached cells only fetch the missing tail, so a daily top-up is 1 call per cell.
+
+For scale, a typical single-part TA costs about 1,000–4,300 weighted calls. That's one region per day within the 6,000 budget, leaving room for top-ups. (The pilot's first pulls, one location per suburb from 2008 and repeated, used about 13,300 weighted calls in one day, more than the free cap. The per-cell design prevents this.)
+
+### 20.3 Before a run: preflight
+The worker estimates each run's cost per service, from the region's SA2s, suburbs, climate cells and features, and compares it with what's left of today's budget. If it doesn't fit, the job is **not started**: it is set to `scheduled`, with a reason, and the scheduler retries it the next UTC day. The app shows the estimate next to the *Queue* button, and the source index carries a heuristic estimate per part.
+
+### 20.4 During a run: pacing and throttling
+- **Pacing:** one request at a time per service, with the minimum interval above.
+- **Ledger:** every attempt is counted, including retries, per service and per day/hour. In production this is the `api_usage` table; locally it's `~/.cache/nzsw/api_usage.json`.
+- **429 / 503 / 502 / 504:**
+  - honour `Retry-After` (seconds or HTTP date);
+  - otherwise exponential backoff with jitter (5 s × 2ⁿ, capped at 10 min), up to 5 retries;
+  - a 504 from LINZ also logs advice to reduce the page size;
+  - S3's `503 SlowDown` counts as throttling.
+- **Circuit breaker:** 3 throttled responses within 15 minutes pause that service for 6 hours. The job is parked as `paused_quota` and resumes from where it stopped, because all steps are idempotent upserts and cached tiles and cells are skipped.
+- **Budget edges:**
+  - a request that would exceed the **hourly** budget waits for the next hour;
+  - one that would exceed the **daily** budget stops the run (`paused_quota`), to resume tomorrow;
+  - a single request larger than the hourly budget is refused, and must be split.
+
+### 20.5 Caching (don't re-request what we have)
+| Data | Refresh |
+|---|---|
+| Census | once per census release (dataflow version recorded) |
+| SA2 boundaries | once per boundary release |
+| LINZ layers | weekly changesets for published regions, not full re-downloads |
+| Imagery | per capture; processed tiles are never re-read |
+| Climate | cells cached; only new days fetched |
+| ADE dataflow structures and the geography code list | cached locally |
