@@ -10,11 +10,12 @@
 #   ~/.config/google/oauth_client_id       Google OAuth web client ID      (after step "google")
 #   ~/.config/google/oauth_client_secret   Google OAuth web client secret  (after step "google")
 #   ~/.config/linz/api_key, ~/.config/statsnz/{ade_key,datafinder_key}   pushed as Edge Function secrets
+# --apply passes --yes to the Supabase CLI (hosted changes): run it only after the user has approved.
 # Writes ~/.config/supabase/project_ref and ./.env (gitignored: project URL + publishable anon key).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SB="${SUPABASE_BIN:-$HOME/.local/bin/supabase}"
-NAME="explore-nz-suburb-water"; REGION="ap-southeast-2"
+NAME="${SUPABASE_PROJECT_NAME:-explore-nz-suburb-water-syd}"; REGION="ap-southeast-2"
 APPLY=0; [[ "${1:-}" == "--apply" ]] && APPLY=1
 C="$HOME/.config"
 has() { [[ -s "$1" ]]; }
@@ -23,7 +24,7 @@ step() { printf '\n== %s\n' "$*"; }
 do_or_plan() { if (( APPLY )); then "$@"; else echo "   would run: ${*//$PW/<db-password>}"; fi; }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); $1"; }
 
-for f in "$C/supabase/access_token" "$C/supabase/db_password" "$C"/google/oauth_client_* "$C/linz/api_key" "$C"/statsnz/*_key; do
+for f in "$C/supabase/access_token" "$C/supabase/db_password" "$C/supabase/org_id" "$C"/google/oauth_client_* "$C/linz/api_key" "$C"/statsnz/*_key; do
   [[ -e "$f" ]] && [[ "$(stat -c %a "$f")" != 600 ]] && { echo "refusing: $f must be chmod 600"; exit 1; }
 done
 
@@ -38,20 +39,21 @@ PW="$(val "$C/supabase/db_password")"
 echo "   ok (token present)"
 
 step "2. Organisation"
-ORGS="$("$SB" orgs list -o json)"
-if has "$C/supabase/org_id"; then ORG="$(val "$C/supabase/org_id")"
+if has "$C/supabase/org_id"; then
+  ORG="$(val "$C/supabase/org_id")"; echo "   organisation: $ORG (from org_id; no organisation listing needed)"
 else
+  ORGS="$("$SB" orgs list -o json)"
   N="$(echo "$ORGS" | json 'print(len(d))')"
   [[ "$N" == 1 ]] || { echo "   you belong to $N organisations; put the right ID in $C/supabase/org_id:"; echo "$ORGS" | json 'print("\n".join(f"   {o[\"id\"]}  {o[\"name\"]}" for o in d))'; exit 0; }
   ORG="$(echo "$ORGS" | json 'print(d[0]["id"])')"
+  echo "   organisation: $(echo "$ORGS" | json 'print(d[0]["name"])')"
 fi
-echo "   organisation: $(echo "$ORGS" | json "print(next((o['name'] for o in d if o['id']=='$ORG'), '?'))")"
 
 step "3. Project ($NAME, $REGION, free plan)"
 REF="$("$SB" projects list -o json | json "print(next((p['id'] for p in d if p['name']=='$NAME'), ''))")"
 if [[ -n "$REF" ]]; then echo "   exists: $REF"
 else
-  do_or_plan "$SB" projects create "$NAME" --org-id "$ORG" --region "$REGION" --db-password "$PW"
+  do_or_plan "$SB" --yes projects create "$NAME" --org-id "$ORG" --region "$REGION" --db-password "$PW"
   (( APPLY )) || { echo "   (plan stops here: later steps need the project)"; exit 0; }
   REF="$("$SB" projects list -o json | json "print(next((p['id'] for p in d if p['name']=='$NAME'), ''))")"
   echo "   created: $REF; waiting for it to become healthy"
@@ -64,16 +66,16 @@ echo "$REF" > "$C/supabase/project_ref"; chmod 600 "$C/supabase/project_ref"
 echo "   Google redirect URI to register: https://$REF.supabase.co/auth/v1/callback"
 
 step "4. Link and apply migrations"
-do_or_plan "$SB" link --project-ref "$REF"
+do_or_plan "$SB" --yes link --project-ref "$REF"
 if (( APPLY )); then "$SB" db push --remote --dry-run -p "$PW"; fi
-do_or_plan "$SB" db push --remote -p "$PW"
+do_or_plan "$SB" --yes db push --remote -p "$PW"
 
 step "5. Google sign-in (auth config)"
 if has "$C/google/oauth_client_id" && has "$C/google/oauth_client_secret"; then
   export SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET
   SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID="$(val "$C/google/oauth_client_id")"
   SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET="$(val "$C/google/oauth_client_secret")"
-  do_or_plan "$SB" config push   # site_url, redirect URLs, Google provider, email sign-in off (supabase/config.toml)
+  do_or_plan "$SB" --yes config push   # site_url, redirect URLs, Google provider, email sign-in off (supabase/config.toml)
 else
   echo "   waiting for the Google OAuth client: create it with redirect URI https://$REF.supabase.co/auth/v1/callback,"
   echo "   then put the client ID and secret in $C/google/oauth_client_id and oauth_client_secret (chmod 600)."
@@ -85,7 +87,7 @@ has "$C/linz/api_key" && echo "LINZ_API_KEY=$(val "$C/linz/api_key")" >> "$TMP"
 has "$C/statsnz/ade_key" && echo "STATSNZ_ADE_KEY=$(val "$C/statsnz/ade_key")" >> "$TMP"
 has "$C/statsnz/datafinder_key" && echo "STATSNZ_DATAFINDER_KEY=$(val "$C/statsnz/datafinder_key")" >> "$TMP"
 echo "   $(wc -l < "$TMP") secret(s) found: $(cut -d= -f1 "$TMP" | tr '\n' ' ')"
-[[ -s "$TMP" ]] && do_or_plan "$SB" secrets set --env-file "$TMP"
+[[ -s "$TMP" ]] && do_or_plan "$SB" --yes secrets set --env-file "$TMP"
 
 step "7. Client config (.env, gitignored)"
 if (( APPLY )); then
