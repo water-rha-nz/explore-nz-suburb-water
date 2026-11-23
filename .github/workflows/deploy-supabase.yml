@@ -34,9 +34,9 @@ jobs:
       - name: Link project
         run: supabase link --project-ref "$PROJECT_REF" -p "$SUPABASE_DB_PASSWORD"
       - name: Migrations (dry run)
-        run: supabase db push --dry-run -p "$SUPABASE_DB_PASSWORD"
+        run: supabase db push --remote --dry-run -p "$SUPABASE_DB_PASSWORD"
       - name: Migrations
-        run: supabase --yes db push -p "$SUPABASE_DB_PASSWORD"
+        run: supabase --yes db push --remote -p "$SUPABASE_DB_PASSWORD"
       - name: Edge Functions
         run: |
           for d in supabase/functions/*/; do
