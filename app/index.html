@@ -952,7 +952,8 @@ function readCSV(text) {
   const all = rows.filter((r) => r.some((x) => x.trim() !== ""));
   if (!all.length) return [];
   const h = all[0].map((x) => x.trim().toUpperCase().replace(/^﻿/, ""));
-  return all.slice(1).map((r) => Object.fromEntries(h.map((k, i) => [k, (r[i] || "").trim()])));
+  const out = all.slice(1).map((r) => Object.fromEntries(h.map((k, i) => [k, (r[i] || "").trim()])));
+  out.headers = all[0].map((x) => x.trim().replace(/^﻿/, "")); out.sep = sep; return out;
 }
 // PRVDR from a file: current code, legacy code (e.g. WDC_WHG), alias or provider name
 function prvdrCode(v) {
@@ -998,16 +999,26 @@ function scopeByTA() {
     for (const c of rowTAs(r.M_TERRITORY, r.PRVDR || r.PROVIDER)) add(c, "ref", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, file: "nz_suburb_ref.csv" }); }
   for (const r of BATCH.files.provider || []) { if (!r.M_SUBURB) continue;
     const other = (r["OTHER SPELLINGS"] || r.OTHER_SPELLINGS || "").split(/[;,|/]/).map((x) => x.trim()).filter(Boolean);
-    for (const c of provRowTAs(r)) { add(c, "provider", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, prvdr: resolveCode(r.PRVDR), spellings: other, file: "nz_suburb_provider.csv" });
-      for (const o of other) add(c, "provider", o); } }
-  // keep rule: nz_suburb_map and nz_suburb_ref are the keep-lists (either / both); the provider file assigns PRVDRs and
-  // other spellings, and scopes a TA only when neither keep-list covers it
+    for (const c of provRowTAs(r)) add(c, "provider", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, prvdr: resolveCode(r.PRVDR), code: r.PRVDR, spellings: other, file: "nz_suburb_provider.csv", src: r }); }
+  for (const [c, o] of Object.entries(out)) {
+    if (!o.lists.provider) continue;
+    // study scope = the provider file; each study suburb's LINZ suburb(s) come from its nz_suburb_map.csv allocations
+    const rows = [];
+    for (const pr of o.rows.filter((r) => r.file === "nz_suburb_provider.csv")) {
+      const names = new Set([pr.m_suburb, ...pr.spellings].map(norm));
+      const maps = (BATCH.files.map || []).filter((m) => names.has(norm(m.M_SUBURB)) && (m.NZ_SUBURB_REF || m.M_SUBURB) && (!m.M_TERRITORY || rowTAs(m.M_TERRITORY).includes(c)));
+      if (maps.length) for (const m of maps) rows.push({ ...pr, linz_ref: m.NZ_SUBURB_REF || m.M_SUBURB, via: "nz_suburb_map.csv" });
+      else rows.push(pr); }
+    o.rows = rows; o.keep = [...new Map(rows.map((r) => [norm(r.linz_ref), r.linz_ref])).values()];
+    o.studies = new Set(rows.map((r) => norm(r.m_suburb))).size;
+    o.basis = "nz_suburb_provider.csv" + (rows.some((r) => r.via) ? " + nz_suburb_map.csv allocations" : "");
+  }
+  // without a provider file: nz_suburb_map and nz_suburb_ref are keep-lists (either / both), as in the builder
   for (const o of Object.values(out)) {
-    const keepLists = ["map", "ref"].filter((k) => o.lists[k]); const use = keepLists.length ? keepLists : ["provider"];
+    if (o.lists.provider) continue;
+    const keepLists = ["map", "ref"].filter((k) => o.lists[k]); const use = keepLists;
     const sets = use.map((k) => new Set([...o.lists[k]].map(norm)));
     let keep = use.flatMap((k) => [...o.lists[k]]).filter((n) => BATCH.keep === "any" || sets.every((st) => st.has(norm(n))));
-    if (o.lists.provider && keepLists.length) for (const r of o.rows.filter((r) => r.file === "nz_suburb_provider.csv"))
-      if (keep.some((k) => norm(k) === norm(r.m_suburb) || (r.spellings || []).some((x) => norm(x) === norm(k)))) keep.push(r.m_suburb, ...(r.spellings || []));
     o.keep = [...new Map(keep.map((n) => [norm(n), n])).values()]; o.basis = use.join(" + ");
   }
   // a loaded configuration's saved names apply where no file covers a selected TA
@@ -1113,7 +1124,7 @@ function configureHTML() {
   const opts = (cur) => BATCH.providers.map((p) => `<option value="${p.prvdr}" ${p.prvdr === cur ? "selected" : ""}>${esc(p.prvdr)} · ${esc(p.name)}</option>`).join("");
   const selRows = sel.map((c) => { const t = taOf(c), s = sc[c], p = prvdrFor(c), w = rateFor(p);
     const rate = w ? `${esc(w.CHARGING_TYPE || "–")} · fixed ${w.FIXED_PA == null ? '<span class="muted">not verified</span>' : "$" + fmt(w.FIXED_PA, 2) + "/yr"} · ${w.VOLUMETRIC_PA == null ? "no volumetric charge" : "$" + fmt(w.VOLUMETRIC_PA, 2) + "/m³"} · checked ${esc(w.DATE_EST || "–")}${w.source ? ` · <a href="${esc(w.source)}" target="_blank" rel="noopener">source</a>` : ""}` : '<span class="muted">no rates on record</span>';
-    return `<tr><td class="l"><b>${esc(t.name)}</b><br><span class="small muted">${s ? `${s.keep.length} suburbs (${esc(s.basis)})` : t.parts > 1 ? "needs a suburb list" : "whole TA"}</span></td>
+    return `<tr><td class="l"><b>${esc(t.name)}</b><br><span class="small muted">${s ? `${s.studies || s.keep.length} ${s.studies ? "study " : ""}suburbs (${esc(s.basis)})` : t.parts > 1 ? "needs a suburb list" : "whole TA"}</span></td>
       <td class="l">${(() => { const f = filePrvdr(c), acr = !BATCH.prvdr[c] && f && f.code ? f.acronyms.filter((a) => norm(a) !== norm(p)) : [];
         return `${acr.length ? `<b>${acr.map(esc).join(", ")}</b> <span class="small muted">(your PRVDR) →</span><br>` : ""}<select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}">${opts(p)}</select><br><span class="small muted">${prvdrSource(c)}${BATCH.prvdr[c] ? ` · <button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:1px 6px">reset</button>` : ""}</span>${f && f.unresolved.length ? `<br><span class="tag warn">${f.unresolved.map(esc).join(", ")}: no saved provider</span> <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">match in 2.2</button>` : ""}`; })()}</td><td class="l small" style="white-space:normal;min-width:260px">${rate}</td>
       <td><button class="btn" type="button" data-tunsel="${c}" aria-label="Remove ${esc(t.name)}">×</button></td></tr>`; }).join("");
@@ -1128,9 +1139,9 @@ function configureHTML() {
       <p class="small" style="margin:6px 0"><label><b>Add several at once</b> <input type="file" multiple accept=".json,.csv,.tsv,application/json,text/csv" id="bin-files"></label><br><span class="muted">Each file goes to its slot below by name.</span></p>
       <p class="small" style="margin:6px 0"><label><b>nz_suburb_builder_config.json</b> <input type="file" accept=".json,application/json" id="bcfg-import"></label>${BATCH.builder ? ` <span class="tag info">${esc(BATCH.builder.fname)}</span> <button class="btn" type="button" id="bcfg-clear">Clear</button>` : ""} <button class="btn" type="button" id="bcfg-export">Export</button><br>
         <span class="muted">From the reference builder (suburb_lookup.html): keep rule, PRVDR matches and suburb allocations.</span>${builderNote()}</p>
-      ${[["map", "nz_suburb_map.csv", "M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY"], ["ref", "nz_suburb_ref.csv", "M_SUBURB, …, M_TERRITORY"], ["provider", "nz_suburb_provider.csv", "M_SUBURB, Other spellings, PRVDR (sets each TA's PRVDR, ahead of nz_suburb_map's PROVIDER)"]].map(([k, f, cols]) =>
+      ${[["provider", "nz_suburb_provider.csv", "M_SUBURB, Other spellings, PRVDR: the study suburbs in scope and their provider (sets each TA's PRVDR)"], ["map", "nz_suburb_map.csv", "M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY: allocations of study suburbs to LINZ suburbs"], ["ref", "nz_suburb_ref.csv", "M_SUBURB, TYPE, M_TERRITORY, …: the LINZ suburb reference"]].map(([k, f, cols]) =>
         `<p class="small" style="margin:6px 0"><label><b>${f}</b> <input type="file" accept=".csv,.tsv,text/csv" data-sfile="${k}"></label>${BATCH.files[k] ? ` <span class="tag info">${esc(BATCH.fileNames[k] || "")} · ${BATCH.files[k].length} rows</span> <button class="btn" type="button" data-sclear="${k}">Clear</button>` : ""}<br><span class="muted">${cols}</span></p>`).join("")}
-      <p class="small"><label>With both keep-lists, keep a suburb that is in <select id="batch-keep"><option value="any" ${BATCH.keep === "any" ? "selected" : ""}>either list</option><option value="both" ${BATCH.keep === "both" ? "selected" : ""}>both lists</option></select></label></p>
+      <p class="small"><label>Without nz_suburb_provider.csv, nz_suburb_map and nz_suburb_ref define the scope: keep a suburb that is in <select id="batch-keep"><option value="any" ${BATCH.keep === "any" ? "selected" : ""}>either list</option><option value="both" ${BATCH.keep === "both" ? "selected" : ""}>both lists</option></select></label></p>
       ${newFound.length ? `<p class="small">Your files also mention ${newFound.length} TA(s) that aren't selected: ${newFound.map((c) => esc(taOf(c).name)).join(", ")}. <button class="btn" id="sel-found" type="button">Select them</button></p>` : ""}
     </div></div>
   <h2>Selected TAs (${sel.length}): PRVDR and charging rates</h2><p class="small muted">Each PRVDR is filled from your lists (nz_suburb_provider.csv, then nz_suburb_map.csv's PROVIDER) or the TA's saved provider. Change it here at any time.</p>
@@ -1157,6 +1168,11 @@ function locate(name, terr, file, byNorm) {
   if (a) { const t = (a.linzSuburbs || []).map((x) => byNorm.get(norm(x.name))).filter(Boolean); if (t.length) return { linz: t, allocated: true }; }
   const hit = byNorm.get(norm(name)); return hit ? { linz: [hit], allocated: false } : null;
 }
+function locateRow(n, row, byNorm) {
+  const hit = locate(n, row.territory || "", row.file || "", byNorm); if (hit || row.via) return hit;
+  for (const sp of row.spellings || []) { const x = byNorm.get(norm(sp)); if (x) return { linz: [x], allocated: false }; }
+  return null;
+}
 // study suburbs you added in 2.2 that aren't in your files (file "manual", territory = the TA)
 const manualFor = (c) => Object.values(BATCH.alloc).filter((a) => a.file === "manual" && rowTAs(a.territory).includes(c));
 
@@ -1167,7 +1183,7 @@ function scopeOf(c) {
   const s = scopeByTA()[c], L = BATCH.linz[c]; if (!L) return null;
   const byNorm = linzIndex(L.list), pairs = []; let unmatched = [];
   if (s) { for (const n of s.keep) { const rows = s.rows.filter((r) => norm(r.linz_ref) === norm(n)); let ok = false;
-      for (const row of rows.length ? rows : [{}]) { const hit = locate(n, row.territory || "", row.file || "", byNorm);
+      for (const row of rows.length ? rows : [{}]) { const hit = locateRow(n, row, byNorm);
         if (hit) { ok = true; hit.linz.forEach((x) => pairs.push({ input: n, mname: row.m_suburb || n, row: row.file ? row : null, linz: x, allocated: hit.allocated })); } }
       if (!ok) unmatched.push(n); }
     const spell = new Set(s.rows.flatMap((r) => r.spellings || []).map(norm));
@@ -1183,7 +1199,7 @@ function scopeOf(c) {
   const P = tapicks(c), ex = new Set(P.ex.map(norm)), inBase = new Set(base.map((m) => norm(m.linz.name)));
   const matched = base.filter((m) => !ex.has(norm(m.linz.name)));
   for (const n of P.add) { const x = byNorm.get(norm(n)); if (x && !inBase.has(norm(x.name)) && !ex.has(norm(x.name))) matched.push({ input: x.name, linz: x, added: true, studies: [] }); }
-  return { s, L, base, matched, unmatched, pairs: pairs.filter((m) => !ex.has(norm(m.linz.name))), excluded: base.filter((m) => ex.has(norm(m.linz.name))),
+  return { s, L, base, matched, unmatched, allPairs: pairs, isEx: (n) => ex.has(norm(n)), pairs: pairs.filter((m) => !ex.has(norm(m.linz.name))), excluded: base.filter((m) => ex.has(norm(m.linz.name))),
     scoped: !!s || P.add.length > 0 || P.ex.length > 0 || manualFor(c).length > 0 };
 }
 function togglePick(c, name, include) {
@@ -1220,7 +1236,7 @@ function allocRows(c, all) {
       const direct = byNorm.has(norm(r.linz_ref)) || (r.spellings || []).some((x) => byNorm.has(norm(x)));
       const k = allocKey(r.file, r.linz_ref, r.territory || ""); if (seen.has(k)) continue;
       const alloc = allocFor(r.file, r.linz_ref, r.territory || ""); if (!all && direct && !(alloc && alloc.file === r.file)) continue; seen.add(k);
-      const hit = locate(r.linz_ref, r.territory || "", r.file, byNorm);
+      const hit = locateRow(r.linz_ref, r, byNorm);
       out.push({ key: k, file: r.file, name: r.linz_ref, mname: r.m_suburb || r.linz_ref, territory: r.territory || "", alloc, direct, targets: hit ? hit.linz.map((x) => x.name) : [] }); } }
   for (const a of manualFor(c)) { const k = allocKey("manual", a.name, a.territory);
     out.push({ key: k, file: "manual", name: a.name, mname: a.name, territory: a.territory, alloc: a, manual: true, targets: (a.linzSuburbs || []).map((x) => (byNorm.get(norm(x.name)) || {}).name).filter(Boolean) }); }
@@ -1280,6 +1296,7 @@ function allocateHTML() {
   <div class="row" style="margin:0 0 8px">${sel.map((x) => `<button class="btn ${x === c ? "primary" : ""}" type="button" data-ata="${x}">${esc(taOf(x).name)}${BATCH.linz[x] ? ` (${allocRows(x).filter((r) => !r.targets.length).length})` : ""}</button>`).join("")}
     <button class="btn" type="button" id="alinz-all">Load LINZ suburbs for all</button></div>
   ${detail}
+  ${refinedHTML()}
   <div class="row" style="margin-top:12px"><button class="btn primary" type="button" data-btab="vsuburbs">Next: 2.3 Validate suburbs →</button></div>`;
 }
 function setAlloc(r, names) {
@@ -1297,6 +1314,63 @@ function mapPair(c, study, linz) {
 }
 const curTA = () => BATCH.aTA && BATCH.sel.has(BATCH.aTA) ? BATCH.aTA : [...BATCH.sel].sort()[0];
 function curAllocRows() { return allocRows(curTA(), store.get("map-all", "0") === "1"); }
+
+// ---------------------------------------------------------------- refined input files, saved as new versions
+// The originals are never overwritten: each download gets the next version number and a timestamp, e.g.
+// nz_suburb_provider.csv -> nz_suburb_provider_v2_20261124-0930.csv. Rows for TAs not refined here (not selected, or
+// LINZ suburbs not loaded) and extra columns are kept as they were.
+const stampNow = () => { const d = new Date(), z = (n) => String(n).padStart(2, "0"); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; };
+function versionName(orig, fallback) {
+  const m = String(orig || fallback).match(/^(.*?)(?:_v(\d+)(?:_\d{8}-\d{4})?)?(\.[a-z]+)?$/i);
+  return `${m[1]}_v${(+m[2] || 1) + 1}_${stampNow()}${m[3] || ".csv"}`;
+}
+const acronymFor = (c) => { const f = filePrvdr(c); return !BATCH.prvdr[c] && f && f.acronyms.length ? f.acronyms[0] : prvdrFor(c); };
+function refinedFiles() {
+  const sel = [...BATCH.sel].sort(), done = sel.filter((c) => BATCH.linz[c]), skip = sel.filter((c) => !BATCH.linz[c]), D2 = Object.fromEntries(done.map((c) => [c, scopeOf(c)]));
+  const inDone = (tas) => tas.some((c) => done.includes(c));
+  const hdr = (k, def) => (BATCH.files[k] && BATCH.files[k].headers) || def;
+  const write = (headers, rows) => [headers, ...rows.map((r) => headers.map((h) => r[h.toUpperCase()] ?? ""))];
+  // provider: study suburbs in scope
+  const ph = hdr("provider", ["M_SUBURB", "Other spellings", "PRVDR"]), prov = [];
+  for (const r of BATCH.files.provider || []) { const tas = provRowTAs(r); if (!inDone(tas)) { prov.push(r); continue; }
+    const c = tas.find((x) => done.includes(x)), S = D2[c], mine = S.allPairs.filter((m) => norm(m.mname) === norm(r.M_SUBURB));
+    if (mine.length && mine.every((m) => S.isEx(m.linz.name))) continue;   // every LINZ suburb it maps to was excluded
+    prov.push(r); }
+  for (const c of done) { const S = D2[c], have = new Set(prov.map((r) => norm(r.M_SUBURB)));
+    const studies = S.s && S.s.rows.length && !(BATCH.files.provider || []).length ? S.pairs.map((m) => m.mname) : [];
+    for (const n of [...manualFor(c).map((a) => a.name), ...studies]) if (!have.has(norm(n))) { have.add(norm(n));
+      prov.push({ M_SUBURB: n, "OTHER SPELLINGS": "", PRVDR: acronymFor(c), M_TERRITORY: taOf(c).name }); } }
+  // map: the allocations, one row per study -> LINZ pair
+  const mh = hdr("map", ["M_SUBURB", "PROVIDER", "NZ_SUBURB_REF", "M_TERRITORY"]), map = (BATCH.files.map || []).filter((r) => !inDone(rowTAs(r.M_TERRITORY, r.PROVIDER)));
+  for (const c of done) { const seen = new Set();
+    for (const m of D2[c].pairs) { const k = norm(m.mname) + "|" + norm(m.linz.name); if (seen.has(k)) continue; seen.add(k);
+      const old = (BATCH.files.map || []).find((x) => norm(x.M_SUBURB) === norm(m.mname) && norm(x.NZ_SUBURB_REF) === norm(m.linz.name)) || {};
+      map.push({ ...old, M_SUBURB: m.mname, PROVIDER: old.PROVIDER || (m.row && m.row.code) || acronymFor(c), NZ_SUBURB_REF: m.linz.name, M_TERRITORY: old.M_TERRITORY || taOf(c).name }); } }
+  // ref: the LINZ suburbs to load
+  const rh = hdr("ref", ["M_SUBURB", "TYPE", "M_TERRITORY", "M_SUBURB_HH_COUNT"]), ref = (BATCH.files.ref || []).filter((r) => !inDone(rowTAs(r.M_TERRITORY, r.PRVDR || r.PROVIDER)));
+  for (const c of done) for (const m of D2[c].matched) { const old = (BATCH.files.ref || []).find((x) => norm(x.M_SUBURB) === norm(m.linz.name)) || {};
+    ref.push({ ...old, M_SUBURB: m.linz.name, TYPE: old.TYPE || m.linz.type || "", M_TERRITORY: old.M_TERRITORY || taOf(c).name }); }
+  const ensure = (h, extra) => extra.reduce((a, x) => a.some((y) => y.toUpperCase() === x) ? a : [...a, x], h);
+  const out = {
+    provider: { rows: write(ensure(ph, (prov.some((r) => r.M_TERRITORY) && !ph.some((h) => h.toUpperCase() === "M_TERRITORY")) ? ["M_TERRITORY"] : []), prov), n: prov.length },
+    map: { rows: write(mh, map), n: map.length }, ref: { rows: write(rh, ref), n: ref.length } };
+  return { out, done, skip };
+}
+function downloadRefined(k) {
+  const { out } = refinedFiles(), names = { provider: "nz_suburb_provider.csv", map: "nz_suburb_map.csv", ref: "nz_suburb_ref.csv" };
+  const ks = k === "all" ? ["provider", "map", "ref"] : [k], made = {};
+  ks.forEach((x, i) => { const n = versionName(BATCH.fileNames[x], names[x]); made[x] = n; setTimeout(() => download(n, csv(out[x].rows, (BATCH.files[x] && BATCH.files[x].sep) || ",")), i * 400); });
+  if (k === "all") setTimeout(() => exportBuilder(made), ks.length * 400);
+  toastMsg(`Saved ${Object.values(made).join(", ")}${k === "all" ? " and a builder config pointing to them" : ""}`);
+}
+function refinedHTML() {
+  const { out, done, skip } = refinedFiles();
+  return `<div class="card" style="margin-top:12px"><h3>Refined input files</h3>
+    <p class="small muted">Your refinements (mappings, exclusions, added study suburbs) for ${done.length ? done.map((c) => esc(taOf(c).name)).join(", ") : "no TA yet"}, merged into your files and saved as <b>new versions</b>: the originals are never overwritten. Other TAs' rows and extra columns are kept.${skip.length ? ` Load LINZ suburbs for ${skip.map((c) => esc(taOf(c).name)).join(", ")} to include them.` : ""}</p>
+    <div class="row" style="gap:6px">${[["provider", "nz_suburb_provider", "study scope"], ["map", "nz_suburb_map", "allocations"], ["ref", "nz_suburb_ref", "LINZ reference"]].map(([k, f, w]) =>
+      `<button class="btn" type="button" data-refined="${k}" ${done.length ? "" : "disabled"}>${f} (${w}, ${out[k].n} rows)</button>`).join("")}
+      <button class="btn primary" type="button" data-refined="all" ${done.length ? "" : "disabled"}>All three + builder config</button></div></div>`;
+}
 
 // ---------------------------------------------------------------- builder config (suburb_lookup.html, version 1)
 function builderNote() {
@@ -1321,10 +1395,10 @@ function importBuilder(c, fname) {
   BATCH.builder = { ...c, fname }; BATCH.valid = {}; saveSel();
   return `Loaded ${fname}: ${Object.keys(c.prvdrMatches || {}).length - bad} PRVDR matches${bad ? ` (${bad} matched no saved provider)` : ""}, ${n} allocations, keep rule "${BATCH.keep}"`;
 }
-function exportBuilder() {
+function exportBuilder(made) {
   const b = BATCH.builder || {}, roles = { map: "suburb_map", ref: "suburb_ref", provider: "suburb_provider" };
-  const inputs = (b.inputs || []).filter((i) => !Object.values(roles).includes(i.role) || !BATCH.fileNames[Object.keys(roles).find((k) => roles[k] === i.role)]);
-  for (const [k, r] of Object.entries(roles)) if (BATCH.fileNames[k]) inputs.push({ role: r, file: BATCH.fileNames[k] });
+  const inputs = (b.inputs || []).filter((i) => !Object.values(roles).includes(i.role) || !((made && made[Object.keys(roles).find((k) => roles[k] === i.role)]) || BATCH.fileNames[Object.keys(roles).find((k) => roles[k] === i.role)]));
+  for (const [k, r] of Object.entries(roles)) if ((made && made[k]) || BATCH.fileNames[k]) inputs.push({ role: r, file: (made && made[k]) || BATCH.fileNames[k] });
   const nameOf = (code) => (BATCH.providers.find((p) => p.prvdr === code) || {}).name || code;
   const out = { ...b, tool: "NZ Suburb Reference Builder", version: 1, saved: new Date().toISOString().slice(0, 10), inputs,
     settings: { ...(b.settings || {}), keepMode: BATCH.keep },
@@ -1332,7 +1406,7 @@ function exportBuilder() {
     suburbAllocations: Object.values(BATCH.alloc).map((a) => ({ file: a.file, name: a.name, territory: a.territory || "", linzSuburbs: a.linzSuburbs })),
     suburbPicks: Object.fromEntries(Object.entries(BATCH.picks).map(([c, P]) => [taOf(c).name || c, P])) };
   delete out.fname;
-  download("nz_suburb_builder_config.json", JSON.stringify(out, null, 2) + "\n");
+  download(made ? versionName(b.fname, "nz_suburb_builder_config.json").replace(/\.csv$/, ".json") : "nz_suburb_builder_config.json", JSON.stringify(out, null, 2) + "\n");
 }
 
 // ---------------------------------------------------------------- 4. validate suburbs
@@ -1375,7 +1449,7 @@ function validateHTML() {
     <p class="small muted">Each TA's LINZ suburbs are fetched once and cached for everyone, so validating again, or later, makes no request. Allocated rows count as matched. Click a row to see it on the map.</p>
     <table><tbody>${rows}</tbody></table>
     ${done ? '<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="load">Next: 3 Load →</button></div>' : ""}</div>
-  <div class="row" style="margin-top:16px;justify-content:space-between"><h2 style="margin:0">${esc(t.name || "")} <span class="small muted">· ${esc(prvdrFor(c))}</span></h2>${taNav(c, "data-vta")}</div>${detail}`;
+  <div class="row" style="margin-top:16px;justify-content:space-between"><h2 style="margin:0">${esc(t.name || "")} <span class="small muted">· ${esc(prvdrFor(c))}</span></h2>${taNav(c, "data-vta")}</div>${detail}${refinedHTML()}`;
 }
 
 // ---------------------------------------------------------------- 5. load
@@ -1499,6 +1573,7 @@ document.addEventListener("click", async (e) => {
     if (!x) return toastMsg(`"${n}" is not a LINZ suburb in ${taOf(c).name}`); togglePick(c, x.name, true); return drawBatch(); }
   if (t.dataset && t.dataset.punmatch) { delete BATCH.matches[t.dataset.punmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bcfg-export") return exportBuilder();
+  if (t.dataset && t.dataset.refined) return downloadRefined(t.dataset.refined);
   if (t.id === "bcfg-clear") { BATCH.builder = null; return drawBatch(); }
   if (t.dataset && t.dataset.tprvdrReset) { delete BATCH.prvdr[t.dataset.tprvdrReset]; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.tunsel) { BATCH.sel.delete(t.dataset.tunsel); saveSel(); return drawBatch(); }

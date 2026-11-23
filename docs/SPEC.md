@@ -560,7 +560,12 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 These two stages replace the reference builder's Load and Allocate stages. The stage bar runs 1 Region, 2 Configure, 3 Load, then Imagery, Validate, Context, Explore and Export; Configure has three sub-steps.
 1. **2.1 Inputs and TAs:**
    - select TAs on a zoomable map (scroll to zoom, drag to pan, +/−, zoom to selection, reset) or in the 67-TA table;
-   - uploaded `nz_suburb_map.csv`, `nz_suburb_ref.csv` and `nz_suburb_provider.csv` apply **only to the selected TAs**: files never change the selection, but TAs they mention can be added with **Select them**;
+   - the input files have distinct roles, and the tool builds on them:
+     - `nz_suburb_provider.csv` (M_SUBURB, Other spellings, PRVDR) is the **study scope**: the study suburbs of interest and their provider;
+     - `nz_suburb_map.csv` (M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY) holds the **allocations** of study suburbs to LINZ suburbs;
+     - `nz_suburb_ref.csv` (M_SUBURB, TYPE, M_TERRITORY, …) is the **LINZ suburb reference**;
+     - without a provider file, map and ref act as keep-lists (either / both), as in the builder;
+   - uploaded files apply **only to the selected TAs**: files never change the selection, but TAs they mention can be added with **Select them**;
    - each selected TA's **PRVDR** is filled from the reference CSVs, resolved as the builder does: `nz_suburb_provider.csv` PRVDR, then `nz_suburb_map.csv` PROVIDER (the most common code among the TA's rows, through your matches; legacy codes, aliases and provider names map to current codes), then a loaded saved configuration, then the TA's saved provider. Provider rows (no M_TERRITORY in the builder's format) reach their TA through the same suburb or spelling in your map/ref lists, else the TA's LINZ suburbs. Your acronym is shown with the saved provider it resolves to (used for rates and stored in the database); codes matching no provider are flagged with a link to 2.2. Only a hand pick (`prvdr_manual`) outranks your files, and it can be reset;
    - each selected TA shows that PRVDR's **charging rates** (type, fixed $/yr, volumetric $/m³, date checked) with a link to the provider's **source**;
    - **saved configurations** (`batch_configs`) store the selected TAs, PRVDRs, keep rule, provider-code matches (`prvdr_matches`), allocations (`allocations`) and the resulting suburb names, never file contents; they are private to their owner;
@@ -576,6 +581,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
    - the located suburbs are drawn on a zoomable map: in scope in blue, the TA's other suburbs in grey;
    - LINZ suburbs come from the `linz-suburbs` Edge Function, which is editor-only, uses the caller's key or the project key, counts against the key's daily budget, honours Retry-After, and fetches each TA **once into a shared cache** (`linz_suburb_index`, fresh for 30 days); Allocate and Validate share it;
    - the worker reads the same cache, so loading a validated TA makes no suburbs request.
+   - **refined input files** (end of 2.2 and 2.3): your refinements (mappings, exclusions, added study suburbs) merged into the three files and saved as **new versions**, never over the originals: `<name>_v<N+1>_<yyyymmdd-hhmm>.csv`, with the same headers, separator and extra columns. Rows for TAs not refined (not selected, or LINZ suburbs not loaded) are kept as they were. *All three* also saves a builder config whose inputs point to the new versions. The refined provider file drops study suburbs whose LINZ suburbs were all excluded and adds study suburbs created in 2.2; the map file has one row per study → LINZ pair; the ref file lists the LINZ suburbs to load.
 4. **3 Load:** queue only validated LINZ suburbs (`regions.scope`) with the region's PRVDR (`regions.prvdr`). `m_suburbs` keeps your M_SUBURB names with the LINZ suburb each maps to, one row per allocated suburb. Then follow progress, publish, and download the tile list.
 
 ## 26. Privacy
