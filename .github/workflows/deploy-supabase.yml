@@ -1,0 +1,40 @@
+# Deploy database migrations and Edge Functions to Supabase when they change on main (docs/SPEC.md section 27).
+# Secrets live only in the "production" environment (SUPABASE_DB_PASSWORD, SUPABASE_ACCESS_TOKEN; variable
+# SUPABASE_PROJECT_REF). Auth/config settings (config.toml) are never pushed from here: they stay in the dashboard.
+name: Deploy Supabase
+on:
+  push:
+    branches: [main]
+    paths: ["supabase/migrations/**", "supabase/functions/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-supabase
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF" -p "$SUPABASE_DB_PASSWORD"
+      - name: Migrations (dry run)
+        run: supabase db push --dry-run -p "$SUPABASE_DB_PASSWORD"
+      - name: Migrations
+        run: supabase --yes db push -p "$SUPABASE_DB_PASSWORD"
+      - name: Edge Functions
+        run: |
+          for d in supabase/functions/*/; do
+            f=$(basename "$d"); [ "$f" = "_shared" ] && continue
+            echo "deploying $f"; supabase functions deploy "$f" --use-api --project-ref "$PROJECT_REF"
+          done
