@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explore NZ Suburb Water</title>
+<meta name="description" content="Static demo of explore-nz-suburb-water: suburb metadata for residential water-demand analysis (pools, gardens, sections, census, climate, water rates) for Taupō and Tauranga pilot regions.">
+<style>
+:root{--bg:#f5f6f4;--panel:#fff;--ink:#1b1e21;--muted:#5f656b;--line:#dfe1dc;--accent:#0b6bcb;--accent-ink:#fff;--accent-soft:#e3effb;
+--ok:#1a7f4b;--ok-bg:#e2f3e9;--bad:#b42318;--bad-bg:#fde7e5;--warn:#8a5a00;--warn-bg:#fcf0d4;
+--s1:#deebf7;--s2:#9ecae1;--s3:#4292c6;--s4:#08519c;--s5:#08306b;--land:#eceee9;--landline:#c9cdc4;--rain:#3d7cc9;--et0:#d9822b;--temp:#c0392b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121416;--panel:#1b1e21;--ink:#e7e8e6;--muted:#9aa0a6;--line:#2c3035;--accent:#5aa4f0;--accent-ink:#0b1a2a;--accent-soft:#16283b;
+--ok:#5fd394;--ok-bg:#15301f;--bad:#ff8a80;--bad-bg:#3a1916;--warn:#f2c46b;--warn-bg:#3a2d11;
+--s1:#16324a;--s2:#1f5a86;--s3:#3a86c4;--s4:#7ab8ea;--s5:#c6e2fb;--land:#23272b;--landline:#3a3f45;--rain:#6aa6ec;--et0:#f0a35a;--temp:#ff7a6b}}
+:root[data-theme="dark"]{--bg:#121416;--panel:#1b1e21;--ink:#e7e8e6;--muted:#9aa0a6;--line:#2c3035;--accent:#5aa4f0;--accent-ink:#0b1a2a;--accent-soft:#16283b;
+--ok:#5fd394;--ok-bg:#15301f;--bad:#ff8a80;--bad-bg:#3a1916;--warn:#f2c46b;--warn-bg:#3a2d11;
+--s1:#16324a;--s2:#1f5a86;--s3:#3a86c4;--s4:#7ab8ea;--s5:#c6e2fb;--land:#23272b;--landline:#3a3f45;--rain:#6aa6ec;--et0:#f0a35a;--temp:#ff7a6b}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+header{position:sticky;top:0;z-index:10;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar{max-width:1240px;margin:0 auto;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.brand{font-weight:700;font-size:1.02rem;margin-right:6px}
+.badge{font-size:.72rem;font-weight:600;border-radius:99px;padding:2px 9px;background:var(--warn-bg);color:var(--warn)}
+.spacer{flex:1}
+select,button,input{font:inherit;color:var(--ink)}
+select,input[type=text]{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.9rem}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+nav.stages{max-width:1240px;margin:0 auto;padding:0 16px 8px;display:flex;gap:4px;overflow-x:auto;scrollbar-width:thin}
+nav.stages button{flex:0 0 auto;border:1px solid transparent;background:none;border-radius:8px;padding:6px 10px;cursor:pointer;color:var(--muted);font-size:.9rem;white-space:nowrap}
+nav.stages button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-soft);font-weight:600}
+nav.stages button .n{display:inline-block;width:1.4em;font-variant-numeric:tabular-nums}
+main{max-width:1240px;margin:0 auto;padding:18px 16px 64px}
+h1{font-size:1.45rem;margin:0 0 4px}h2{font-size:1.12rem;margin:26px 0 10px}h3{font-size:.98rem;margin:0 0 8px}
+.lead{color:var(--muted);margin:0 0 16px;max-width:860px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.kpi b{display:block;font-size:1.45rem;font-variant-numeric:tabular-nums;line-height:1.25}
+.kpi span{color:var(--muted);font-size:.8rem}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:.86rem;width:100%}
+th,td{padding:6px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+td.l,th.l{text-align:left}
+.tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:.76rem;font-weight:600}
+.ok{background:var(--ok-bg);color:var(--ok)}.bad{background:var(--bad-bg);color:var(--bad)}.warn{background:var(--warn-bg);color:var(--warn)}.info{background:var(--accent-soft);color:var(--accent)}
+.note{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel);border-radius:0 8px 8px 0;font-size:.88rem;margin:0 0 14px}
+.muted{color:var(--muted)}.small{font-size:.84rem}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+svg text{fill:var(--muted);font-size:11px;font-family:inherit}
+.map svg{width:100%;height:auto;display:block}
+.map path.sub{stroke:var(--panel);stroke-width:1.2;cursor:pointer}
+.map path.sub:hover,.map path.sub.sel{stroke:var(--ink);stroke-width:2}
+.map path.sa2{fill:none;stroke:var(--ink);stroke-opacity:.45;stroke-dasharray:3 3;stroke-width:1;pointer-events:none}
+.legend{display:flex;gap:4px;align-items:center;font-size:.78rem;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:22px;height:10px;border-radius:2px}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);padding:6px 9px;border-radius:7px;font-size:.8rem;opacity:0;transition:opacity .12s;z-index:30;max-width:260px}
+.tip.show{opacity:.95}
+.keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:420px}
+.key{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;background:var(--panel)}
+.key kbd{display:block;font-size:1.15rem;font-family:inherit}
+.k-up{grid-column:2}.k-left{grid-column:1;grid-row:2}.k-down{grid-column:2;grid-row:2}.k-right{grid-column:3;grid-row:2}
+.job{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.86rem}
+.job:last-child{border-bottom:none}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:.78rem;max-height:240px;margin:8px 0 0}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:420px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--panel);cursor:pointer}
+.locked{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--muted);font-size:.88rem}
+footer{max-width:1240px;margin:0 auto;padding:0 16px 40px;color:var(--muted);font-size:.8rem}
+[hidden]{display:none!important}
+@media (max-width:600px){.bar{gap:8px}.brand{width:100%}}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="brand">Explore NZ Suburb Water</span>
+    <span class="badge" title="Static demo: no database, no real sign-in">Static demo</span>
+    <label class="small muted">Region <select id="region"></select></label>
+    <span class="spacer"></span>
+    <span id="who" class="small"></span>
+    <button class="btn" id="signin" type="button">Sign in with Google</button>
+    <button class="btn" id="theme" type="button" aria-label="Toggle colour theme">◐</button>
+  </div>
+  <nav class="stages" id="stages" role="tablist" aria-label="Stages"></nav>
+</header>
+
+<main id="main"><p class="muted">Loading data…</p></main>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<dialog id="signin-dlg">
+  <form method="dialog">
+    <h3>Sign in (demo)</h3>
+    <p class="small muted">The real app uses Supabase Auth with Google OAuth; your role comes from the <code>profiles</code> table and every query is filtered by row-level security. Here you pick a role to see what each one can do.</p>
+    <button class="gbtn" value="google" type="submit">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+      Continue with Google (simulated)
+    </button>
+    <p style="margin:14px 0 6px"><label>Role <select id="role-pick">
+      <option value="viewer">viewer: browse and export published regions</option>
+      <option value="labeller">labeller: viewer plus validation labelling</option>
+      <option value="editor">editor: labeller plus pipelines, allocation, rates, publish</option>
+      <option value="admin">admin: everything, users and schedules</option>
+    </select></label></p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" value="cancel" type="submit">Cancel</button></div>
+  </form>
+</dialog>
+
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (v, d = 0) => v == null || Number.isNaN(v) ? "–" : Number(v).toLocaleString("en-NZ", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+const RANK = { viewer: 1, labeller: 2, editor: 3, admin: 4 };
+const STAGES = [["region", "Region"], ["load", "Load"], ["allocate", "Allocate"], ["imagery", "Imagery"], ["validate", "Validate"], ["context", "Context"], ["explore", "Explore"], ["export", "Export"]];
+const REPO = "https://github.com/water-rha-nz/explore-nz-suburb-water";
+let D = null, SECT = null, region = store.get("region", "taupo"), stage = store.get("stage", "region");
+let user = null; try { user = JSON.parse(store.get("user", "null")); } catch (e) {}
+let edits = {}; try { edits = JSON.parse(store.get("edits", "{}")) || {}; } catch (e) {}
+let jobs = []; try { jobs = JSON.parse(store.get("jobs", "[]")) || []; } catch (e) {}
+const can = (r) => user && RANK[user.role] >= RANK[r];
+const R = () => D.regions[region];
+const mName = (s) => (edits[region + ":" + s.linz_id]) || s.name;
+
+// ---------- metrics catalogue (paper variables, DWU excluded) ----------
+const C23 = (k) => (s) => s.census && s.census["2023"] ? s.census["2023"][k] : null;
+const METRICS = [
+  { id: "PercPool", label: "Sections with a pool (%)", get: (s) => s.PercPool, d: 1, src: "Imagery" },
+  { id: "GardSize", label: "Median garden (vegetated) m²", get: (s) => s.GardSize, d: 0, src: "Imagery" },
+  { id: "GardPct", label: "Median % of section vegetated", get: (s) => s.GardPct, d: 1, src: "Imagery" },
+  { id: "LotSize", label: "Median section m²", get: (s) => s.LotSize, d: 0, src: "LINZ" },
+  { id: "Footprint", label: "Median roof footprint m²", get: (s) => s.Footprint, d: 0, src: "LINZ" },
+  { id: "ImperviousProxy", label: "Median impervious proxy m²", get: (s) => s.ImperviousProxy, d: 0, src: "LINZ + imagery" },
+  { id: "SharedPct", label: "Shared sections (%)", get: (s) => s.SharedPct, d: 1, src: "LINZ titles" },
+  { id: "HhSize", label: "Household size (2023)", get: C23("hh_size_mean"), d: 2, src: "Stats NZ" },
+  { id: "Income", label: "Median household income $ (2023)", get: C23("income_median"), d: 0, src: "Stats NZ" },
+  { id: "BRooms", label: "Mean bedrooms (2023)", get: C23("bedrooms_mean_all"), d: 2, src: "Stats NZ" },
+  { id: "Owner", label: "Owner-occupied % (2023)", get: C23("pct_owner_all"), d: 1, src: "Stats NZ" },
+  { id: "PctDetached", label: "Separate houses % (2023)", get: C23("pct_separate"), d: 1, src: "Stats NZ" },
+  { id: "PctJoined", label: "Joined dwellings % (2023)", get: C23("pct_joined"), d: 1, src: "Stats NZ" },
+  { id: "Rain", label: "Annual rain mm (2008–2025)", get: (s) => s.climate_annual && s.climate_annual.rain_mm, d: 0, src: "Open-Meteo" },
+  { id: "ET0", label: "Annual ET0 mm (2008–2025)", get: (s) => s.climate_annual && s.climate_annual.et0_mm, d: 0, src: "Open-Meteo" },
+  { id: "Temp", label: "Mean temperature °C", get: (s) => s.climate_annual && s.climate_annual.tmean_c, d: 1, src: "Open-Meteo" },
+  { id: "Density", label: "Titles per km²", get: (s) => s.density_per_km2, d: 0, src: "LINZ" },
+];
+const M = Object.fromEntries(METRICS.map((m) => [m.id, m]));
+const resident = (s) => s.sections != null;
+
+// ---------- tiny SVG chart kit ----------
+const ramp = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s4)", "var(--s5)"];
+function classify(vals) {
+  const v = vals.filter((x) => x != null).sort((a, b) => a - b);
+  if (!v.length) return () => "var(--land)";
+  const q = [0.2, 0.4, 0.6, 0.8].map((p) => v[Math.min(v.length - 1, Math.floor(p * v.length))]);
+  return (x) => x == null ? "var(--land)" : ramp[q.filter((t) => x > t).length];
+}
+function mapSVG(feats, opts = {}) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const f of feats) for (const poly of f.geom) for (const ring of poly) for (const [x, y] of ring) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const W = 640, pad = 8, sc = (W - 2 * pad) / Math.max(x1 - x0, y1 - y0) * (x1 - x0 >= y1 - y0 ? 1 : 1);
+  const H = Math.round((y1 - y0) * sc + 2 * pad), Wd = Math.round((x1 - x0) * sc + 2 * pad);
+  const P = (ring) => ring.map(([x, y], i) => (i ? "L" : "M") + ((x - x0) * sc + pad).toFixed(1) + "," + ((y1 - y) * sc + pad).toFixed(1)).join("") + "Z";
+  const paths = feats.map((f, i) => `<path class="${f.cls || "sub"}" data-i="${i}" fill="${f.fill || "none"}" d="${f.geom.map((p) => p.map(P).join("")).join("")}"><title>${esc(f.title || "")}</title></path>`).join("");
+  const extra = (opts.overlay || []).map((f) => `<path class="sa2" d="${f.geom.map((p) => p.map(P).join("")).join("")}"/>`).join("");
+  return `<svg viewBox="0 0 ${Wd} ${H}" role="img" aria-label="${esc(opts.label || "Map")}">${paths}${extra}</svg>`;
+}
+function bars(series, opts) { // series: [{v, label}], optional line [{v}]
+  const W = 640, H = opts.h || 200, L = 40, B = 24, T = 10, n = series.length;
+  const vmax = Math.max(1, ...series.map((s) => s.v || 0), ...(opts.line || []).map((s) => s.v || 0));
+  const bw = (W - L - 8) / n, y = (v) => T + (H - T - B) * (1 - v / vmax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let k = 0; k <= 4; k++) { const v = vmax * k / 4; s += `<line x1="${L}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+  series.forEach((d, i) => { const h = (H - T - B) * (d.v || 0) / vmax; s += `<rect x="${L + i * bw + bw * 0.12}" y="${y(d.v || 0)}" width="${bw * 0.76}" height="${h}" fill="${opts.color || "var(--rain)"}"><title>${esc(d.label)}: ${fmt(d.v, 1)}</title></rect>`; if (opts.every ? i % opts.every === 0 : true) s += `<text x="${L + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${esc(d.short ?? d.label)}</text>`; });
+  if (opts.line) s += `<polyline fill="none" stroke="${opts.lineColor || "var(--et0)"}" stroke-width="2" points="${opts.line.map((d, i) => `${L + i * bw + bw / 2},${y(d.v || 0)}`).join(" ")}"/>`;
+  return s + "</svg>";
+}
+function line(vals, opts) {
+  const W = 640, H = opts.h || 160, L = 40, B = 22, T = 8, n = vals.length;
+  const vmax = Math.max(1, ...vals.filter((v) => v != null)), x = (i) => L + (W - L - 8) * i / Math.max(1, n - 1), y = (v) => T + (H - T - B) * (1 - v / vmax);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label)}">`;
+  for (let k = 0; k <= 3; k++) { const v = vmax * k / 3; s += `<line x1="${L}" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 4}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`; }
+  (opts.ticks || []).forEach(([i, t]) => { s += `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${esc(t)}</text>`; });
+  if (opts.bars) vals.forEach((v, i) => { if (v) s += `<line x1="${x(i)}" x2="${x(i)}" y1="${y(0)}" y2="${y(v)}" stroke="${opts.color}" stroke-width="1.2"/>`; });
+  else s += `<polyline fill="none" stroke="${opts.color}" stroke-width="1.5" points="${vals.map((v, i) => v == null ? "" : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"/>`;
+  return s + "</svg>";
+}
+function scatter(pts, xl, yl) {
+  const W = 640, H = 300, L = 54, B = 38, T = 10, R2 = 14;
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const [xa, xb] = [Math.min(...xs), Math.max(...xs)], [ya, yb] = [Math.min(...ys), Math.max(...ys)];
+  const px = (v) => L + (W - L - R2) * (xb === xa ? 0.5 : (v - xa) / (xb - xa)), py = (v) => T + (H - T - B) * (yb === ya ? 0.5 : 1 - (v - ya) / (yb - ya));
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(yl)} against ${esc(xl)}">`;
+  for (let k = 0; k <= 4; k++) { const vx = xa + (xb - xa) * k / 4, vy = ya + (yb - ya) * k / 4;
+    s += `<line x1="${px(vx)}" x2="${px(vx)}" y1="${T}" y2="${H - B}" stroke="var(--line)"/><text x="${px(vx)}" y="${H - B + 14}" text-anchor="middle">${fmt(vx, 1)}</text>`;
+    s += `<line x1="${L}" x2="${W - R2}" y1="${py(vy)}" y2="${py(vy)}" stroke="var(--line)"/><text x="${L - 4}" y="${py(vy) + 4}" text-anchor="end">${fmt(vy, 1)}</text>`; }
+  s += `<text x="${(L + W) / 2}" y="${H - 4}" text-anchor="middle">${esc(xl)}</text>`;
+  pts.forEach((p) => { s += `<circle cx="${px(p.x)}" cy="${py(p.y)}" r="${Math.max(4, Math.min(14, Math.sqrt(p.n || 100) / 5))}" fill="${p.c}" fill-opacity=".75" stroke="var(--panel)"><title>${esc(p.label)}: ${fmt(p.x, 1)}, ${fmt(p.y, 1)}</title></circle>`; });
+  return s + "</svg>";
+}
+function nzMap() {
+  const r = D.nz_regions; if (!r) return "";
+  const KX = Math.cos(41 * Math.PI / 180), q = r.q, W = 300;
+  const rings = []; let x0 = 180, x1 = 160, y0 = 0, y1 = -60;
+  for (const g of r.regions) for (const d of g.r) { let x = 0, y = 0; const a = []; for (let i = 0; i < d.length; i += 2) { x += d[i]; y += d[i + 1]; const lon = x / q, lat = y / q; a.push([lon, lat]); if (lon < x0) x0 = lon; if (lon > x1) x1 = lon; if (lat < y0) y0 = lat; if (lat > y1) y1 = lat; } rings.push(a); }
+  const sc = W / ((x1 - x0) * KX), H = Math.round((y1 - y0) * sc);
+  const P = ([lon, lat]) => [((lon - x0) * KX * sc).toFixed(1), ((y1 - lat) * sc).toFixed(1)];
+  let s = `<svg viewBox="-4 -4 ${W + 8} ${H + 8}" role="img" aria-label="New Zealand regional councils with pilot regions">`;
+  s += rings.map((a) => `<path d="${a.map((p, i) => (i ? "L" : "M") + P(p).join(",")).join("")}Z" fill="var(--land)" stroke="var(--landline)" stroke-width=".8"/>`).join("");
+  for (const [k, g] of Object.entries(D.regions)) { const [cx, cy] = P(g.lonlat); s += `<circle cx="${cx}" cy="${cy}" r="${k === region ? 7 : 5}" fill="var(--accent)" stroke="var(--panel)" stroke-width="2" data-reg="${k}" style="cursor:pointer"><title>${esc(g.label)}</title></circle><text x="${+cx + 10}" y="${+cy + 4}" style="fill:var(--ink);font-weight:600">${esc(g.label.split(" ")[0])}</text>`; }
+  return s + "</svg>";
+}
+function legend(vals, d) {
+  const v = vals.filter((x) => x != null).sort((a, b) => a - b); if (!v.length) return "";
+  const q = [0, 0.2, 0.4, 0.6, 0.8].map((p) => v[Math.min(v.length - 1, Math.floor(p * v.length))]);
+  return `<div class="legend">${ramp.map((c, i) => `<i style="background:${c}"></i>${i < 4 ? "" : ""}≥${fmt(q[i], d)}`).join(" ")}<i style="background:var(--land);border:1px solid var(--line)"></i>no data</div>`;
+}
+
+// ---------- tooltip for maps ----------
+const tip = $("#tip");
+document.addEventListener("mousemove", (e) => { if (tip.classList.contains("show")) { tip.style.left = Math.min(innerWidth - 270, e.clientX + 12) + "px"; tip.style.top = (e.clientY + 14) + "px"; } });
+
+// ---------- header ----------
+function renderHeader() {
+  $("#region").innerHTML = Object.entries(D.regions).map(([k, g]) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("");
+  $("#stages").innerHTML = STAGES.map(([id, l], i) => `<button role="tab" type="button" data-stage="${id}" aria-selected="${id === stage}"><span class="n">${i + 1}</span>${l}</button>`).join("");
+  $("#who").innerHTML = user ? `${esc(user.email)} · <span class="tag info">${user.role}</span>` : `<span class="muted">Not signed in</span>`;
+  $("#signin").textContent = user ? "Sign out" : "Sign in with Google";
+}
+$("#region").addEventListener("change", (e) => { region = e.target.value; store.set("region", region); render(); });
+$("#stages").addEventListener("click", (e) => { const b = e.target.closest("[data-stage]"); if (b) { stage = b.dataset.stage; store.set("stage", stage); render(); scrollTo(0, 0); } });
+$("#signin").addEventListener("click", () => { if (user) { user = null; store.set("user", "null"); render(); } else $("#signin-dlg").showModal(); });
+$("#signin-dlg").addEventListener("close", () => { if ($("#signin-dlg").returnValue === "google") { user = { email: "demo.user@example.org", role: $("#role-pick").value }; store.set("user", JSON.stringify(user)); render(); } });
+$("#theme").onclick = () => { const r = document.documentElement; const dk = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dk ? "light" : "dark"; };
+const lock = (role, what) => `<div class="locked">🔒 ${esc(what)} needs the <b>${role}</b> role. ${user ? `You are signed in as <b>${user.role}</b>.` : "Sign in (simulated) to try it."} In the full app this is enforced by Supabase row-level security, not by hiding buttons.</div>`;
+
+// ---------- stages ----------
+const V = {};
+V.region = () => {
+  const g = R();
+  const subs = g.suburbs.filter(resident);
+  return `<h1>1 · Region</h1><p class="lead">Choose a territorial authority and its suburbs. The full app checks which LINZ aerial captures cover the area with a near-infrared band, then queues the pipeline as background jobs. This demo has two pilot regions, prepared from local runs on 2026-11-23.</p>
+  <div class="grid g2">
+    <div class="card map" id="nz">${nzMap()}<p class="small muted" style="margin:6px 0 0">Click a marker to switch region. Outlines: Stats NZ regional councils 2025.</p></div>
+    <div class="card"><h3>${esc(g.label)}</h3>
+      <table><tbody>
+        <tr><td>Territorial authority</td><td>${esc(g.ta)}</td></tr>
+        <tr><td>LINZ suburbs (with housing)</td><td>${g.suburbs.length} (${subs.length})</td></tr>
+        <tr><td>Residential sections</td><td>${fmt(subs.reduce((a, s) => a + s.sections, 0))}</td></tr>
+        <tr><td>SA2 areas</td><td>${g.sa2.length}</td></tr>
+        <tr><td>Imagery capture</td><td class="l" style="white-space:normal">${esc(g.imagery)}<br><span class="muted small">s3://nz-imagery/${esc(g.imagery_prefix)}/rgbnir</span></td></tr>
+        <tr><td>Water provider (PRVDR)</td><td>${esc(g.provider)}</td></tr>
+        <tr><td>Status</td><td><span class="tag ok">published</span></td></tr>
+      </tbody></table>
+      <h3 style="margin-top:14px">Pipeline jobs</h3>
+      ${can("editor") ? `<div class="row"><button class="btn primary" id="queue" type="button">Queue full refresh</button><span class="small muted">Simulated; the worker would pick these up from the <code>jobs</code> table.</span></div>` : lock("editor", "Queuing pipeline jobs")}
+      <div id="jobs" style="margin-top:8px">${jobsHTML()}</div>
+    </div>
+  </div>`;
+};
+function jobsHTML() {
+  const mine = jobs.filter((j) => j.region === region);
+  return mine.length ? mine.slice(-8).reverse().map((j) => `<div class="job"><span>${esc(j.type)}</span><span class="tag ${j.status === "done" ? "ok" : j.status === "running" ? "warn" : "info"}">${j.status}</span></div>`).join("") : `<p class="small muted">No jobs yet.</p>`;
+}
+V.load = () => {
+  const g = R(), a = g.area_check;
+  const rows = g.suburbs.map((s) => `<tr><td>${esc(s.name)}</td><td class="l">${esc(s.type)}</td><td>${fmt(s.area_km2, 2)}</td><td>${fmt(s.sections)}</td><td>${fmt(s.titles)}</td><td>${fmt(s.density_per_km2)}</td><td>${fmt(s.LotSize)}</td><td>${fmt(s.SurveyArea)}</td><td class="l">${s.urban_rural ? `<span class="tag ${s.urban_rural === "Urban" ? "info" : "warn"}">${s.urban_rural}</span>` : "–"}</td></tr>`).join("");
+  return `<h1>2 · Load</h1><p class="lead">Source layers are loaded by bounding box from LINZ and Stats NZ. Each row in the database keeps its source, version and fetch date, so any export can be reproduced for a past date.</p>
+  <div class="grid g3">
+    ${[["LINZ NZ Suburbs and Localities", "layer 113764", "WFS · LINZ key"], ["LINZ NZ Primary Parcels", "layer 50772", "WFS · LINZ key"], ["LINZ NZ Property Titles", "layer 50804 (type, issue date)", "WFS · LINZ key"], ["LINZ NZ Building Outlines", "layer 101290", "WFS · LINZ key"], ["Stats NZ SA2 2023 (clipped)", "Datafinder layer 111206", "WFS · Datafinder key"], ["LINZ aerial imagery RGB+NIR", "s3://nz-imagery", "Public, no key"]].map(([t, l, k]) => `<div class="card"><h3>${t}</h3><p class="small muted" style="margin:0">${l}<br>${k}</p></div>`).join("")}
+  </div>
+  ${a ? `<h2>Section area check</h2><div class="kpis"><div class="kpi"><span>Polygon within 1% of legal survey area</span><b>${a.within_1pct}%</b><span>${fmt(a.n)} sections</span></div><div class="kpi"><span>Within 5%</span><b>${a.within_5pct}%</b></div><div class="kpi"><span>Median difference</span><b>${a.median_abs_diff_m2} m²</b></div></div>` : ""}
+  <h2>Suburbs</h2><div class="card scroll"><table><thead><tr><th>Suburb</th><th class="l">LINZ type</th><th>km²</th><th>Sections</th><th>Titles</th><th>Titles/km²</th><th>Median section m²</th><th>Median survey m²</th><th class="l">Urban/rural</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="small muted">Urban/rural uses the reference builder's rule: a LINZ suburb is urban unless it is both sparse (under 300 per km²) and has a median section over 4,000 m².</p>`;
+};
+V.allocate = () => {
+  const g = R(), ed = can("editor"), w = D.water_rates.find((x) => x.PROVIDER === g.provider);
+  const rows = g.suburbs.map((s) => `<tr><td>${esc(s.name)}</td><td class="l">${ed ? `<input type="text" data-msub="${s.linz_id}" value="${esc(mName(s))}" aria-label="M_SUBURB for ${esc(s.name)}">` : esc(mName(s))}</td><td class="l">${esc(s.ta)}</td><td class="l">${esc(g.provider)}</td></tr>`).join("");
+  return `<h1>3 · Allocate</h1><p class="lead">This maps your own suburb names (<code>M_SUBURB</code>) to LINZ suburbs and assigns each suburb a water provider (<code>PRVDR</code>), as the reference builder does. ${ed ? "Edits are stored in this browser and flow through to the exports." : "Editors can rename M_SUBURB here."}</p>
+  <div class="grid g2">
+    <div class="card scroll"><table><thead><tr><th>LINZ suburb</th><th class="l">M_SUBURB</th><th class="l">M_TERRITORY</th><th class="l">PRVDR</th></tr></thead><tbody>${rows}</tbody></table>
+      ${ed ? `<div class="row" style="margin-top:8px"><button class="btn" id="reset-edits" type="button">Reset names</button></div>` : ""}</div>
+    <div class="card"><h3>Water rates: ${esc(w.name)} (${esc(w.PROVIDER)})</h3>
+      <table><tbody><tr><td>Charging</td><td>${esc(w.CHARGING_TYPE)}</td></tr><tr><td>Fixed $/yr</td><td>${w.FIXED_PA == null ? '<span class="tag warn">not verified</span>' : "$" + fmt(w.FIXED_PA, 2)}</td></tr>
+      <tr><td>Volumetric $/m³</td><td>${w.VOLUMETRIC_PA == null ? "–" : "$" + fmt(w.VOLUMETRIC_PA, 2)}</td></tr><tr><td>Year</td><td>${esc(w.year)}</td></tr><tr><td>Checked</td><td>${esc(w.DATE_EST)}</td></tr></tbody></table>
+      <p class="small muted">${esc(w.NOTE)}</p><p class="small"><a href="${esc(w.source)}" rel="noopener" target="_blank">Provider source</a></p>
+      <p class="small muted">The full app keeps a dated history per provider (<code>water_rates.valid_from</code>), so the price variable can vary by year.</p></div>
+  </div>`;
+};
+V.imagery = () => {
+  const g = R(), subs = g.suburbs.filter(resident);
+  const sel = subs.find((s) => s.linz_id == store.get("sub-" + region)) || subs[0];
+  const tot = subs.reduce((a, s) => a + s.pools, 0), sec = subs.reduce((a, s) => a + s.sections, 0);
+  const rows = subs.map((s) => `<tr data-sel="${s.linz_id}" style="cursor:pointer${s === sel ? ";background:var(--accent-soft)" : ""}"><td>${esc(s.name)}</td><td>${fmt(s.sections)}</td><td>${fmt(s.pools)}</td><td>${fmt(s.PercPool, 1)}</td><td>${fmt(s.PoolArea, 1)}</td><td>${fmt(s.Footprint)}</td><td>${fmt(s.Unbuilt)}</td><td>${fmt(s.GardSize)}</td><td>${fmt(s.GardPct, 1)}</td><td>${fmt(s.ImperviousProxy)}</td></tr>`).join("");
+  const h = (arr, bins, lab) => bars(arr.map((v, i) => ({ v, label: `${bins[i]}+ m²`, short: bins[i] >= 1000 ? bins[i] / 1000 + "k" : bins[i] })), { label: lab, h: 170, color: "var(--s3)" });
+  return `<h1>4 · Imagery</h1><p class="lead">The worker reads LINZ RGB + near-infrared tiles at 15–20 cm and measures each residential section, excluding roofs (LINZ building outlines). Water is bright and blue with very low near-infrared; vegetation has a high vegetation index and bright near-infrared. Pool candidates must pass size, shape and colour tests, calibrated per capture.</p>
+  <div class="note">Privacy: only suburb aggregates are published. Pool or garden values for individual properties stay in editor-only tables, and image chips are only shown to signed-in labellers.</div>
+  <div class="kpis"><div class="kpi"><span>Capture</span><b style="font-size:1rem">${esc(g.imagery)}</b></div><div class="kpi"><span>Pools detected</span><b>${fmt(tot)}</b><span>${fmt(100 * tot / sec, 1)}% of ${fmt(sec)} sections</span></div>
+  <div class="kpi"><span>Validated precision</span><b>${fmt(100 * g.validation.pool_user.precision, 1)}%</b><span>labeller-checked</span></div><div class="kpi"><span>Estimated recall</span><b>${fmt(100 * g.validation.pool_user.recall, 0)}%</b><span>pool counts are a lower bound</span></div></div>
+  <div class="card scroll"><table><thead><tr><th>Suburb</th><th>Sections</th><th>Pools</th><th>% with pool</th><th>Median pool m²</th><th>Median roof m²</th><th>Median unbuilt m²</th><th>Median garden m²</th><th>% vegetated</th><th>Impervious proxy m²</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <h2>Distributions: ${esc(sel.name)}</h2><p class="small muted">Click a suburb row to change. Histograms are aggregates only.</p>
+  <div class="grid g2"><div class="card"><h3>Section size (m²)</h3>${h(sel.hist_section, sel.hist_bins_section, "Section size histogram")}</div>
+  <div class="card"><h3>Vegetated (garden) area (m²)</h3>${h(sel.hist_garden, sel.hist_bins_garden, "Garden area histogram")}</div></div>`;
+};
+V.validate = () => {
+  const g = R(), v = g.validation, U = v.pool_user, Cl = v.pool_claude;
+  const gate = U.precision >= 0.95 && U.recall >= 0.8 && U.labelled >= 150;
+  const ct = (s) => `<table><thead><tr><th></th><th>Pool</th><th>Water, not pool</th><th>Not pool</th><th>Unknown</th></tr></thead><tbody>${["pool", "not_pool"].map((t) => `<tr><td>Tool: ${t === "pool" ? "pool" : "not pool"}</td>${["pool", "water", "not_pool", "unknown"].map((c) => `<td>${s.confusion[t][c]}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  const gr = (o) => `${o.about_right} about right · ${o.over} too much · ${o.under} too little · ${o.unknown} unknown`;
+  return `<h1>5 · Validate</h1><p class="lead">Labellers check sample chips with the arrow keys. The labels give per-capture precision (on accepted detections) and estimated recall (from rejected candidates). A capture's pool metrics are published only when it passes the quality gate.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Labelling keys</h3>
+      <div class="keys"><div class="key k-up"><kbd>↑</kbd><span class="small">Water, not pool</span></div><div class="key k-left"><kbd>←</kbd><span class="small">Not pool</span></div><div class="key k-down"><kbd>↓</kbd><span class="small">Unknown</span></div><div class="key k-right"><kbd>→</kbd><span class="small">Pool</span></div></div>
+      <p class="small muted">Gardens: ← too much · ↑ about right · → too little · ↓ unknown. Backspace undoes.</p>
+      ${can("labeller") ? `<p class="small"><span class="tag ok">labeller</span> In the full app the labelling queue opens here, showing private image chips from Supabase Storage. The demo shows only the aggregate results below.</p>` : lock("labeller", "Labelling")}
+    </div>
+    <div class="card"><h3>Quality gate: ${esc(g.imagery)}</h3>
+      <p><span class="tag ${gate ? "ok" : "bad"}">${gate ? "passes" : "fails"}</span> precision ≥ 95%, recall ≥ 80%, ≥ 150 labels</p>
+      <table><tbody><tr><td>Labels (excluding unknown)</td><td>${U.labelled}</td></tr><tr><td>Precision</td><td>${fmt(100 * U.precision, 1)}%</td></tr><tr><td>Miss rate among rejects</td><td>${fmt(100 * U.miss_rate, 1)}%</td></tr>
+      <tr><td>Estimated pools found / missed</td><td>${fmt(U.est_found)} / ${fmt(U.est_missed)}</td></tr><tr><td>Estimated recall</td><td>${fmt(100 * U.recall, 0)}%</td></tr></tbody></table>
+      ${v.missed_pools_n ? `<p class="small muted">${v.missed_pools_green_lt_130} of ${v.missed_pools_n} missed pools fail the green-channel test (deep-blue water): the colour rule needs recalibrating for this capture.</p>` : ""}
+    </div>
+  </div>
+  <h2>Labeller vs tool</h2><div class="card scroll">${ct(U)}</div>
+  <h2>Second reviewer (Claude, blind) vs tool</h2><div class="card scroll">${ct(Cl)}<p class="small muted">The two reviewers agree on pool or not pool for ${v.agree.same} of ${v.agree.n} chips (${fmt(100 * v.agree.same / v.agree.n, 1)}%).</p></div>
+  <h2>Gardens</h2><div class="card"><p class="small">Labeller: ${gr(v.garden.user)}<br>Claude: ${gr(v.garden.claude)}</p></div>`;
+};
+V.context = () => {
+  const g = R(), subs = g.suburbs.filter((s) => s.census && s.census["2023"]);
+  const sel = g.suburbs.find((s) => s.linz_id == store.get("csub-" + region) && s.grid) || g.suburbs.find((s) => s.grid);
+  const cell = g.climate_cells[sel.grid];
+  const yrs = ["2013", "2018", "2023"];
+  const crow = (s) => yrs.map((y) => { const c = s.census[y] || {}; return `<td>${fmt(c.hh_size_mean, 2)}</td><td>${fmt(c.income_median)}</td><td>${fmt(c.pct_owner_all, 1)}</td><td>${fmt(c.bedrooms_mean_all, 2)}</td><td>${fmt(c.pct_separate, 1)}</td>`; }).join("");
+  // monthly climatology
+  const clim = Array.from({ length: 12 }, (_, m) => { const idx = cell.months.map((x, i) => [x, i]).filter(([x]) => +x.slice(5, 7) === m + 1 && +x.slice(0, 4) <= 2025).map(([, i]) => i); const av = (a) => idx.reduce((t, i) => t + (a[i] || 0), 0) / Math.max(1, idx.length); return { rain: av(cell.rain), et0: av(cell.et0), t: av(cell.tmean) }; });
+  const mn = "JFMAMJJASOND".split("");
+  const dd = cell.daily, start = new Date(dd.start + "T00:00:00");
+  const ticks = []; for (let i = 0; i < dd.rain.length; i++) { const d = new Date(start.getTime() + i * 864e5); if (d.getDate() === 1 && d.getMonth() % 3 === 0) ticks.push([i, d.toLocaleDateString("en-NZ", { month: "short", year: "2-digit" })]); }
+  const seas = sel.climate_seasonal.filter((r) => r.year >= 2008 && r.year <= 2026);
+  return `<h1>6 · Context: census and climate</h1><p class="lead">Census tables come from the Stats NZ data API by SA2 (2013, 2018, 2023) and are shared out to suburbs by residential sections. Climate comes from the Open-Meteo archive (daily from 2008) per grid cell; suburbs sharing a cell are flagged. Earth Sciences NZ data is not used.</p>
+  <h2>Census by suburb</h2><div class="card scroll"><table><thead><tr><th rowspan="2">Suburb</th>${yrs.map((y) => `<th colspan="5" style="text-align:center">${y}</th>`).join("")}</tr><tr>${yrs.map(() => "<th>HH size</th><th>Median income $</th><th>Owner %</th><th>Bedrooms</th><th>Separate %</th>").join("")}</tr></thead><tbody>${subs.map((s) => `<tr><td>${esc(s.name)}</td>${crow(s)}</tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Bedrooms and ownership are also available split by separate house and joined dwelling (in the export). Household income isn't published by dwelling type at SA2 level.</p>
+  <h2>Climate</h2>
+  <div class="row" style="margin-bottom:8px"><label class="small">Suburb <select id="csub">${g.suburbs.filter((s) => s.grid).map((s) => `<option value="${s.linz_id}" ${s === sel ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></label>
+  <span class="small muted">Grid cell ${esc(sel.grid)} · shared by ${g.suburbs.filter((s) => s.grid === sel.grid).length} suburb(s)</span></div>
+  <div class="grid g2">
+    <div class="card"><h3>Monthly averages 2008–2025</h3>${bars(clim.map((c, i) => ({ v: c.rain, label: mn[i] + " rain mm", short: mn[i] })), { label: "Monthly rain with ET0 line", line: clim.map((c) => ({ v: c.et0 })), h: 200 })}
+      <div class="legend"><i style="background:var(--rain)"></i>rain mm <i style="background:var(--et0)"></i>reference evapotranspiration (ET0) mm</div></div>
+    <div class="card"><h3>Daily rain since ${esc(dd.start)}</h3>${line(dd.rain, { label: "Daily rain", color: "var(--rain)", bars: true, ticks, h: 200 })}
+      <h3 style="margin-top:8px">Daily maximum temperature °C</h3>${line(dd.tmax, { label: "Daily max temperature", color: "var(--temp)", ticks, h: 140 })}</div>
+  </div>
+  <h2>Seasonal values (paper: February = summer, June = winter)</h2>
+  <div class="card scroll"><table><thead><tr><th>Year</th><th>Feb rain</th><th>Feb ET0</th><th>Feb deficit</th><th>Feb T °C</th><th>Jun rain</th><th>Jun ET0</th><th>Jun T °C</th></tr></thead><tbody>
+  ${seas.map((r) => `<tr><td>${r.year}</td><td>${fmt(r.rain_mm_summer_feb)}</td><td>${fmt(r.et0_mm_summer_feb)}</td><td>${fmt(r.deficit_mm_summer_feb)}</td><td>${fmt(r.tmean_c_summer_feb, 1)}</td><td>${fmt(r.rain_mm_winter_jun)}</td><td>${fmt(r.et0_mm_winter_jun)}</td><td>${fmt(r.tmean_c_winter_jun, 1)}</td></tr>`).join("")}</tbody></table></div>
+  <p class="small muted">Deficit = ET0 − rain (mm/month): positive means outdoor watering pressure.</p>`;
+};
+V.explore = () => {
+  const g = R(), mid = store.get("metric", "PercPool"), m = M[mid] || M.PercPool, showSA2 = store.get("sa2", "0") === "1";
+  const vals = g.suburbs.map((s) => resident(s) ? m.get(s) : null), col = classify(vals);
+  const feats = g.suburbs.map((s, i) => ({ geom: s.geom, fill: col(vals[i]), title: `${s.name}: ${fmt(vals[i], m.d)}` }));
+  const all = Object.entries(D.regions).flatMap(([k, r]) => r.suburbs.filter(resident).map((s) => ({ ...s, _r: k })));
+  const xid = store.get("sx", "LotSize"), yid = store.get("sy", "PercPool");
+  const pts = all.map((s) => ({ x: M[xid].get(s), y: M[yid].get(s), n: s.sections, label: s.name, c: s._r === "taupo" ? "var(--s3)" : "var(--et0)" })).filter((p) => p.x != null && p.y != null);
+  const opt = (sel) => METRICS.map((x) => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.label)}</option>`).join("");
+  const cols = ["LotSize", "Footprint", "GardSize", "PercPool", "HhSize", "Income", "Owner", "BRooms", "PctJoined", "Rain", "ET0"];
+  return `<h1>7 · Explore</h1><p class="lead">This is the <code>v_suburb_metadata</code> view: the example study's explanatory variables per suburb, ready to join to your water consumption.</p>
+  <div class="row" style="margin-bottom:10px"><label class="small">Map shows <select id="metric">${opt(mid)}</select></label><label class="small"><input type="checkbox" id="sa2" ${showSA2 ? "checked" : ""}> SA2 outlines</label></div>
+  <div class="grid g2">
+    <div class="card map" id="exmap">${mapSVG(feats, { label: m.label + " by suburb", overlay: showSA2 ? g.sa2 : [] })}${legend(vals, m.d)}<p class="small muted" style="margin:6px 0 0">Source: ${esc(m.src)}. Grey = suburbs with no residential sections.</p></div>
+    <div class="card"><h3>Compare suburbs across both regions</h3>
+      <div class="row small"><label>X <select id="sx">${opt(xid)}</select></label><label>Y <select id="sy">${opt(yid)}</select></label></div>
+      ${pts.length > 1 ? scatter(pts, M[xid].label, M[yid].label) : "<p class='muted'>Not enough data.</p>"}
+      <div class="legend"><i style="background:var(--s3)"></i>Taupō <i style="background:var(--et0)"></i>Tauranga · circle size = sections</div></div>
+  </div>
+  <h2>Suburb metadata</h2><div class="card scroll"><table><thead><tr><th>Suburb</th>${cols.map((c) => `<th title="${esc(M[c].label)}">${c}</th>`).join("")}</tr></thead><tbody>
+  ${g.suburbs.filter(resident).map((s) => `<tr><td>${esc(mName(s))}</td>${cols.map((c) => `<td>${fmt(M[c].get(s), M[c].d)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+};
+
+// ---------- exports (compatible with suburb_lookup.html) ----------
+const cq = (v) => { const s = v == null ? "" : String(v); return /[",\n\t]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+const csv = (rows, sep = ",") => rows.map((r) => r.map(cq).join(sep)).join("\r\n") + "\r\n";
+const scopeRegions = () => store.get("scope", "region") === "all" ? Object.keys(D.regions) : [region];
+const SUBS = () => scopeRegions().flatMap((k) => D.regions[k].suburbs.map((s) => ({ s, k, g: D.regions[k] })));
+const censusFor = (s, y) => { const yrs = ["2013", "2018", "2023"].filter((c) => s.census && s.census[c]); const pick = y <= 2015 ? "2013" : y <= 2020 ? "2018" : "2023"; return [pick, s.census && s.census[pick] ? s.census[pick] : (yrs.length ? s.census[yrs[yrs.length - 1]] : {})]; };
+const EXPORTS = {
+  "nz_suburb_ref.csv": { desc: "M_SUBURB, TYPE, M_TERRITORY, M_SUBURB_HH_COUNT", make: () => csv([["M_SUBURB", "TYPE", "M_TERRITORY", "M_SUBURB_HH_COUNT"], ...SUBS().map(({ s }) => [mName(s), s.type, s.ta, s.hh_count_proxy ?? 0])]) },
+  "nz_household_ref.csv": { desc: "M_SUBURB, M_DWELLING_ID, SECTION_TYPE, SECTION_SIZE_M2, NUM_SECTIONS, SECTION_AVG_M2 (LINZ parcels; no imagery values)", lazy: true, make: async () => { await loadSections(); const ks = scopeRegions(); const nm = {}; for (const k of ks) for (const s of D.regions[k].suburbs) nm[k + ":" + s.name] = mName(s); return csv([["M_SUBURB", "M_DWELLING_ID", "SECTION_TYPE", "SECTION_SIZE_M2", "NUM_SECTIONS", "SECTION_AVG_M2"], ...SECT.rows.filter((r) => ks.includes(r[0])).map((r) => [nm[r[0] + ":" + r[1]] || r[1], r[2], r[3], r[4], r[5], r[6]])]); } },
+  "nz_urban_rural.csv": { desc: "Tab-separated: SUBURB, TYPE, PROVIDER, NOTE", make: () => csv([["SUBURB", "TYPE", "PROVIDER", "NOTE"], ...SUBS().map(({ s }) => [mName(s), s.urban_rural || "", "", s.sections != null ? `LINZ ${s.type.toLowerCase()}; ${s.titles} titles; ${fmt(s.density_per_km2)} per km²; median section ${fmt(s.LotSize)} m²` : `LINZ ${s.type.toLowerCase()}; no residential sections`])], "\t") },
+  "nz_water_rates.csv": { desc: "PROVIDER, CHARGING_TYPE, FIXED_PA, VOLUMETRIC_PA, THRESHOLD_Lpd, DATE_EST, NOTE", make: () => csv([["PROVIDER", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "NOTE"], ...D.water_rates.filter((w) => scopeRegions().some((k) => D.regions[k].provider === w.PROVIDER)).map((w) => [w.PROVIDER, w.CHARGING_TYPE, w.FIXED_PA, w.VOLUMETRIC_PA, w.THRESHOLD_Lpd, w.DATE_EST, w.NOTE])]) },
+  "nz_suburb_demographics.csv": { desc: "M_SUBURB, M_TERRITORY, PRVDR, then one column per metric", make: () => { const cols = METRICS.map((m) => m.id); return csv([["M_SUBURB", "M_TERRITORY", "PRVDR", ...cols], ...SUBS().filter(({ s }) => resident(s)).map(({ s, g }) => [mName(s), s.ta, g.provider, ...METRICS.map((m) => { const v = m.get(s); return v == null ? "" : +(+v).toFixed(m.d); })])]); } },
+  "sa2_census_wide.csv": { desc: "One row per SA2 × year, for the original tool's Demographics loader", make: () => { const keys = ["households", "hh_size_mean", "income_median", "pct_owner_all", "bedrooms_mean_all", "pct_separate", "pct_joined", "bedrooms_mean_separate", "bedrooms_mean_joined", "pct_owner_separate", "pct_owner_joined"]; const rows = [["SA2_CODE", "SA2_NAME", "YEAR", ...keys]]; for (const k of scopeRegions()) for (const a of D.regions[k].sa2) for (const [y, c] of Object.entries(a.census)) rows.push([a.code, a.name, y, ...keys.map((x) => c[x])]); return csv(rows); } },
+  "suburb_metadata_panel.csv": { desc: "Suburb × year × season panel (2008–2025, Feb/Jun) with the study's variables except DWU", make: () => {
+    const head = ["REGION", "M_SUBURB", "LINZ_ID", "PRVDR", "YEAR", "SEASON", "Temp", "Rain", "ET0", "Deficit", "CENSUS_YEAR", "HhSize", "Income", "BRooms", "Owner", "PctDetached", "PctJoined", "PercPool", "GardSize", "LotSize", "Footprint", "ImperviousProxy", "Price", "IMAGERY_CAPTURE"];
+    const rows = [head];
+    for (const { s, k, g } of SUBS()) { if (!resident(s)) continue; const w = D.water_rates.find((x) => x.PROVIDER === g.provider);
+      for (const r of s.climate_seasonal) { if (r.year < 2008 || r.year > 2025) continue;
+        for (const [season, suf] of [["summer", "summer_feb"], ["winter", "winter_jun"]]) { const [cy, c] = censusFor(s, r.year);
+          rows.push([k, mName(s), s.linz_id, g.provider, r.year, season, r["tmean_c_" + suf], r["rain_mm_" + suf], r["et0_mm_" + suf], r["deficit_mm_" + suf], cy, c.hh_size_mean, c.income_median, c.bedrooms_mean_all, c.pct_owner_all, c.pct_separate, c.pct_joined, s.PercPool, s.GardSize, s.LotSize, s.Footprint, s.ImperviousProxy, w && w.VOLUMETRIC_PA, g.imagery]); } } }
+    return csv(rows); } },
+  "DATA_DICTIONARY.csv": { desc: "Column definitions, units and sources", make: () => csv([["column", "definition", "unit", "source"], ["Temp", "Mean daily air temperature for the month", "°C", "Open-Meteo archive (CC BY 4.0)"], ["Rain", "Total rainfall for the month", "mm/month", "Open-Meteo"], ["ET0", "FAO-56 reference evapotranspiration", "mm/month", "Open-Meteo"], ["Deficit", "ET0 − Rain", "mm/month", "derived"],
+    ["HhSize", "Mean usual residents per household", "people", "Stats NZ CEN23_FHH_038"], ["Income", "Median total household income", "NZD/yr", "Stats NZ CEN23_HOU_001"], ["BRooms", "Mean bedrooms", "bedrooms", "Stats NZ CEN23_HOU_020"], ["Owner", "Owned/partly owned or family trust, of stated", "%", "Stats NZ CEN23_HOU_020"], ["PctDetached", "Households in separate houses", "%", "Stats NZ CEN23_HOU_020"], ["PctJoined", "Households in joined dwellings", "%", "Stats NZ CEN23_HOU_020"],
+    ["PercPool", "Residential sections with a detected pool", "%", "LINZ aerial imagery (CC BY 4.0), validated"], ["GardSize", "Median vegetated area per section (NDVI>0.2, NIR≥40, excluding roofs)", "m²", "LINZ aerial imagery"], ["LotSize", "Median residential section polygon area", "m²", "LINZ NZ Primary Parcels"], ["Footprint", "Median building outline area per section", "m²", "LINZ NZ Building Outlines"], ["ImperviousProxy", "Median unbuilt minus median vegetated area", "m²", "derived"],
+    ["Price", "Current volumetric water $/m³ (history to be added)", "NZD/m³", "Provider published rates"], ["CENSUS_YEAR", "Census used for the year (2013 for 2008–15, 2018 for 2016–20, 2023 after)", "", "derived"], ["DWU", "Not included: join your own water consumption", "L/dwelling/day", "provider data (outside this app)"]]) },
+  "ATTRIBUTION.md": { desc: "Required CC BY 4.0 attribution", make: () => ATTR },
+  "nz_suburb_builder_config.json": { desc: "Config for suburb_lookup.html (inputs, outputs, settings, PRVDR matches)", make: () => JSON.stringify({ tool: "NZ Suburb Reference Builder", version: 1, dataFolder: "", inputs: [{ role: "linz", file: "lds-new-zealand-2layers-SHP.zip" }], outputs: { suburb_ref: "nz_suburb_ref.csv", household_ref: "nz_household_ref.csv", urban_rural: "nz_urban_rural.csv", water_rates: "nz_water_rates.csv" }, settings: { keepMode: "any", dropNoProvider: true, hhCount: "addr", urbanDensityPerKm2: 300, urbanMedianSectionM2: 4000 }, prvdrMatches: Object.fromEntries(scopeRegions().map((k) => [D.regions[k].provider, D.water_rates.find((w) => w.PROVIDER === D.regions[k].provider).name])), suburbAllocations: SUBS().filter(({ s }) => mName(s) !== s.name).map(({ s }) => ({ row: mName(s), linz: [s.name], territory: s.ta })) }, null, 2) },
+};
+const ATTR = `# Attribution
+
+Data in this export is derived from the following sources, each licensed under Creative Commons Attribution 4.0 International (CC BY 4.0):
+
+- Toitū Te Whenua Land Information New Zealand (LINZ): NZ Suburbs and Localities, NZ Primary Parcels, NZ Property Titles, NZ Building Outlines. Released by LINZ under CC BY 4.0.
+- Aerial imagery via LINZ: Taupō 0.075m Urban Aerial Photos (2023) and Tauranga 0.1m Urban Aerial Photos (2025), sourced from LINZ and licensed for reuse under CC BY 4.0. Copyright of each survey rests with its supplier (see the LINZ imagery survey index).
+- Stats NZ (Tatauranga Aotearoa): 2013, 2018 and 2023 Census tables (Aotearoa Data Explorer) and Statistical Area 2 2023 boundaries, licensed by Stats NZ for reuse under CC BY 4.0.
+- Weather data by Open-Meteo.com (CC BY 4.0), based on ECMWF/Copernicus ERA5 and ERA5-Land reanalysis.
+- Water rates compiled from provider publications (see source links).
+
+Derived data © explore-nz-suburb-water contributors, licensed CC BY 4.0.
+`;
+async function loadSections() { if (!SECT) SECT = await fetch("data/sections.json").then((r) => r.json()); }
+function download(name, text) { const type = name.endsWith(".json") ? "application/json" : name.endsWith(".md") ? "text/markdown" : "text/csv"; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: type + ";charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); }
+V.export = () => {
+  const sc = store.get("scope", "region");
+  return `<h1>8 · Export</h1><p class="lead">The exports use the same file names, columns and delimiters as <code>suburb_lookup.html</code>, so they load straight into the original tool, plus a panel file for the example study's models. Each bundle carries its attribution and a manifest.</p>
+  ${user ? "" : `<div class="note">Viewers can export published regions. ${lock("viewer", "Exporting")}</div>`}
+  <div class="row" style="margin-bottom:10px"><label class="small">Scope <select id="scope"><option value="region" ${sc === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${sc === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+  <button class="btn primary" id="dl-all" type="button" ${user ? "" : "disabled"}>Download all + manifest</button></div>
+  <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
+  ${Object.entries(EXPORTS).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-preview="${f}" type="button">Preview</button></td><td><button class="btn" data-dl="${f}" type="button" ${user ? "" : "disabled"}>Download</button></td></tr>`).join("")}
+  </tbody></table></div>
+  <pre id="preview" hidden></pre>
+  <p class="small muted">Demo notes: <code>M_SUBURB_HH_COUNT</code> uses residential title counts as a stand-in for dwellings, and <code>M_DWELLING_ID</code> is the LINZ parcel ID. The full app uses the reference builder's dwelling logic (rating units and titles, addresses).</p>`;
+};
+async function makeExport(f) { return await EXPORTS[f].make(); }
+document.addEventListener("click", async (e) => {
+  const t = e.target;
+  if (t.closest("[data-reg]")) { region = t.closest("[data-reg]").dataset.reg; store.set("region", region); render(); return; }
+  if (t.id === "queue") { const types = ["LINZ layers (WFS)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
+    let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
+  if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
+  const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
+  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…"; const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
+  if (t.dataset.dl) { download(t.dataset.dl, await makeExport(t.dataset.dl)); return; }
+  if (t.id === "dl-all") { const man = { app: "explore-nz-suburb-water demo", generated: new Date().toISOString(), data_as_of: D.generated, scope: scopeRegions(), files: [] };
+    for (const f of Object.keys(EXPORTS)) { const txt = await makeExport(f); man.files.push({ file: f, bytes: new Blob([txt]).size }); download(f, txt); await new Promise((r) => setTimeout(r, 250)); }
+    man.sources = { linz: "LDS layers 113764, 50772, 50804, 101290; nz-imagery " + scopeRegions().map((k) => D.regions[k].imagery_prefix).join(", "), statsnz: "ADE CEN23_HOU_020, CEN23_FHH_038, CEN23_HOU_001, CEN23_HOU_018; Datafinder 111206", climate: "Open-Meteo archive (best match)" };
+    download("manifest.json", JSON.stringify(man, null, 2)); }
+});
+document.addEventListener("change", (e) => {
+  const t = e.target;
+  if (t.dataset.msub) { const k = region + ":" + t.dataset.msub; const s = R().suburbs.find((x) => x.linz_id == t.dataset.msub); if (t.value.trim() && t.value.trim() !== s.name) edits[k] = t.value.trim(); else delete edits[k]; store.set("edits", JSON.stringify(edits)); }
+  if (t.id === "csub") { store.set("csub-" + region, t.value); render(); }
+  if (["metric", "sx", "sy", "scope"].includes(t.id)) { store.set(t.id, t.value); render(); }
+  if (t.id === "sa2") { store.set("sa2", t.checked ? "1" : "0"); render(); }
+});
+document.addEventListener("mouseover", (e) => { const p = e.target.closest && e.target.closest("#exmap path.sub"); if (p) { const s = R().suburbs[+p.dataset.i]; const m = M[store.get("metric", "PercPool")] || M.PercPool; tip.innerHTML = `<b>${esc(s.name)}</b><br>${esc(m.label)}: ${fmt(resident(s) ? m.get(s) : null, m.d)}${s.sections != null ? `<br>${fmt(s.sections)} sections` : ""}`; tip.classList.add("show"); } });
+document.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest("#exmap path.sub")) tip.classList.remove("show"); });
+
+function render() {
+  if (!D.regions[region]) region = Object.keys(D.regions)[0];
+  if (!V[stage]) stage = "region";
+  renderHeader();
+  $("#main").innerHTML = V[stage]();
+}
+fetch("data/demo.json").then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then((d) => {
+  D = d;
+  $("#foot").innerHTML = `Static demo of <a href="${REPO}">explore-nz-suburb-water</a> (code Apache-2.0, data CC BY 4.0). Data prepared ${esc(D.generated)} from LINZ, Stats NZ and Open-Meteo, CC BY 4.0. See <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> and the <a href="${REPO}/blob/main/docs/SPEC.md">specification</a>. This demo doesn't handle water consumption.`;
+  render();
+}).catch((err) => { $("#main").innerHTML = `<p>Could not load demo data (${esc(err.message)}). If you opened this file directly, serve the folder over HTTP instead.</p>`; });
+</script>
+</body>
+</html>
