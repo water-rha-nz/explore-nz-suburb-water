@@ -267,7 +267,7 @@ V.region = () => {
         <tr><td>SA2 areas</td><td>${g.sa2.length}</td></tr>
         <tr><td>Imagery capture</td><td class="l" style="white-space:normal">${esc(g.imagery)}<br><span class="muted small">s3://nz-imagery/${esc(g.imagery_prefix)}/rgbnir</span></td></tr>
         <tr><td>Water provider (PRVDR)</td><td>${esc(g.provider)}</td></tr>
-        <tr><td>Status</td><td><span class="tag ok">published</span></td></tr>
+        <tr><td>Status</td><td>${g.status === "published" ? '<span class="tag ok">published</span>' : `<span class="tag warn">${esc(g.status || "draft")}</span>`}</td></tr>
       </tbody></table>
       <h3 style="margin-top:14px">Pipeline jobs</h3>
       ${can("editor") ? `<div class="row"><button class="btn primary" id="queue" type="button">Queue full refresh</button><span class="small muted">Simulated; the worker would pick these up from the <code>jobs</code> table.</span></div>` : lock("editor", "Queuing pipeline jobs")}
@@ -633,7 +633,6 @@ const SB_URL = "https://uthodoiocvnwxwfzahwd.supabase.co", SB_KEY = "sb_publisha
 const sb = supabase.createClient(SB_URL, SB_KEY, { auth: { flowType: "pkce", detectSessionInUrl: true, persistSession: true } });
 let SESSION = null, PROFILE = null, STATIC = null;
 const LIVE = { jobs: [], runs: [], usage: [], rates: {}, labelQueue: [], labelPos: 0, labelling: false, chipUrls: {} };
-STAGES.push(["admin", "Admin"]);
 const multi = (g) => (g.type === "Polygon" ? [g.coordinates] : g.coordinates);
 const q = async (p) => { const { data, error } = await p; if (error) throw new Error(error.message); return data; };
 const today = () => new Date().toISOString().slice(0, 10);
@@ -709,7 +708,7 @@ async function loadRegion(r) {
   });
   const cap = caps[0] || {};
   return { label: r.name, ta: (r.territorial_authorities || [])[0], imagery: cap.id ? `${cap.id} (LINZ, ${cap.bands || "RGB+NIR"})` : "–", imagery_prefix: cap.s3_prefix || "",
-    capture_id: cap.id, ta_code: r.ta_code, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || [174.8, -41.3], status: r.status, suburbs,
+    capture_id: cap.id, ta_code: r.ta_code, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || null, status: r.status, suburbs,
     sa2: sa2o.map((a) => ({ code: a.id, name: a.name, geom: multi(a.geom), census: censusOf(cm.filter((c) => c.sa2_code === a.id)) })),
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
@@ -720,7 +719,8 @@ async function loadAll() {
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
-  for (const r of regions) { const g = await loadRegion(r); if (g.suburbs.length) d.regions[r.id] = g; }   // drafts without data yet are listed on the Batch stage
+  const cen = await q(sb.rpc("region_centroids"));
+  for (const r of regions) { const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = cen[r.id] || g.lonlat; d.regions[r.id] = g; } }   // drafts without data yet are listed on the Batch stage
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
@@ -773,7 +773,7 @@ jobsHTML = function () {
   if (!LIVE.jobs.length) return `<p class="small muted">No jobs for this region yet.</p>`;
   const tag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "running" ? "warn" : "info"}">${esc(s)}</span>`;
   return LIVE.jobs.map((j) => `<div class="job" style="display:block"><div class="row" style="justify-content:space-between"><span>#${j.id} ${esc(j.type)} · ${esc(((j.params || {}).steps || []).join(", "))}</span>${tag(j.status)}</div>
-    ${LIVE.runs.filter((r) => r.job_id === j.id).map((r) => `<div class="small muted">${esc(r.step)}: ${tag(r.status)} ${esc((r.log || "").slice(0, 160))}</div>`).join("")}
+    ${Object.values(Object.fromEntries(LIVE.runs.filter((r) => r.job_id === j.id).map((r) => [r.step, r]))).map((r) => `<div class="small muted">${esc(r.step)}: ${tag(r.status)} ${esc((r.log || "").slice(0, 160))}</div>`).join("")}
     ${j.not_before && j.status !== "done" ? `<div class="small muted">resumes after ${esc(new Date(j.not_before).toLocaleString())}</div>` : ""}</div>`).join("");
 };
 const LIVE_SVCS = [["openmeteo", "Open-Meteo"], ["statsnz_ade", "Stats NZ census API"], ["statsnz_datafinder", "Stats NZ Datafinder"], ["linz_wfs", "LINZ data service"]];
@@ -810,7 +810,7 @@ V.region = () => {
   const h = _vRegion().replace(/<h3 style="margin-top:14px">Pipeline jobs<\/h3>[\s\S]*?<div id="jobs"/, `<h3 style="margin-top:14px">Pipeline jobs</h3>
     ${can("editor") ? `<div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
     <div class="row" style="margin-top:6px"><button class="btn primary" id="queue-live" type="button">Queue job</button><button class="btn" type="button" onclick="refreshJobs()">Refresh</button></div>
-    <p class="small muted">One region per job. The worker (GitHub Actions) runs queued jobs within each service's free-tier budget. LINZ re-loads and imagery runs use the pilot pipeline for now.</p>` : lock("editor", "Queuing jobs")}
+    <p class="small muted">One region per job, run by the worker (GitHub Actions) within each service's free-tier budget. Data already stored, by anyone, is reused, not downloaded again. To prepare new regions, use the Batch stage.</p>` : lock("editor", "Queuing jobs")}
     <div id="jobs"`);
   setTimeout(refreshJobs, 0);
   return h;
@@ -886,12 +886,16 @@ document.addEventListener("click", async (e) => {
   try { await q(sb.from("profiles").update({ role, status }).eq("id", id)); toastMsg("Saved"); loadUsers(); } catch (err) { toastMsg("Not saved: " + err.message); }
 });
 
+document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-goto]"); if (!b) return;
+  stage = b.dataset.goto; store.set("stage", stage); render(); scrollTo(0, 0); });
+
 // ---------------------------------------------------------------- header + boot
 const _renderHeader = renderHeader;
 renderHeader = function () {
   _renderHeader();
-  if (!can("admin")) { const b = document.querySelector('[data-stage="admin"]'); if (b) b.remove(); }
-  $("#who").innerHTML = `${esc(PROFILE.email)} · <span class="tag info">${esc(PROFILE.role)}</span>`;
+  $("#who").innerHTML = `${esc(PROFILE.email)} · <span class="tag info">${esc(PROFILE.role)}</span>
+    <button class="btn" type="button" data-goto="account" ${stage === "account" ? 'aria-current="page"' : ""}>Account</button>
+    ${can("admin") ? `<button class="btn" type="button" data-goto="admin" ${stage === "admin" ? 'aria-current="page"' : ""}>Admin</button>` : ""}`;
   $("#signin").textContent = "Sign out";
 };
 (async function boot() {
@@ -915,7 +919,6 @@ renderHeader = function () {
 // per-user API keys. Loaded after live.js.
 "use strict";
 STAGES.splice(1, 0, ["batch", "Batch"]);
-STAGES.push(["account", "Account"]);
 const BATCH = { tas: null, sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), files: {}, keep: store.get("batch-keep", "any"), batches: [], jobs: [], regions: [] };
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const saveSel = () => store.set("batch-sel", JSON.stringify([...BATCH.sel]));
@@ -993,7 +996,7 @@ const idx = () => Object.fromEntries((D.index_regions || []).map((r) => [r.TA_CO
 // ---------------------------------------------------------------- stage
 V.batch = () => {
   setTimeout(async () => { try { await loadBatchData(); drawBatch(); } catch (e) { $("#batch-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`; } }, 0);
-  return `<h1>Batch preparation</h1><p class="lead">Select the territorial authorities to prepare by clicking them on the map or ticking them in the table. Optionally limit each to the suburbs in your lists (<code>nz_suburb_map.csv</code>, <code>nz_suburb_provider.csv</code>, <code>nz_suburb_ref.csv</code>). Each region becomes its own job, run one at a time within the free-tier budgets, so a large batch is spread over several days.</p>
+  return `<h1>Batch preparation</h1><p class="lead">Select the territorial authorities to prepare by clicking them on the map or ticking them in the table. Optionally limit each to the suburbs in your lists (<code>nz_suburb_map.csv</code>, <code>nz_suburb_provider.csv</code>, <code>nz_suburb_ref.csv</code>). Each region becomes its own job, run one at a time within the free-tier budgets, so a large batch is spread over several days. Data already stored, by any user, is shared and reused (suburbs, sections, buildings, SA2s, census, imagery tiles, climate), so your keys are only used for what is missing.</p>
   <div id="batch-body"><p class="muted">Loading the map…</p></div>`;
 };
 function taMap() {
