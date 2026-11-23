@@ -32,7 +32,7 @@ end = s.index("</script>", boot)
 s = s[:boot] + "/* live: boot is in live.js */\n" + s[end:]
 s = re.sub(r'<meta name="description" content="[^"]*">', '<meta name="description" content="NZ Suburb Water Profiles: suburb-level data for residential water-demand analysis in Aotearoa New Zealand (pools, gardens, sections, census, climate, water charges).">', s, count=1)
 s = s.replace('<main id="main"><p class="muted">Loading data…</p></main>', '<main id="main"><p class="muted">Checking sign-in…</p></main>')
-live = "\n".join(open(os.path.join(ROOT, "app", f), encoding="utf-8").read() for f in ("live.js", "live_batch.js"))
+live = "\n".join(open(os.path.join(ROOT, "app", f), encoding="utf-8").read() for f in ("live.js", "live_batch_ui.js", "live_batch.js"))
 inject = (f'<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>\n'
           f'<script>\nconst SB_URL = {json.dumps(url)}, SB_KEY = {json.dumps(key)};\n{live}\n</script>\n</body>')
 s = s.replace("</body>", inject, 1)

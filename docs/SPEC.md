@@ -555,3 +555,23 @@ Everything a job downloads goes into shared tables, whichever user's or the proj
 | `climate` | cells are shared between regions; days already stored | only new days |
 
 A batch for a TA that already has a region reuses that region; the pilot regions carry their TA codes (021, 023). Verified: re-preparing Kawerau made one LINZ request (the suburbs lookup) and nothing else.
+
+## 25. Batch stage: Configure → Validate → Load
+1. **Configure:**
+   - select TAs on a zoomable map (scroll to zoom, drag to pan, +/−, zoom to selection, reset) or in the 67-TA table;
+   - uploaded `nz_suburb_map.csv`, `nz_suburb_ref.csv` and `nz_suburb_provider.csv` apply **only to the selected TAs**: files never change the selection, but TAs they mention can be added with **Select them**;
+   - each selected TA has a **PRVDR**: chosen by hand, otherwise allocated by `nz_suburb_provider.csv` (the most common code among the TA's rows; legacy codes and aliases map to current codes), otherwise the TA's provider;
+   - each selected TA shows that PRVDR's **charging rates** (type, fixed $/yr, volumetric $/m³, date checked) with a link to the provider's **source**;
+   - **saved configurations** (`batch_configs`) store the selected TAs, PRVDRs, keep rule and the resulting suburb names, never file contents; they are private to their owner.
+2. **Validate:**
+   - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive), with matched and not-found names and "did you mean" suggestions;
+   - the located suburbs are drawn on a zoomable map: in scope in blue, the TA's other suburbs in grey;
+   - LINZ suburbs come from the `linz-suburbs` Edge Function, which is editor-only, uses the caller's key or the project key, counts against the key's daily budget, honours Retry-After, and fetches each TA **once into a shared cache** (`linz_suburb_index`, fresh for 30 days);
+   - the worker reads the same cache, so loading a validated TA makes no suburbs request.
+3. **Load:** queue only validated LINZ suburbs (`regions.scope`) with the region's PRVDR (`regions.prvdr`, used for `suburb_metrics`), then follow progress, publish, and download the tile list.
+
+## 26. Privacy
+- Users see only their own configurations, batches, jobs (plus scheduled project jobs), job runs, validation labels and exports, and usage of their own keys or the project's. Admins see everything.
+- `created_by` columns are not readable by users. The rate setting doesn't record who changed it.
+- Uploaded files are processed in the browser; only the resulting suburb names and mappings are stored.
+- Development workspace: personal data was removed from test fixtures, and the full-access database login was deleted after setup. Tests use the worker's limited login and synthetic users.
