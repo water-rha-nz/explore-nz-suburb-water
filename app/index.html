@@ -928,13 +928,13 @@ STAGES.splice(1, STAGES.filter(([id]) => id === "load" || id === "allocate").len
 let bsub = store.get("batch-sub", "select");
 if (["batch", "allocate", "vsuburbs"].includes(stage)) { if (stage !== "batch") bsub = stage; stage = "configure"; }
 const isSub = (k) => stage === "configure" && bsub === k;
-const BATCH = { tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr", "{}")),
+const BATCH = { tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr-v2", "{}")), cfgPrvdr: {},
   files: {}, keep: store.get("batch-keep", "any"), config: null, configs: [], valid: {}, vTA: null,
   batches: [], jobs: [], regions: [], view: null, savedScope: null, fileNames: {}, linz: {}, aTA: null, aPick: null, builder: null,
   matches: JSON.parse(store.get("batch-matches", "{}")), alloc: JSON.parse(store.get("batch-alloc", "{}")) };
 const isB = () => Object.prototype.hasOwnProperty.call(BSTAGES, stage);
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-const saveSel = () => { store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr", JSON.stringify(BATCH.prvdr));
+const saveSel = () => { store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
   store.set("batch-matches", JSON.stringify(BATCH.matches)); store.set("batch-alloc", JSON.stringify(BATCH.alloc)); };
 const taOf = (c) => (BATCH.tas || []).find((x) => x.code === c) || {};
 
@@ -976,6 +976,17 @@ function rowTAs(territory, prvdr) {
   const p = resolveCode(prvdr);
   return p ? (BATCH.tas || []).filter((x) => (x.prvdrs || []).includes(p)).map((x) => x.code) : [];
 }
+// TAs of an nz_suburb_provider.csv row: its M_TERRITORY if given; else the territory of the same suburb (or spelling)
+// in nz_suburb_map / nz_suburb_ref; else the TAs whose LINZ suburbs (loaded in 2.2 / 2.3) have that name; else by PRVDR
+function provRowTAs(r) {
+  if (r.M_TERRITORY) return rowTAs(r.M_TERRITORY, r.PRVDR);
+  const names = new Set([r.M_SUBURB, ...String(r["OTHER SPELLINGS"] || r.OTHER_SPELLINGS || "").split(/[;,|/]/)].map(norm).filter(Boolean));
+  const out = new Set();
+  for (const x of BATCH.files.map || []) if ((names.has(norm(x.M_SUBURB)) || names.has(norm(x.NZ_SUBURB_REF))) && x.M_TERRITORY) rowTAs(x.M_TERRITORY).forEach((c) => out.add(c));
+  for (const x of BATCH.files.ref || []) if (names.has(norm(x.M_SUBURB)) && x.M_TERRITORY) rowTAs(x.M_TERRITORY).forEach((c) => out.add(c));
+  if (!out.size) for (const [c, L] of Object.entries(BATCH.linz)) if (L.list.some((y) => names.has(norm(y.name)) || names.has(norm(y.name_ascii)))) out.add(c);
+  return out.size ? [...out] : rowTAs("", r.PRVDR);
+}
 // per selected TA: { lists, rows, keep, basis }. Rows for TAs that are not selected are ignored (files never change the selection).
 function scopeByTA() {
   const out = {}, sel = BATCH.sel;
@@ -986,7 +997,7 @@ function scopeByTA() {
     for (const c of rowTAs(r.M_TERRITORY, r.PRVDR || r.PROVIDER)) add(c, "ref", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, file: "nz_suburb_ref.csv" }); }
   for (const r of BATCH.files.provider || []) { if (!r.M_SUBURB) continue;
     const other = (r["OTHER SPELLINGS"] || r.OTHER_SPELLINGS || "").split(/[;,|/]/).map((x) => x.trim()).filter(Boolean);
-    for (const c of rowTAs(r.M_TERRITORY, r.PRVDR)) { add(c, "provider", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, prvdr: resolveCode(r.PRVDR), spellings: other, file: "nz_suburb_provider.csv" });
+    for (const c of provRowTAs(r)) { add(c, "provider", r.M_SUBURB, { m_suburb: r.M_SUBURB, linz_ref: r.M_SUBURB, territory: r.M_TERRITORY, prvdr: resolveCode(r.PRVDR), spellings: other, file: "nz_suburb_provider.csv" });
       for (const o of other) add(c, "provider", o); } }
   // keep rule: nz_suburb_map and nz_suburb_ref are the keep-lists (either / both); the provider file assigns PRVDRs and
   // other spellings, and scopes a TA only when neither keep-list covers it
@@ -1006,22 +1017,31 @@ function tasInFiles() {
   const s = new Set();
   for (const r of BATCH.files.map || []) rowTAs(r.M_TERRITORY, r.PROVIDER).forEach((c) => s.add(c));
   for (const r of BATCH.files.ref || []) rowTAs(r.M_TERRITORY, r.PRVDR || r.PROVIDER).forEach((c) => s.add(c));
-  for (const r of BATCH.files.provider || []) rowTAs(r.M_TERRITORY, r.PRVDR).forEach((c) => s.add(c));
+  for (const r of BATCH.files.provider || []) provRowTAs(r).forEach((c) => s.add(c));
   for (const a of Object.values(BATCH.alloc)) for (const t of [a.territory, ...(a.linzSuburbs || []).map((x) => x.territory)]) if (t) rowTAs(t).forEach((c) => s.add(c));
   return [...s].sort();
 }
 // PRVDR per TA, resolved as the old builder does: chosen by hand > nz_suburb_provider.csv PRVDR > nz_suburb_map.csv PROVIDER
 // (most common code among the TA's rows, through your matches) > the saved provider serving the TA. Always editable.
+// returns { code: saved PRVDR, src, acronyms: your file's codes for that provider, unresolved: codes matching no provider }
 function filePrvdr(c) {
-  for (const [k, col, f] of [["provider", "PRVDR", "nz_suburb_provider.csv"], ["map", "PROVIDER", "nz_suburb_map.csv"]]) {
-    const n = {};
-    for (const r of BATCH.files[k] || []) { const p = resolveCode(r[col]); if (p && rowTAs(r.M_TERRITORY, r[col]).includes(c)) n[p] = (n[p] || 0) + 1; }
-    const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0]; if (best) return { code: best[0], src: `from ${f}` };
+  for (const [k, col, f, tas] of [["provider", "PRVDR", "nz_suburb_provider.csv", provRowTAs], ["map", "PROVIDER", "nz_suburb_map.csv", (r) => rowTAs(r.M_TERRITORY, r.PROVIDER)]]) {
+    const n = {}, acr = {}, bad = new Set();
+    for (const r of BATCH.files[k] || []) { const v = String(r[col] || "").trim(); if (!v || !tas(r).includes(c)) continue;
+      const p = resolveCode(v); if (!p) { bad.add(v); continue; } n[p] = (n[p] || 0) + 1; (acr[p] = acr[p] || new Set()).add(v); }
+    const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
+    if (best || bad.size) return { code: best ? best[0] : null, src: `from ${f}`, acronyms: best ? [...acr[best[0]]] : [], unresolved: [...bad] };
   }
   return null;
 }
-const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || (taOf(c).prvdrs || [])[0] || "";
-const prvdrSource = (c) => BATCH.prvdr[c] ? "chosen" : filePrvdr(c) ? filePrvdr(c).src : "TA default";
+// precedence: chosen by hand > your lists > a loaded saved configuration > the TA's saved provider
+const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0] || "";
+function prvdrSource(c) {
+  if (BATCH.prvdr[c]) return "chosen by you";
+  const f = filePrvdr(c);
+  if (f && f.code) return f.src;
+  return BATCH.cfgPrvdr[c] ? "saved configuration" : "TA default";
+}
 const rateFor = (p) => (D.water_rates || []).find((w) => w.PROVIDER === p);
 
 // ---------------------------------------------------------------- data
@@ -1029,7 +1049,7 @@ async function loadBatchData() {
   if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 }));
   if (!BATCH.providers.length) BATCH.providers = await q(sb.from("providers").select("prvdr,legacy_prvdr,name,aliases,territories").order("prvdr"));
   if (can("editor")) {
-    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,scope_by_ta,prvdr_matches,allocations,updated_at").order("updated_at", { ascending: false }));
+    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,updated_at").order("updated_at", { ascending: false }));
     BATCH.batches = await q(sb.from("batches").select("id,name,ta_codes,keep_mode,status,created_at").order("id", { ascending: false }).limit(10));
     BATCH.regions = await q(sb.from("regions").select("id,name,ta_code,status,scope,batch_id,prvdr"));
     const ids = BATCH.regions.filter((r) => r.batch_id).map((r) => r.id);
@@ -1093,7 +1113,8 @@ function configureHTML() {
   const selRows = sel.map((c) => { const t = taOf(c), s = sc[c], p = prvdrFor(c), w = rateFor(p);
     const rate = w ? `${esc(w.CHARGING_TYPE || "–")} · fixed ${w.FIXED_PA == null ? '<span class="muted">not verified</span>' : "$" + fmt(w.FIXED_PA, 2) + "/yr"} · ${w.VOLUMETRIC_PA == null ? "no volumetric charge" : "$" + fmt(w.VOLUMETRIC_PA, 2) + "/m³"} · checked ${esc(w.DATE_EST || "–")}${w.source ? ` · <a href="${esc(w.source)}" target="_blank" rel="noopener">source</a>` : ""}` : '<span class="muted">no rates on record</span>';
     return `<tr><td class="l"><b>${esc(t.name)}</b><br><span class="small muted">${s ? `${s.keep.length} suburbs (${esc(s.basis)})` : t.parts > 1 ? "needs a suburb list" : "whole TA"}</span></td>
-      <td class="l"><select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}">${opts(p)}</select><br><span class="small muted">${prvdrSource(c)}${BATCH.prvdr[c] ? ` · <button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:1px 6px">reset</button>` : ""}</span></td><td class="l small" style="white-space:normal;min-width:260px">${rate}</td>
+      <td class="l">${(() => { const f = filePrvdr(c), acr = !BATCH.prvdr[c] && f && f.code ? f.acronyms.filter((a) => norm(a) !== norm(p)) : [];
+        return `${acr.length ? `<b>${acr.map(esc).join(", ")}</b> <span class="small muted">(your PRVDR) →</span><br>` : ""}<select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}">${opts(p)}</select><br><span class="small muted">${prvdrSource(c)}${BATCH.prvdr[c] ? ` · <button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:1px 6px">reset</button>` : ""}</span>${f && f.unresolved.length ? `<br><span class="tag warn">${f.unresolved.map(esc).join(", ")}: no saved provider</span> <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">match in 2.2</button>` : ""}`; })()}</td><td class="l small" style="white-space:normal;min-width:260px">${rate}</td>
       <td><button class="btn" type="button" data-tunsel="${c}" aria-label="Remove ${esc(t.name)}">×</button></td></tr>`; }).join("");
   return `<div class="grid g2">
     <div class="card">${zoomMap("cfg", layers, mapBox(BATCH.tas.map((t) => t.geom.coordinates)))}<p class="small muted" style="margin:6px 0 0">Scroll to zoom, drag to pan, click a TA to select it.</p></div>
@@ -1340,6 +1361,7 @@ async function saveConfig() {
   const sc = scopeByTA(), sel = [...BATCH.sel].sort();
   const rec = { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])),
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
+    prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     prvdr_matches: Object.fromEntries(Object.entries(BATCH.matches).map(([k, v]) => [k.toUpperCase(), v])), allocations: Object.values(BATCH.alloc) };
   if (BATCH.config && BATCH.config.name === name) { await q(sb.from("batch_configs").update(rec).eq("id", BATCH.config.id)); }
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
@@ -1347,8 +1369,9 @@ async function saveConfig() {
 }
 function loadConfig(id) {
   const c = BATCH.configs.find((x) => String(x.id) === String(id));
-  if (!c) { BATCH.config = null; BATCH.savedScope = null; return drawBatch(); }
-  BATCH.config = { id: c.id, name: c.name }; BATCH.sel = new Set(c.ta_codes); BATCH.prvdr = { ...c.prvdr_by_ta }; BATCH.keep = c.keep_mode;
+  if (!c) { BATCH.config = null; BATCH.savedScope = null; BATCH.cfgPrvdr = {}; return drawBatch(); }
+  BATCH.config = { id: c.id, name: c.name }; BATCH.sel = new Set(c.ta_codes); BATCH.keep = c.keep_mode;
+  BATCH.cfgPrvdr = { ...c.prvdr_by_ta }; BATCH.prvdr = Object.fromEntries((c.prvdr_manual || []).filter((k) => c.prvdr_by_ta[k]).map((k) => [k, c.prvdr_by_ta[k]]));
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
   BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
@@ -1410,7 +1433,8 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset && t.dataset.tsel) { t.checked ? BATCH.sel.add(t.dataset.tsel) : BATCH.sel.delete(t.dataset.tsel); saveSel(); BATCH.valid = {}; return drawBatch(); }
-  if (t.dataset && t.dataset.tprvdr) { BATCH.prvdr[t.dataset.tprvdr] = t.value; saveSel(); return drawBatch(); }
+  if (t.dataset && t.dataset.tprvdr) { const c = t.dataset.tprvdr, auto = (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0];
+    t.value === auto ? delete BATCH.prvdr[c] : BATCH.prvdr[c] = t.value; saveSel(); return drawBatch(); }
   if (t.id === "batch-keep") { BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "cfg-pick") return loadConfig(t.value);
   if (t.dataset && t.dataset.pmatch !== undefined) { t.value ? BATCH.matches[t.dataset.pmatch] = t.value : delete BATCH.matches[t.dataset.pmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
