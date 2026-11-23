@@ -556,6 +556,14 @@ Everything a job downloads goes into shared tables, whichever user's or the proj
 
 A batch for a TA that already has a region reuses that region; the pilot regions carry their TA codes (021, 023). Verified: re-preparing Kawerau made one LINZ request (the suburbs lookup) and nothing else.
 
+**1 Region** is a read-only overview of the data already in the database, built from what the app loads at sign-in, with no extra queries and no jobs:
+- totals: regions, LINZ suburbs (with housing), residential sections, SA2s, pools detected, providers;
+- a map of regions with data;
+- the selected region's details;
+- a table of all regions: TA, PRVDR, suburbs, sections, SA2s, imagery capture, pools, gardens, census years, climate coverage, status.
+
+Refreshing a region's data, job progress and download rates are on **3 Load**.
+
 ## 25. Batch preparation: 2 Configure (2.1 Inputs and TAs → 2.2 Allocate → 2.3 Validate suburbs) → 3 Load
 These two stages replace the reference builder's Load and Allocate stages. The stage bar runs 1 Region, 2 Configure, 3 Load, then Imagery, Validate, Context, Explore and Export; Configure has three sub-steps.
 1. **2.1 Inputs and TAs:**
