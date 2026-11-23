@@ -87,10 +87,20 @@ def linz(con, client, region, log):
     for _, s in sub.iterrows():
         con.execute("""insert into suburbs (linz_id, name, type, territorial_authority, population_estimate, geom, region_id, source_version)
                        values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193), %s, %s)
-                       on conflict (linz_id) do update set name=excluded.name, type=excluded.type, geom=excluded.geom, region_id=excluded.region_id""",
+                       on conflict (linz_id) do update set name=excluded.name, type=excluded.type, geom=excluded.geom,
+                       region_id=coalesce(suburbs.region_id, excluded.region_id)""",
                     (int(s["id"]), s["name"], s.get("type"), s.get("territorial_authority"), s.get("population_estimate"), _multi(s.geometry).wkb,
                      region, dt.date.today().isoformat()))
     log(f"suburbs: {len(sub)}")
+    # reuse: suburbs whose sections are already stored (by any user's earlier job) are not downloaded again
+    loaded = {r[0] for r in con.execute("select distinct suburb_id from sections where suburb_id = any(%s)", (list(sub["id"].astype(int)),))}
+    todo = sub[~sub["id"].astype(int).isin(loaded)]
+    if todo.empty:
+        log(f"all {len(sub)} suburbs already stored: no LINZ parcel/building download needed")
+        _sa2_and_cells(con, client, region, sub, None)
+        return f"{len(sub)} suburbs, all reused from stored data (0 parcel/building requests)"
+    log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}")
+    full_sub, sub = sub, gpd.GeoDataFrame(todo, crs=2193)
     area = sub.union_all()
     minx, miny, maxx, maxy = gpd.GeoSeries([area], crs=2193).to_crs(4326).total_bounds
     bbox = f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326"
@@ -130,29 +140,40 @@ def linz(con, client, region, log):
         cur.execute("insert into buildings select * from _bld on conflict (building_id) do update set geom=excluded.geom, area_m2=excluded.area_m2")
     log(f"residential sections: {len(par)}, buildings: {len(seen)}")
 
-    # SA2 boundaries for the area (one Datafinder request), then each section's SA2 by point-in-polygon
-    sa2 = _wfs(client, "statsnz_datafinder", DF, 111206, bbox=bbox)
-    code = next((c for c in sa2.columns if c.upper() == "SA22023_V1_00"), None)
-    name = next((c for c in sa2.columns if c.upper() == "SA22023_V1_00_NAME"), None)
-    sa2 = sa2[sa2.intersects(area)]
-    for _, s in sa2.iterrows():
-        con.execute("insert into sa2 (code, name, version, geom) values (%s,%s,2023, st_geomfromwkb(%s,2193)) on conflict (code) do update set geom=excluded.geom",
-                    (str(s[code]), s[name], _multi(s.geometry).wkb))
-    con.execute("""update sections s set sa2_code = a.code from sa2 a
-                   where s.region_id = %s and st_within(st_pointonsurface(s.geom), a.geom)""", (region,))
-    # climate cells (0.1 deg) from suburb points: no API call
+    n_sa2 = _sa2_and_cells(con, client, region, full_sub, bbox)
+    return f"{len(full_sub)} suburbs ({len(full_sub) - len(sub)} reused), {len(par)} new residential sections, {len(seen)} buildings, {n_sa2} SA2 boundaries downloaded"
+
+
+def _sa2_and_cells(con, client, region, sub, bbox):
+    """SA2 per section from stored boundaries first; download boundaries only if some sections are still unassigned.
+    Climate cells and M_SUBURB links need no API call."""
+    q_assign = """update sections s set sa2_code = a.code from sa2 a
+                  where s.region_id = %s and s.sa2_code is null and st_within(st_pointonsurface(s.geom), a.geom)"""
+    con.execute(q_assign, (region,))
+    n = 0
+    if con.execute("select count(*) from sections where region_id=%s and sa2_code is null", (region,)).fetchone()[0]:
+        if bbox is None:
+            minx, miny, maxx, maxy = gpd.GeoSeries([sub.union_all()], crs=2193).to_crs(4326).total_bounds
+            bbox = f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326"
+        sa2 = _wfs(client, "statsnz_datafinder", DF, 111206, bbox=bbox)
+        code = next((c for c in sa2.columns if c.upper() == "SA22023_V1_00"), None)
+        name = next((c for c in sa2.columns if c.upper() == "SA22023_V1_00_NAME"), None)
+        sa2 = sa2[sa2.intersects(sub.union_all())]
+        for _, s in sa2.iterrows():
+            con.execute("insert into sa2 (code, name, version, geom) values (%s,%s,2023, st_geomfromwkb(%s,2193)) on conflict (code) do update set geom=excluded.geom",
+                        (str(s[code]), s[name], _multi(s.geometry).wkb))
+        con.execute(q_assign, (region,)); n = len(sa2)
     p4326 = sub.assign(geometry=sub.representative_point()).to_crs(4326)
     for _, s in p4326.iterrows():
         lat, lon = round(s.geometry.y / 0.1) * 0.1, round(s.geometry.x / 0.1) * 0.1
         cid = f"{lat:.1f},{lon:.1f}"
         con.execute("insert into climate_cells (id, lat, lon) values (%s,%s,%s) on conflict (id) do nothing", (cid, s.geometry.y, s.geometry.x))
-        con.execute("insert into suburb_climate_cell (linz_id, cell_id) values (%s,%s) on conflict (linz_id) do update set cell_id=excluded.cell_id", (int(s["id"]), cid))
-    # link the user's M_SUBURB rows (from nz_suburb_map / _ref / _provider) to the LINZ suburbs just loaded
+        con.execute("insert into suburb_climate_cell (linz_id, cell_id) values (%s,%s) on conflict (linz_id) do nothing", (int(s["id"]), cid))
     con.execute("""insert into m_suburb_links (m_suburb_id, linz_id, share_rule)
                    select m.id, s.linz_id, 'full' from m_suburbs m join suburbs s on s.region_id = m.region_id
                    and lower(s.name) = lower(coalesce(m.linz_ref, m.m_suburb))
                    where m.region_id = %s on conflict do nothing""", (region,))
-    return f"{len(sub)} suburbs, {len(par)} residential sections, {len(seen)} buildings, {len(sa2)} SA2s"
+    return n
 
 
 # ---------------------------------------------------------------- imagery index
@@ -173,6 +194,12 @@ def _s3_list(client, prefix, delimiter=None):
 
 def imagery_index(con, client, region, log):
     R = _region(con, region)
+    # reuse: tiles already indexed for this region (by any user's job) cover sections that have none of their own
+    have = con.execute("select count(*), min(capture_id) from imagery_tiles where region_id=%s", (region,)).fetchone()
+    uncovered = con.execute("""select count(*) from sections s where s.region_id=%s and not exists
+                               (select 1 from imagery_tiles t where t.region_id=s.region_id and st_intersects(t.geom, s.geom))""", (region,)).fetchone()[0]
+    if have[0] and not uncovered:
+        return f"reused: {have[0]} tiles of {have[1]} already indexed; no imagery listing needed"
     idx = {e["ta_code"]: e for e in json.load(open(os.path.join(ROOT, "index", "source_index.json")))["regions"]}
     folders = idx[R["ta_code"]]["imagery_folders"]
     cands = []

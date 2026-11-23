@@ -89,6 +89,14 @@ def census(con, client, region, log):
         return "no SA2s for region"
     if len(codes) > L.RUN_CAPS["max_sa2_per_run"]:
         raise L.RunTooLarge(f"{len(codes)} SA2s exceeds {L.RUN_CAPS['max_sa2_per_run']} per run")
+    # reuse: census values already stored for an SA2 (fetched by anyone) are not requested again
+    have = {r[0] for r in con.execute("select distinct sa2_code from census_metrics where sa2_code = any(%s)", (codes,))}
+    need = [c for c in codes if c not in have]
+    log(f"census: {len(have)} SA2(s) reused, {len(need)} to fetch")
+    if not need:
+        _apportion(con, region)
+        return f"all {len(codes)} SA2s reused from stored census data (0 requests); suburb census rebuilt"
+    codes = need
     h = pd.concat([_ade_csv(client, "CEN23_HOU_020", codes[i:i + 150]) for i in range(0, len(codes), 150)])
     f = pd.concat([_ade_csv(client, "CEN23_FHH_038", codes[i:i + 150]) for i in range(0, len(codes), 150)])
     inc = pd.concat([_ade_csv(client, "CEN23_HOU_001", codes[i:i + 150]) for i in range(0, len(codes), 150)])
@@ -117,6 +125,12 @@ def census(con, client, region, log):
             vals = [None if pd.isna(r[c]) else float(r[c]) for c in cols]
             cur.execute(f"""insert into census_metrics (sa2_code, year, {','.join(cols)}) values (%s,%s,{','.join(['%s'] * len(cols))})
                             on conflict (sa2_code, year) do update set {','.join(f'{c}=excluded.{c}' for c in cols)}""", (r.sa2, int(r.year), *vals))
+    _apportion(con, region)
+    return f"{len(out)} SA2-year rows; suburb census rebuilt (weighted by sections)"
+
+
+def _apportion(con, region):
+    with con.cursor() as cur:
         # SA2 -> suburb, weighted by residential sections (same rule as the reference builder)
         cur.execute("""insert into suburb_census (linz_id, year, sa2s, sections, hh_size_mean, income_median, bedrooms_mean_all, pct_owner_all,
                          pct_separate, pct_joined, bedrooms_mean_separate, bedrooms_mean_joined, pct_owner_separate, pct_owner_joined)
@@ -131,7 +145,7 @@ def census(con, client, region, log):
                          pct_separate=excluded.pct_separate, pct_joined=excluded.pct_joined, bedrooms_mean_separate=excluded.bedrooms_mean_separate,
                          bedrooms_mean_joined=excluded.bedrooms_mean_joined, pct_owner_separate=excluded.pct_owner_separate, pct_owner_joined=excluded.pct_owner_joined""",
                     (region,))
-    return f"{len(out)} SA2-year rows; suburb census rebuilt (weighted by sections)"
+
 
 
 # ---------------------------------------------------------------- publish: suburb metrics from section-level results (SQL)

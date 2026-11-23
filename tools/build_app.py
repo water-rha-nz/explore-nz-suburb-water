@@ -18,6 +18,7 @@ REPL = [
     ('$("#signin").addEventListener("click", () => { if (user) { user = null; store.set("user", "null"); render(); } else $("#signin-dlg").showModal(); });', '/* live: sign-in handled by live.js */'),
     ('if (t.id === "queue") {', 'if (t.id === "queue-sim") {'),
     ("<title>Explore NZ Suburb Water</title>", "<title>NZ Suburb Water Profiles</title>"),
+    ('<tr><td>Status</td><td><span class="tag ok">published</span></td></tr>', '<tr><td>Status</td><td>${g.status === "published" ? \'<span class="tag ok">published</span>\' : `<span class="tag warn">${esc(g.status || "draft")}</span>`}</td></tr>'),
     ('app: "explore-nz-suburb-water demo"', 'app: "NZ Suburb Water Profiles (live)"'),
     ('<span class="brand">Explore NZ Suburb Water</span>', '<span class="brand">NZ Suburb Water Profiles</span>'),
 ]

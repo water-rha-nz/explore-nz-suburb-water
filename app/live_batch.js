@@ -2,7 +2,6 @@
 // per-user API keys. Loaded after live.js.
 "use strict";
 STAGES.splice(1, 0, ["batch", "Batch"]);
-STAGES.push(["account", "Account"]);
 const BATCH = { tas: null, sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), files: {}, keep: store.get("batch-keep", "any"), batches: [], jobs: [], regions: [] };
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const saveSel = () => store.set("batch-sel", JSON.stringify([...BATCH.sel]));
@@ -80,7 +79,7 @@ const idx = () => Object.fromEntries((D.index_regions || []).map((r) => [r.TA_CO
 // ---------------------------------------------------------------- stage
 V.batch = () => {
   setTimeout(async () => { try { await loadBatchData(); drawBatch(); } catch (e) { $("#batch-body").innerHTML = `<p class="muted">${esc(e.message)}</p>`; } }, 0);
-  return `<h1>Batch preparation</h1><p class="lead">Select the territorial authorities to prepare by clicking them on the map or ticking them in the table. Optionally limit each to the suburbs in your lists (<code>nz_suburb_map.csv</code>, <code>nz_suburb_provider.csv</code>, <code>nz_suburb_ref.csv</code>). Each region becomes its own job, run one at a time within the free-tier budgets, so a large batch is spread over several days.</p>
+  return `<h1>Batch preparation</h1><p class="lead">Select the territorial authorities to prepare by clicking them on the map or ticking them in the table. Optionally limit each to the suburbs in your lists (<code>nz_suburb_map.csv</code>, <code>nz_suburb_provider.csv</code>, <code>nz_suburb_ref.csv</code>). Each region becomes its own job, run one at a time within the free-tier budgets, so a large batch is spread over several days. Data already stored, by any user, is shared and reused (suburbs, sections, buildings, SA2s, census, imagery tiles, climate), so your keys are only used for what is missing.</p>
   <div id="batch-body"><p class="muted">Loading the map…</p></div>`;
 };
 function taMap() {
