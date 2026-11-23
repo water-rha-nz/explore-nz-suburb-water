@@ -569,8 +569,10 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 2. **2.2 Allocate** (as the builder's Allocate tab):
    - every PRVDR / PROVIDER value in your files, with the saved provider it resolves to and a picker to assign or override it;
    - per selected TA, the list rows that match no LINZ suburb. Allocate each to one or more LINZ suburbs by picking "did you mean" suggestions, typing a name, or clicking suburbs on the TA's map. Unallocated rows aren't loaded.
+   - **suburbs to load** per TA (from your lists, or the whole TA without one): untick or click a suburb on the map to exclude it, add any other LINZ suburb by name or click; include/exclude all (filterable). Picks are saved with the configuration (`suburb_picks`) and as `suburbPicks` in an exported builder config;
+   - **‹ Previous / Next ›** move through the selected TAs (shown with their PRVDR), here and in 2.3.
 3. **2.3 Validate suburbs:**
-   - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive); allocated rows count as matched; not-found names show "did you mean" suggestions;
+   - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive); allocated rows count as matched, 2.2's picks apply; not-found names show "did you mean" suggestions;
    - the located suburbs are drawn on a zoomable map: in scope in blue, the TA's other suburbs in grey;
    - LINZ suburbs come from the `linz-suburbs` Edge Function, which is editor-only, uses the caller's key or the project key, counts against the key's daily budget, honours Retry-After, and fetches each TA **once into a shared cache** (`linz_suburb_index`, fresh for 30 days); Allocate and Validate share it;
    - the worker reads the same cache, so loading a validated TA makes no suburbs request.
