@@ -1,5 +1,11 @@
-# What the job worker needs (imagery steps add rasterio/geopandas/opencv: see requirements.txt)
+# Worker on GitHub Actions: jobs (climate, census, publish) and region preparation (LINZ, imagery)
 numpy==2.5.5
 pandas==3.1.1
 requests==2.34.2
 psycopg[binary]>=3.2
+geopandas==1.2.0
+shapely==2.2.0
+pyproj==3.8.0
+pyogrio==0.13.0
+rasterio==1.5.2
+opencv-python-headless==5.1.0.95

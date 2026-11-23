@@ -115,6 +115,15 @@ def run():
     assert r.status_code == 200 and L.effective("linz_wfs")["per_min"] == 120, L.effective("linz_wfs")
     assert json.load(open(os.environ["NZSW_RATES"]))["linz_wfs"]["reason"] == "auto: throttled"
     print("ok  throttled at a raised rate -> lowered automatically 240 -> 120/min")
+    # 8. network errors (refused connection) are retried with backoff, then raised
+    import socket, requests as _rq
+    sk = socket.socket(); sk.bind(("127.0.0.1", 0)); dead = f"http://127.0.0.1:{sk.getsockname()[1]}/"; sk.close()
+    slept.clear(); c = mk()
+    try:
+        c.request("statsnz_ade", "GET", dead, timeout=2); raise AssertionError("expected ConnectionError")
+    except _rq.ConnectionError:
+        assert len([x for x in slept if x >= 2.5]) == L.MAX_RETRIES, slept
+        print(f"ok  connection errors retried {L.MAX_RETRIES} times with backoff, then raised")
     srv.shutdown()
     print("all limits tests passed")
 

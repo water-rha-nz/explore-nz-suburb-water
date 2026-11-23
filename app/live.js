@@ -19,7 +19,7 @@ function gate(kind, msg) {
   const body = {
     signin: `<section style="max-width:880px;margin:24px auto 0">
       <p class="small muted" style="margin:0 0 6px">Aotearoa New Zealand · residential water demand</p>
-      <h1 style="font-size:2rem;line-height:1.2;margin:0 0 12px">Explore NZ Suburb Water</h1>
+      <h1 style="font-size:2rem;line-height:1.2;margin:0 0 12px">NZ Suburb Water Profiles</h1>
       <p class="lead" style="font-size:1.05rem">Suburb-level metadata for water-demand analysis, prepared one region at a time from LINZ, Stats NZ and Open-Meteo data: swimming pools and garden area from aerial imagery, section and roof sizes, household size, income, bedrooms and tenure, daily climate, and water charges.</p>
       <div class="grid g3" style="margin:18px 0">
         <div class="card"><h3>Prepare</h3><p class="small muted" style="margin:0">Load a region, detect pools and gardens, join census and climate, within each service's free-tier limits.</p></div>
@@ -80,7 +80,7 @@ async function loadRegion(r) {
   });
   const cap = caps[0] || {};
   return { label: r.name, ta: (r.territorial_authorities || [])[0], imagery: cap.id ? `${cap.id} (LINZ, ${cap.bands || "RGB+NIR"})` : "–", imagery_prefix: cap.s3_prefix || "",
-    capture_id: cap.id, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || [174.8, -41.3], status: r.status, suburbs,
+    capture_id: cap.id, ta_code: r.ta_code, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || [174.8, -41.3], status: r.status, suburbs,
     sa2: sa2o.map((a) => ({ code: a.id, name: a.name, geom: multi(a.geom), census: censusOf(cm.filter((c) => c.sa2_code === a.id)) })),
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
@@ -91,7 +91,7 @@ async function loadAll() {
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
-  for (const r of regions) d.regions[r.id] = await loadRegion(r);
+  for (const r of regions) { const g = await loadRegion(r); if (g.suburbs.length) d.regions[r.id] = g; }   // drafts without data yet are listed on the Batch stage
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
@@ -277,7 +277,7 @@ renderHeader = function () {
     $("#main").innerHTML = `<p class="muted">Loading regions…</p>`;
     D = await loadAll();
     if (!D.regions[region]) region = Object.keys(D.regions)[0];
-    $("#foot").innerHTML = `Explore NZ Suburb Water · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · Water consumption isn't handled here.`;
+    $("#foot").innerHTML = `NZ Suburb Water Profiles · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · Water consumption isn't handled here.`;
     render();
   } catch (err) { gate("error", err.message); }
 })();

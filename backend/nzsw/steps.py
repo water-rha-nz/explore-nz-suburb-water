@@ -14,13 +14,21 @@ ADE_TABLES = {
 }
 
 
+USER_KEYS = {}   # set per job by cli.run_steps: the job creator's keys from Vault (name -> key)
+
+
 def key(name):
-    """Secrets: environment first (GitHub / Supabase secrets), then ~/.config files for local runs."""
-    env = {"statsnz_ade": "STATSNZ_ADE_KEY", "statsnz_datafinder": "STATSNZ_DATAFINDER_KEY", "linz": "LINZ_API_KEY"}[name]
+    """The job creator's key (Supabase Vault) if they set one, else the project key: environment (GitHub
+    secrets) first, then ~/.config files for local runs."""
+    if USER_KEYS.get(name):
+        return USER_KEYS[name]
+    env = {"statsnz_ade": "STATSNZ_ADE_KEY", "statsnz_datafinder": "STATSNZ_DATAFINDER_KEY", "linz": "LINZ_API_KEY", "openmeteo": "OPENMETEO_API_KEY"}[name]
     if os.environ.get(env):
         return os.environ[env]
-    f = {"statsnz_ade": "~/.config/statsnz/ade_key", "statsnz_datafinder": "~/.config/statsnz/datafinder_key", "linz": "~/.config/linz/api_key"}[name]
-    return open(os.path.expanduser(f)).read().strip()
+    f = {"statsnz_ade": "~/.config/statsnz/ade_key", "statsnz_datafinder": "~/.config/statsnz/datafinder_key", "linz": "~/.config/linz/api_key",
+         "openmeteo": "~/.config/openmeteo/api_key"}[name]
+    f = os.path.expanduser(f)
+    return open(f).read().strip() if os.path.exists(f) else None
 
 
 # ---------------------------------------------------------------- climate top-up (Open-Meteo, per grid cell)
@@ -37,8 +45,11 @@ def climate(con, client, region, log):
         if start > end:
             continue
         w = L.openmeteo_weight(1, len(DAILY), start, end)
-        r = client.request("openmeteo", "GET", OPENMETEO, cost=w, params=dict(latitude=float(lat), longitude=float(lon), start_date=start,
-                           end_date=end, daily=",".join(DAILY), timezone="Pacific/Auckland"))
+        omk = key("openmeteo")   # a commercial key (optional) uses Open-Meteo's customer API
+        p = dict(latitude=float(lat), longitude=float(lon), start_date=start, end_date=end, daily=",".join(DAILY), timezone="Pacific/Auckland")
+        if omk: p["apikey"] = omk
+        r = client.request("openmeteo", "GET", OPENMETEO.replace("://archive-api", "://customer-archive-api") if omk else OPENMETEO, cost=w, params=p,
+                           redact=(lambda t: t.replace(omk, "<key>")) if omk else (lambda t: t))
         if r.status_code != 200:
             raise RuntimeError(f"Open-Meteo HTTP {r.status_code}: {r.text[:200]}")
         d = r.json()["daily"]
