@@ -79,13 +79,13 @@ async function loadRegion(r) {
   });
   const cap = caps[0] || {};
   return { label: r.name, ta: (r.territorial_authorities || [])[0], imagery: cap.id ? `${cap.id} (LINZ, ${cap.bands || "RGB+NIR"})` : "–", imagery_prefix: cap.s3_prefix || "",
-    capture_id: cap.id, ta_code: r.ta_code, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || null, status: r.status, suburbs,
+    capture_id: cap.id, ta_code: r.ta_code, timeline: r.timeline || {}, provider: (mets[0] || {}).prvdr || st.provider, lonlat: st.lonlat || null, status: r.status, suburbs,
     sa2: sa2o.map((a) => ({ code: a.id, name: a.name, geom: multi(a.geom), census: censusOf(cm.filter((c) => c.sa2_code === a.id)) })),
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
 }
 async function loadAll() {
-  const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr").order("id"));
+  const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr,timeline").order("id"));
   const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
