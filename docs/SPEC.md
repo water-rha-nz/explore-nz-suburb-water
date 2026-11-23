@@ -565,14 +565,17 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 Refreshing a region's data, job progress and download rates are on **3 Load**.
 
 **1 Overview: data map.** Stage 1 is named *Overview*. The header's study filters it to that study's TAs that have prepared data; when there are none, it says so and outlines the study's TAs. The map is a zoomable, pannable view of the data, kept light: all layers come from data loaded at sign-in plus one cached request for TA outlines.
-- **Pan and zoom:** a drag moves only the viewBox, and layers are redrawn once it ends. Drag distance matches the cursor on the letterboxed map. The wheel zooms in proportion to the scroll, about the cursor. Releasing anywhere, or leaving the window, ends a drag.
-- **Layer panel (beside the map):**
-  - every fill statistic as a compact item grouped by source (Census, Property (LINZ), Imagery, Climate) with a mini ramp. The active one shows its class breaks, and census values come from the chosen census year;
-  - tile overlays: *sections with a pool %*, *median garden m²*, *annual rainfall*, and suburb names.
-- **Tiles:** an embedded heatmap over the fill. A square grid of fixed screen size, snapped to round distances, takes the suburb under each tile's centre and shows one inset stripe per active overlay, each on its own ramp.
-- **Imagery:** at full zoom (under ~2.5 km across) tiles give way to imagery via `map_items` (row-level security: property-level detail for labellers and editors; at most 3 km × 3 km): detected pools at true size, and pool and garden validation chips (signed URLs, approximate placement).
-- **Suburb details** (click a suburb) appear below the map.
-- **Sources:** the legend and details carry superscript references to the numbered Sources list at the bottom of the page (LINZ layers, imagery captures as STAC collections, Stats NZ census tables and SA2 boundaries, Open-Meteo, each provider's rates page).
+- **Pan and zoom:** a drag moves only the viewBox, and layers are redrawn once it ends. Drag distance matches the cursor; the wheel zooms in proportion to the scroll, about the cursor; releasing anywhere ends a drag.
+- **Suburb statistics, several axes at once:**
+  - *layout:* geographic, or an equal-area tile grid (one square per suburb, in the free cell nearest its real centre);
+  - *glyph:* **colour** (a continuous scale of one statistic), **radar** in the suburb's own shape (one wedge per statistic, up to 6, reaching toward the suburb's edge in proportion to the value), or **section make-up** (a square per suburb sized by its median section, divided into building, garden, pool and other);
+  - *size axis:* a non-contiguous cartogram (area ∝ sections, titles or pools), or tile size in the tile layout;
+  - census values come from the chosen census year.
+- **Scales and legend:** continuous colour scales over the full data range by default. They switch to logarithmic when values are right-skewed (all positive, skewness > 1) and are centred on zero for diverging statistics. Each spectrum shows its name above it and no printed values: hovering shows the value under the cursor and the span, scrolling over it narrows or widens the range about the cursor, and a double-click resets it. Radar wedges use the same scales.
+- **Where pools and green space are:** shown separately from the statistics, as dots.
+  - *Below full zoom:* dots aggregated to a grid snapped to round distances (dot ∝ number of pools, or ∝ garden area), from `map_presence`: cells ≥ 100 m, only cells with ≥ 5 sections, visible to viewers.
+  - *Full zoom* (under ~2.5 km): single pools at true size, each section's garden, and pool and garden validation chips, from `map_items` (row-level security: property-level detail for editors).
+- **Suburb details** (click) appear below the map; **sources** are superscript references to the numbered list at the bottom of the page.
 
 **Header.** The header shows the **study**: the saved configuration in use, selectable. Choosing one loads it and limits the region picker to its TAs. The region picker appears only on stages that work on one region (Imagery onwards).
 
