@@ -7,6 +7,7 @@
 // 2 Configure (sub-steps: 2.1 Inputs and TAs, 2.2 Allocate, 2.3 Validate suburbs) and 3 Load replace the old Load and Allocate
 (() => { const st = document.createElement("style"); st.textContent = ".amap td,.amap th{white-space:normal;vertical-align:top}.amap td .tag{display:inline-block;margin:1px 2px 1px 0}.amap td input[type=text]{max-width:100%}"; (document.head || document.body).appendChild(st); })();
 const BSTAGES = { configure: "Configure", load: "Load" };
+{ const r0 = STAGES.find(([id]) => id === "region"); if (r0) r0[1] = "Overview"; }   // stage 1 is an overview of the data, not a region picker
 const CFG_STEPS = [["select", "Inputs and TAs"], ["allocate", "Allocate"], ["vsuburbs", "Validate suburbs"]];
 STAGES.splice(1, STAGES.filter(([id]) => id === "load" || id === "allocate").length, ...Object.entries(BSTAGES));
 let bsub = store.get("batch-sub", "select");
@@ -179,20 +180,53 @@ function zoomMap(id, layers, full) {
   return `<div class="zmap" data-zmap="${id}" style="position:relative">
     <div class="row" style="position:absolute;right:6px;top:6px;gap:4px;z-index:2"><button class="btn" type="button" data-zoom="in" aria-label="Zoom in">+</button><button class="btn" type="button" data-zoom="out" aria-label="Zoom out">−</button>
     <button class="btn" type="button" data-zoom="sel">Selection</button><button class="btn" type="button" data-zoom="reset">Reset</button></div>
-    <svg viewBox="${v.join(" ")}" data-full="${full.join(" ")}" style="width:100%;height:440px;display:block;touch-action:none;background:var(--bg);border-radius:8px" role="img" aria-label="Map: scroll to zoom, drag to pan">
+    <svg viewBox="${v.join(" ")}" data-full="${full.join(" ")}" style="width:100%;height:${id === "ovw" ? 560 : 440}px;display:block;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab;background:var(--bg);border-radius:8px" role="img" aria-label="Map: scroll to zoom, drag to pan">
     ${layers.map((l) => `<path ${l.attr || ""} d="${l.d}" fill="${l.fill}" fill-opacity="${l.op ?? 1}" stroke="${l.stroke || "var(--landline)"}" stroke-width="${l.sw || 0.8}" vector-effect="non-scaling-stroke" ${l.click ? 'style="cursor:pointer"' : ""}><title>${esc(l.title || "")}</title></path>`).join("")}</svg></div>`;
 }
+// Pan and zoom. Dragging only moves the viewBox (cheap); layers that depend on the zoom are redrawn once the drag ends.
+// The drag uses the same metres-per-pixel on both axes as the drawn map (it is letterboxed to keep its shape), the wheel
+// zooms by how far you scroll, about the point under the cursor, and a release anywhere (or leaving the window) ends a drag.
 let DRAG = null;
+const vbOf = (svg) => svg.getAttribute("viewBox").split(" ").map(Number);
+function svgPoint(svg, cx, cy) {
+  const m = svg.getScreenCTM && svg.getScreenCTM();
+  if (m && svg.createSVGPoint) { const p = svg.createSVGPoint(); p.x = cx; p.y = cy; const q = p.matrixTransform(m.inverse()); return [q.x, q.y]; }
+  const r = svg.getBoundingClientRect(), b = vbOf(svg), k = Math.max(b[2] / r.width, b[3] / r.height);
+  return [b[0] + b[2] / 2 + (cx - r.left - r.width / 2) * k, b[1] + b[3] / 2 + (cy - r.top - r.height / 2) * k];
+}
 document.addEventListener("wheel", (e) => {
   const svg = e.target.closest && e.target.closest(".zmap svg"); if (!svg) return; e.preventDefault();
-  const b = svg.getAttribute("viewBox").split(" ").map(Number), r = svg.getBoundingClientRect();
-  const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height, k = e.deltaY < 0 ? 0.8 : 1.25;
-  const w = b[2] * k, h = b[3] * k; setView(svg, [b[0] + (b[2] - w) * fx, b[1] + (b[3] - h) * fy, w, h]);
+  const b = vbOf(svg), [px, py] = svgPoint(svg, e.clientX, e.clientY);
+  const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  const k = Math.min(4, Math.max(0.25, Math.exp(d * 0.002)));
+  setView(svg, [px - (px - b[0]) * k, py - (py - b[1]) * k, b[2] * k, b[3] * k]);
 }, { passive: false });
-document.addEventListener("pointerdown", (e) => { const svg = e.target.closest && e.target.closest(".zmap svg"); if (svg) DRAG = { svg, x: e.clientX, y: e.clientY, b: svg.getAttribute("viewBox").split(" ").map(Number), moved: false }; });
-document.addEventListener("pointermove", (e) => { if (!DRAG) return; const dx = e.clientX - DRAG.x, dy = e.clientY - DRAG.y; if (Math.abs(dx) + Math.abs(dy) > 4) DRAG.moved = true;
-  if (DRAG.moved) { const r = DRAG.svg.getBoundingClientRect(), b = DRAG.b; setView(DRAG.svg, [b[0] - dx * b[2] / r.width, b[1] - dy * b[3] / r.height, b[2], b[3]]); } });
-document.addEventListener("pointerup", () => { if (DRAG) { window._dragMoved = DRAG.moved; setTimeout(() => { window._dragMoved = false; }, 0); } DRAG = null; });
+document.addEventListener("pointerdown", (e) => {
+  const svg = e.target.closest && e.target.closest(".zmap svg"); if (!svg || e.button !== 0) return;
+  const r = svg.getBoundingClientRect(), b = vbOf(svg);
+  DRAG = { svg, x: e.clientX, y: e.clientY, b, k: Math.max(b[2] / r.width, b[3] / r.height), moved: false, id: e.pointerId };
+  e.preventDefault();   // no text selection or native image drag while panning
+});
+document.addEventListener("pointermove", (e) => {
+  if (!DRAG) return;
+  if (e.buttons === 0) return endDrag();   // released outside the window
+  const dx = e.clientX - DRAG.x, dy = e.clientY - DRAG.y;
+  if (!DRAG.moved && Math.abs(dx) + Math.abs(dy) > 3) { DRAG.moved = true; DRAG.svg.style.cursor = "grabbing";
+    try { DRAG.svg.setPointerCapture(DRAG.id); } catch (_) { /* not supported */ } }   // capture only once it is a drag, so plain clicks keep their targets
+  if (!DRAG.moved) return;
+  const b = DRAG.b; DRAG.box = [b[0] - dx * DRAG.k, b[1] - dy * DRAG.k, b[2], b[3]];
+  if (!DRAG.raf) DRAG.raf = requestAnimationFrame(() => { if (DRAG && DRAG.box) DRAG.svg.setAttribute("viewBox", DRAG.box.join(" ")); if (DRAG) DRAG.raf = 0; });
+});
+function endDrag() {
+  const d = DRAG; DRAG = null; if (!d) return;
+  if (d.raf) cancelAnimationFrame(d.raf);
+  try { d.svg.releasePointerCapture(d.id); } catch (_) { /* not captured */ }
+  d.svg.style.cursor = "";
+  if (d.moved) { window._dragMoved = true; setTimeout(() => { window._dragMoved = false; }, 0); if (d.box) setView(d.svg, d.box); }
+}
+for (const ev of ["pointerup", "pointercancel", "lostpointercapture"]) document.addEventListener(ev, endDrag);
+if (window.addEventListener) window.addEventListener("blur", endDrag);
+document.addEventListener("dragstart", (e) => { if (e.target.closest && e.target.closest(".zmap")) e.preventDefault(); });
 function setView(svg, box) { svg.setAttribute("viewBox", box.join(" ")); BATCH.view = { id: svg.closest(".zmap").dataset.zmap, box }; if (window.onZoomMap) window.onZoomMap(svg, box); }
 
 // ---------------------------------------------------------------- stage shell

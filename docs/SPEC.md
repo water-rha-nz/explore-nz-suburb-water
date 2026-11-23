@@ -556,7 +556,7 @@ Everything a job downloads goes into shared tables, whichever user's or the proj
 
 A batch for a TA that already has a region reuses that region; the pilot regions carry their TA codes (021, 023). Verified: re-preparing Kawerau made one LINZ request (the suburbs lookup) and nothing else.
 
-**1 Region** is a read-only overview of the data already in the database, built from what the app loads at sign-in, with no extra queries and no jobs:
+**1 Overview** is a read-only overview of the data already in the database, built from what the app loads at sign-in, with no extra queries and no jobs:
 - totals: regions, LINZ suburbs (with housing), residential sections, SA2s, pools detected, providers;
 - a map of regions with data;
 - the selected region's details;
@@ -564,12 +564,15 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 
 Refreshing a region's data, job progress and download rates are on **3 Load**.
 
-**Data map (1 Region).** A zoomable, pannable map of everything in the database, kept light: all layers come from data loaded at sign-in plus one cached request for TA outlines.
-- **Fill layer (choose one):** a suburb statistic (household size, median income, owner-occupied %, separate houses %, bedrooms, titles/km², median section, median garden, % sections with a pool, annual rainfall, ET₀, rainfall − ET₀), in quintiles. Census values come from a chosen census year.
-- **Overlays (any combination):** pool-area dots, green-space dots, rainfall bars, suburb names. Symbols keep a constant screen size as you zoom.
-- **Legend:** additive, one block per active layer, each with its source link. Clicking a suburb lists its figures, each with a source link, including its provider's water charges.
-- **Imagery:** fetched only at full zoom (under ~2.5 km across), through `map_items` (row-level security: property-level detail is for labellers and editors; at most 3 km × 3 km, capped rows). It shows detected pools at true size and pool and garden validation chips (signed URLs, approximate placement).
-- **Sources:** listed on the page with direct links (LINZ layers, imagery captures as STAC collections, Stats NZ census tables and SA2 boundaries, Open-Meteo, each provider's rates page).
+**1 Overview: data map.** Stage 1 is named *Overview*. The header's study filters it to that study's TAs that have prepared data; when there are none, it says so and outlines the study's TAs. The map is a zoomable, pannable view of the data, kept light: all layers come from data loaded at sign-in plus one cached request for TA outlines.
+- **Pan and zoom:** a drag moves only the viewBox, and layers are redrawn once it ends. Drag distance matches the cursor on the letterboxed map. The wheel zooms in proportion to the scroll, about the cursor. Releasing anywhere, or leaving the window, ends a drag.
+- **Layer panel (beside the map):**
+  - every fill statistic as a compact item grouped by source (Census, Property (LINZ), Imagery, Climate) with a mini ramp. The active one shows its class breaks, and census values come from the chosen census year;
+  - tile overlays: *sections with a pool %*, *median garden m²*, *annual rainfall*, and suburb names.
+- **Tiles:** an embedded heatmap over the fill. A square grid of fixed screen size, snapped to round distances, takes the suburb under each tile's centre and shows one inset stripe per active overlay, each on its own ramp.
+- **Imagery:** at full zoom (under ~2.5 km across) tiles give way to imagery via `map_items` (row-level security: property-level detail for labellers and editors; at most 3 km × 3 km): detected pools at true size, and pool and garden validation chips (signed URLs, approximate placement).
+- **Suburb details** (click a suburb) appear below the map.
+- **Sources:** the legend and details carry superscript references to the numbered Sources list at the bottom of the page (LINZ layers, imagery captures as STAC collections, Stats NZ census tables and SA2 boundaries, Open-Meteo, each provider's rates page).
 
 **Header.** The header shows the **study**: the saved configuration in use, selectable. Choosing one loads it and limits the region picker to its TAs. The region picker appears only on stages that work on one region (Imagery onwards).
 
