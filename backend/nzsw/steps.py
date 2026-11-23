@@ -32,18 +32,40 @@ def key(name):
 
 
 # ---------------------------------------------------------------- climate top-up (Open-Meteo, per grid cell)
+def timeline(con, region):
+    """The region's timeline (Configure, per TA/provider): climate_start / climate_end / census_years; {} = defaults."""
+    r = con.execute("select timeline from regions where id=%s", (region,)).fetchone()
+    return (r and r[0]) or {}
+
+
+def climate_ranges(first, last, want_start, want_end):
+    """Date ranges still to fetch for a cell holding first..last, so that it covers want_start..want_end."""
+    if want_start > want_end:
+        return []
+    if not first:
+        return [(want_start, want_end)]
+    out = []
+    if want_start < first.isoformat():
+        out.append((want_start, min(want_end, (first - dt.timedelta(days=1)).isoformat())))
+    after = max(want_start, (last + dt.timedelta(days=1)).isoformat())
+    if after <= want_end:
+        out.append((after, want_end))
+    return out
+
+
 def climate(con, client, region, log):
-    cells = con.execute("""select c.id, c.lat, c.lon, max(d.date) from climate_cells c join suburb_climate_cell sc on sc.cell_id = c.id
+    cells = con.execute("""select c.id, c.lat, c.lon, min(d.date), max(d.date) from climate_cells c join suburb_climate_cell sc on sc.cell_id = c.id
                            join suburbs s on s.linz_id = sc.linz_id left join climate_daily d on d.cell_id = c.id
                            where s.region_id = %s group by 1, 2, 3""", (region,)).fetchall()
     if not cells:
         return "no climate cells for region (run the region setup first)"
-    end = (dt.date.today() - dt.timedelta(days=2)).isoformat()   # archive lags ~2 days
+    tl = timeline(con, region)
+    latest = (dt.date.today() - dt.timedelta(days=2)).isoformat()   # archive lags ~2 days
+    want_start = tl.get("climate_start") or L.RUN_CAPS["climate_backfill_start"]
+    want_end = min(tl.get("climate_end") or latest, latest)
     added = 0
-    for cid, lat, lon, last in cells:
-        start = (last + dt.timedelta(days=1)).isoformat() if last else L.RUN_CAPS["climate_backfill_start"]
-        if start > end:
-            continue
+    for cid, lat, lon, first, last in cells:
+      for start, end in climate_ranges(first, last, want_start, want_end):
         w = L.openmeteo_weight(1, len(DAILY), start, end)
         omk = key("openmeteo")   # a commercial key (optional) uses Open-Meteo's customer API
         p = dict(latitude=float(lat), longitude=float(lon), start_date=start, end_date=end, daily=",".join(DAILY), timezone="Pacific/Auckland")
@@ -62,7 +84,7 @@ def climate(con, client, region, log):
                                                                          d["temperature_2m_max"][i], d["et0_fao_evapotranspiration"][i]))
                 added += 1
         log(f"climate cell {cid}: {start}..{end} (~{w:.1f} weighted calls)")
-    return f"{added} new daily rows across {len(cells)} cells"
+    return f"{added} new daily rows across {len(cells)} cells ({want_start}..{want_end})"
 
 
 # ---------------------------------------------------------------- census (Stats NZ ADE) -> census_metrics -> suburb_census
@@ -130,7 +152,10 @@ def census(con, client, region, log):
 
 
 def _apportion(con, region):
+    years = [int(y) for y in (timeline(con, region).get("census_years") or [])] or None
     with con.cursor() as cur:
+        if years:   # only the census years chosen for this region (Configure timeline); all stored years stay shared
+            cur.execute("delete from suburb_census where linz_id in (select linz_id from suburbs where region_id=%s) and not (year = any(%s))", (region, years))
         # SA2 -> suburb, weighted by residential sections (same rule as the reference builder)
         cur.execute("""insert into suburb_census (linz_id, year, sa2s, sections, hh_size_mean, income_median, bedrooms_mean_all, pct_owner_all,
                          pct_separate, pct_joined, bedrooms_mean_separate, bedrooms_mean_joined, pct_owner_separate, pct_owner_joined)
@@ -139,12 +164,12 @@ def _apportion(con, region):
                          avg(m.bedrooms_mean_all), avg(m.pct_owner_all), avg(m.pct_separate), avg(m.pct_joined), avg(m.bedrooms_mean_separate),
                          avg(m.bedrooms_mean_joined), avg(m.pct_owner_separate), avg(m.pct_owner_joined)
                        from sections s join census_metrics m on m.sa2_code = s.sa2_code
-                       where s.region_id = %s group by s.suburb_id, m.year
+                       where s.region_id = %s and (%s::int[] is null or m.year = any(%s::int[])) group by s.suburb_id, m.year
                        on conflict (linz_id, year) do update set sa2s=excluded.sa2s, sections=excluded.sections, hh_size_mean=excluded.hh_size_mean,
                          income_median=excluded.income_median, bedrooms_mean_all=excluded.bedrooms_mean_all, pct_owner_all=excluded.pct_owner_all,
                          pct_separate=excluded.pct_separate, pct_joined=excluded.pct_joined, bedrooms_mean_separate=excluded.bedrooms_mean_separate,
                          bedrooms_mean_joined=excluded.bedrooms_mean_joined, pct_owner_separate=excluded.pct_owner_separate, pct_owner_joined=excluded.pct_owner_joined""",
-                    (region,))
+                    (region, years, years))
 
 
 

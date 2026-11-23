@@ -180,6 +180,7 @@ const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
 V.region = () => {
+  setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
   const regs = Object.entries(D.regions), g = R();
   const yrs = (x) => [...new Set(x.suburbs.flatMap((s) => Object.keys(s.census || {})))].sort().join(", ") || "–";
   const clim = (x) => { const c = Object.values(x.climate_cells || {}); if (!c.length) return "–"; const m = c.flatMap((y) => y.months || []).filter(Boolean).sort(), n = `${c.length} cell${c.length === 1 ? "" : "s"}`; return m.length ? `${n}, ${m[0].slice(0, 4)}–${m[m.length - 1].slice(0, 4)}` : `${n}, no months yet`; };
@@ -193,9 +194,9 @@ V.region = () => {
     <div class="kpi"><span>Regions</span><b>${fmt(rows.length)}</b></div><div class="kpi"><span>LINZ suburbs (with housing)</span><b>${fmt(tot("suburbs"))}</b><span>${fmt(tot("housing"))}</span></div>
     <div class="kpi"><span>Residential sections</span><b>${fmt(tot("sections"))}</b></div><div class="kpi"><span>SA2 areas</span><b>${fmt(tot("sa2"))}</b></div>
     <div class="kpi"><span>Pools detected</span><b>${fmt(tot("pools"))}</b></div><div class="kpi"><span>Water providers</span><b>${fmt(new Set(rows.map((r) => r.prvdr)).size)}</b></div></div>
+  <div style="margin-top:12px">${dataMapHTML()}</div>
   <div class="grid g2" style="margin-top:12px">
-    <div class="card map" id="nz">${nzMap()}<p class="small muted" style="margin:6px 0 0">Regions with data in the database. Click a marker to select it. Outlines: Stats NZ regional councils 2025.</p></div>
-    <div class="card"><h3>${esc(g.label)}</h3>
+    <div class="card"><h3>Selected region: ${esc(g.label)}</h3>
       <table><tbody>
         <tr><td>Territorial authority</td><td>${esc(g.ta || "–")}</td></tr>
         <tr><td>Water provider (PRVDR)</td><td>${esc(g.provider || "–")}</td></tr>
@@ -206,12 +207,13 @@ V.region = () => {
         <tr><td>Census years</td><td>${esc(yrs(g))}</td></tr>
         <tr><td>Climate (Open-Meteo)</td><td>${esc(clim(g))}</td></tr>
         <tr><td>Status</td><td><span class="tag ${g.status === "published" ? "ok" : g.status === "draft" ? "warn" : "info"}">${esc(g.status || "–")}</span></td></tr>
-      </tbody></table></div></div>
+      </tbody></table></div>
+    <div class="card"><h3>About this overview</h3><p class="small">Everything shown comes from data already prepared and stored, loaded once when you signed in. Choose one statistic to colour the suburbs, add pool, green-space and rainfall symbols on top, and zoom in: at full zoom, detected pools and imagery chips appear. Each layer's source is linked in the legend and below.</p></div></div>
   <h2>All regions in the database</h2>
   <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
     <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l">${esc(r.prvdr)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
       <td class="l small">${esc(r.imagery)}</td><td>${cell(r.pools)}</td><td class="l">${r.garden ? "yes" : "–"}</td><td class="l">${esc(r.census)}</td><td class="l small">${esc(r.climate)}</td><td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status)}</span></td></tr>`).join("")}
-    ${rows.length > 1 ? `<tr><td class="l"><b>Total</b></td><td></td><td></td><td><b>${fmt(tot("suburbs"))}</b></td><td><b>${fmt(tot("housing"))}</b></td><td><b>${fmt(tot("sections"))}</b></td><td><b>${fmt(tot("sa2"))}</b></td><td></td><td><b>${fmt(tot("pools"))}</b></td><td colspan="4"></td></tr>` : ""}</tbody></table></div>`;
+    ${rows.length > 1 ? `<tr><td class="l"><b>Total</b></td><td></td><td></td><td><b>${fmt(tot("suburbs"))}</b></td><td><b>${fmt(tot("housing"))}</b></td><td><b>${fmt(tot("sections"))}</b></td><td><b>${fmt(tot("sa2"))}</b></td><td></td><td><b>${fmt(tot("pools"))}</b></td><td colspan="4"></td></tr>` : ""}</tbody></table></div>${sourcesHTML()}`;
 };
 
 // ---------------------------------------------------------------- validation: real labelling (labellers)
