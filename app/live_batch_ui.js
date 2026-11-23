@@ -102,12 +102,12 @@ function mapBox(geoms) {
 }
 const pathD = (g) => g.map((p) => p.map((r) => r.map(([x, y], i) => (i ? "L" : "M") + Math.round(x) + "," + Math.round(-y)).join("") + "Z").join("")).join("");
 function zoomMap(id, layers, full) {
-  const v = (BATCH.view && BATCH.view.id === id) ? BATCH.view.box : full, sw = v[2] / 600;
+  const v = (BATCH.view && BATCH.view.id === id) ? BATCH.view.box : full;
   return `<div class="zmap" data-zmap="${id}" style="position:relative">
     <div class="row" style="position:absolute;right:6px;top:6px;gap:4px;z-index:2"><button class="btn" type="button" data-zoom="in" aria-label="Zoom in">+</button><button class="btn" type="button" data-zoom="out" aria-label="Zoom out">−</button>
     <button class="btn" type="button" data-zoom="sel">Selection</button><button class="btn" type="button" data-zoom="reset">Reset</button></div>
     <svg viewBox="${v.join(" ")}" data-full="${full.join(" ")}" style="width:100%;height:440px;display:block;touch-action:none;background:var(--bg);border-radius:8px" role="img" aria-label="Map: scroll to zoom, drag to pan">
-    ${layers.map((l) => `<path ${l.attr || ""} d="${l.d}" fill="${l.fill}" fill-opacity="${l.op ?? 1}" stroke="${l.stroke || "var(--landline)"}" stroke-width="${(l.sw || 0.8) * sw}" vector-effect="non-scaling-stroke" ${l.click ? 'style="cursor:pointer"' : ""}><title>${esc(l.title || "")}</title></path>`).join("")}</svg></div>`;
+    ${layers.map((l) => `<path ${l.attr || ""} d="${l.d}" fill="${l.fill}" fill-opacity="${l.op ?? 1}" stroke="${l.stroke || "var(--landline)"}" stroke-width="${l.sw || 0.8}" vector-effect="non-scaling-stroke" ${l.click ? 'style="cursor:pointer"' : ""}><title>${esc(l.title || "")}</title></path>`).join("")}</svg></div>`;
 }
 let DRAG = null;
 document.addEventListener("wheel", (e) => {
