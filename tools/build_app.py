@@ -14,7 +14,7 @@ s = open(os.path.join(ROOT, "demo", "index.html"), encoding="utf-8").read()
 
 REPL = [
     ('<span class="badge" title="Static demo: no database, no real sign-in">Static demo</span>', '<span class="badge" style="background:var(--ok-bg);color:var(--ok)">Live</span>'),
-    ('<a class="small" href="../" title="The live app, with Google sign-in">Live app</a>\n', '<a class="small" href="demo/">Static demo</a>\n'),
+    ('<a class="small" href="../" title="The live app, with Google sign-in">Live app</a>\n', ''),
     ('$("#signin").addEventListener("click", () => { if (user) { user = null; store.set("user", "null"); render(); } else $("#signin-dlg").showModal(); });', '/* live: sign-in handled by live.js */'),
     ('if (t.id === "queue") {', 'if (t.id === "queue-sim") {'),
     ("<title>Explore NZ Suburb Water</title>", "<title>Explore NZ Suburb Water</title>"),
@@ -34,5 +34,9 @@ inject = (f'<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.11
 s = s.replace("</body>", inject, 1)
 os.makedirs(os.path.join(ROOT, "app", "data"), exist_ok=True)
 open(os.path.join(ROOT, "app", "index.html"), "w", encoding="utf-8").write(s)
-shutil.copy(os.path.join(ROOT, "demo", "data", "demo.json"), os.path.join(ROOT, "app", "data", "demo.json"))
+# public static file: reference data only (no suburb results): NZ outlines, limits, source index, source plans
+full = json.load(open(os.path.join(ROOT, "demo", "data", "demo.json")))
+ref = dict(nz_regions=full["nz_regions"], limits=full["limits"], index_regions=full["index_regions"],
+           regions={k: dict(lonlat=v.get("lonlat"), source_plan=v.get("source_plan"), provider=v.get("provider")) for k, v in full["regions"].items()})
+json.dump(ref, open(os.path.join(ROOT, "app", "data", "demo.json"), "w"), separators=(",", ":"))
 print("app/index.html", len(s) // 1024, "KB")

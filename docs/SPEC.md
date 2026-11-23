@@ -2,7 +2,7 @@
 
 Version 0.2 (draft), 2026-11-23
 
-**Status:** specification, static demo and setup prerequisites. Supabase and Google Cloud accounts exist. The Supabase project `explore-nz-suburb-water-syd` (Sydney, free) exists with migrations 0001–0004 applied and secrets set. Google sign-in is live and the first admin is set up (`docs/SETUP.md`). The demo is in `demo/`, built from the Taupō and Tauranga pilot.
+**Status:** specification, static demo and setup prerequisites. Supabase and Google Cloud accounts exist. The Supabase project `explore-nz-suburb-water-syd` (Sydney, free) exists with migrations 0001–0004 applied and secrets set. Google sign-in is live and the first admin is set up (`docs/SETUP.md`). The live app is on Pages (signed-in users only). Data is seeded from the Taupō and Tauranga pilot. The worker runs climate, census and metric steps; imagery and LINZ re-loads still run from the pilot pipeline. The demo is in `demo/`, built from the Taupō and Tauranga pilot.
 
 ## 1. Purpose
 A web application that prepares, maintains and exports **suburb-level metadata for residential water-demand analysis anywhere in New Zealand**. It covers every explanatory variable of Ghavidelfar, Shamseldin & Melville (2018) *except water consumption*.
@@ -499,3 +499,14 @@ While a region downloads, the **Download progress** panel shows each service's c
 | LINZ imagery S3 | 4 parallel · 25 GB/day | 8 parallel · 60 GB/day | public bucket; be a good citizen |
 
 Raising rates never lifts the per-run region caps (section 20.1). A faster download is still one region.
+
+## 21. Access model as deployed (2026-11-23)
+- **Pages** serves the app, a landing page for signed-out visitors, and a reference file with NZ outlines, limits and the source index (no suburb results). The static demo isn't published.
+- **Database:**
+  - every public table has RLS (migration 0007 fails if one doesn't);
+  - the `anon` role has no privileges on tables, views, sequences or functions, and default privileges for new objects are revoked too;
+  - viewers see published regions only;
+  - property-level imagery tables are editor-only;
+  - chips are served to labellers by signed URL;
+  - the worker uses its own role with explicit policies and no RLS bypass.
+
