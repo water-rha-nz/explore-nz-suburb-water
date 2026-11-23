@@ -181,7 +181,7 @@ const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
 V.region = () => {
-  setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
+  setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel, MAPV.selSet); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
   const regs = studyRegions(), st = studyOf();
   if (!regs.length) return `<h1>1 · Overview</h1><p class="lead">${st ? `The study <b>${esc(st.name)}</b> has no prepared data in the database yet. Its ${(st.ta_codes || []).length} TA(s) are outlined on the map; prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.` : "No prepared data in the database yet. Prepare regions in <b>2 · Configure</b> and <b>3 · Load</b>."}</p>
     <div style="margin-top:12px">${dataMapHTML()}</div>${sourcesHTML()}`;
