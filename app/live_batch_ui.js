@@ -4,9 +4,13 @@
 // 5 Load (queue one job per region, progress, tile lists).
 // Uploaded files are read in the browser only; configurations keep the resulting suburb names, never file contents.
 "use strict";
-const BSTAGES = { configure: "Configure", allocate: "Allocate", vsuburbs: "Validate suburbs", load: "Load" };
+// 2 Configure (sub-steps: 2.1 Inputs and TAs, 2.2 Allocate, 2.3 Validate suburbs) and 3 Load replace the old Load and Allocate
+const BSTAGES = { configure: "Configure", load: "Load" };
+const CFG_STEPS = [["select", "Inputs and TAs"], ["allocate", "Allocate"], ["vsuburbs", "Validate suburbs"]];
 STAGES.splice(1, STAGES.filter(([id]) => id === "load" || id === "allocate").length, ...Object.entries(BSTAGES));
-if (stage === "batch") stage = "configure";
+let bsub = store.get("batch-sub", "select");
+if (["batch", "allocate", "vsuburbs"].includes(stage)) { if (stage !== "batch") bsub = stage; stage = "configure"; }
+const isSub = (k) => stage === "configure" && bsub === k;
 const BATCH = { tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr", "{}")),
   files: {}, keep: store.get("batch-keep", "any"), config: null, configs: [], valid: {}, vTA: null,
   batches: [], jobs: [], regions: [], view: null, savedScope: null, fileNames: {}, linz: {}, aTA: null, aPick: null, builder: null,
@@ -146,15 +150,19 @@ function setView(svg, box) { svg.setAttribute("viewBox", box.join(" ")); BATCH.v
 
 // ---------------------------------------------------------------- stage shell
 const LEADS = {
-  configure: "Choose the territorial authorities to prepare, their water provider (PRVDR) and, optionally, your suburb lists. Each region runs as its own job within the free-tier budgets, and data already stored by anyone is reused.",
-  allocate: "Allocate the rows of your lists that match no LINZ suburb, and match every provider code in your files to a saved provider, as on the reference builder's Allocate tab.",
-  vsuburbs: "Check the suburbs in scope against LINZ and see them on the map before anything is loaded.",
+  configure: "Choose the territorial authorities to prepare and their water provider (PRVDR), add your input files, allocate rows and provider codes that don't match, and check the suburbs against LINZ. Each region runs as its own job within the free-tier budgets, and data already stored by anyone is reused.",
   load: "Queue the validated regions, follow their progress, publish them and download tile lists." };
 for (const id of Object.keys(BSTAGES)) V[id] = () => {
   setTimeout(async () => { try { await loadBatchData(); drawBatch(); } catch (e) { const el = $("#batch-body"); if (el) el.innerHTML = `<p class="muted">${esc(e.message)}</p>`; } }, 0);
   return `<h1>0 · ${BSTAGES[id]}</h1><p class="lead">${LEADS[id]}</p><div id="batch-body"><p class="muted">Loading…</p></div>`;
 };
-function drawBatch() { const el = $("#batch-body"); if (!el || !BATCH.tas || !isB()) return; el.innerHTML = { configure: configureHTML, allocate: allocateHTML, vsuburbs: validateHTML, load: loadHTML }[stage](); }
+function drawBatch() {
+  const el = $("#batch-body"); if (!el || !BATCH.tas || !isB()) return;
+  if (stage === "load") { el.innerHTML = loadHTML(); return; }
+  const i = CFG_STEPS.findIndex(([k]) => k === bsub);
+  el.innerHTML = `<div class="row" role="tablist" aria-label="Configure steps" style="margin-bottom:12px">${CFG_STEPS.map(([k, l], j) => `<button class="btn ${k === bsub ? "primary" : ""}" role="tab" aria-selected="${k === bsub}" data-btab="${k}" type="button">2.${j + 1} ${l}</button>`).join("")}</div>`
+    + { select: configureHTML, allocate: allocateHTML, vsuburbs: validateHTML }[CFG_STEPS[i < 0 ? 0 : i][0]]();
+}
 
 // ---------------------------------------------------------------- 1. configure
 function configureHTML() {
@@ -176,10 +184,11 @@ function configureHTML() {
       ${can("editor") ? `<div class="row"><select id="cfg-pick" aria-label="Saved configuration"><option value="">New configuration</option>${BATCH.configs.map((c) => `<option value="${c.id}" ${BATCH.config && BATCH.config.id === c.id ? "selected" : ""}>${esc(c.name)} (${c.ta_codes.length} TAs)</option>`).join("")}</select>
         <input type="text" id="cfg-name" placeholder="Name" value="${esc(BATCH.config ? BATCH.config.name : "")}" style="width:160px"><button class="btn" id="cfg-save" type="button">Save</button>${BATCH.config ? '<button class="btn" id="cfg-del" type="button">Delete</button>' : ""}</div>
         <p class="small muted">Stores the selected TAs, PRVDRs, keep rule, provider-code matches, allocations and the resulting suburb names, not your files. Only you can see your configurations.</p>` : lock("editor", "Saving configurations")}
-      <p class="small" style="margin:8px 0 0"><label><b>Builder config</b> <input type="file" accept=".json,application/json" id="bcfg-import"></label> <button class="btn" type="button" id="bcfg-export">Export builder config</button><br>
-        <span class="muted">Loads <code>nz_suburb_builder_config.json</code> from the reference builder: keep rule, PRVDR matches and suburb allocations.</span>${builderNote()}</p>
-      <h3 style="margin-top:12px">Scope lists (optional)</h3>
+      <h3 style="margin-top:12px">Input files (optional)</h3>
       <p class="small muted">Read in your browser and applied to the selected TAs only.</p>
+      <p class="small" style="margin:6px 0"><label><b>Add several at once</b> <input type="file" multiple accept=".json,.csv,.tsv,application/json,text/csv" id="bin-files"></label><br><span class="muted">Each file goes to its slot below by name.</span></p>
+      <p class="small" style="margin:6px 0"><label><b>nz_suburb_builder_config.json</b> <input type="file" accept=".json,application/json" id="bcfg-import"></label>${BATCH.builder ? ` <span class="tag info">${esc(BATCH.builder.fname)}</span> <button class="btn" type="button" id="bcfg-clear">Clear</button>` : ""} <button class="btn" type="button" id="bcfg-export">Export</button><br>
+        <span class="muted">From the reference builder (suburb_lookup.html): keep rule, PRVDR matches and suburb allocations.</span>${builderNote()}</p>
       ${[["map", "nz_suburb_map.csv", "M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY"], ["ref", "nz_suburb_ref.csv", "M_SUBURB, …, M_TERRITORY"], ["provider", "nz_suburb_provider.csv", "M_SUBURB, Other spellings, PRVDR (sets each TA's PRVDR, ahead of nz_suburb_map's PROVIDER)"]].map(([k, f, cols]) =>
         `<p class="small" style="margin:6px 0"><label><b>${f}</b> <input type="file" accept=".csv,.tsv,text/csv" data-sfile="${k}"></label>${BATCH.files[k] ? ` <span class="tag info">${esc(BATCH.fileNames[k] || "")} · ${BATCH.files[k].length} rows</span> <button class="btn" type="button" data-sclear="${k}">Clear</button>` : ""}<br><span class="muted">${cols}</span></p>`).join("")}
       <p class="small"><label>With both keep-lists, keep a suburb that is in <select id="batch-keep"><option value="any" ${BATCH.keep === "any" ? "selected" : ""}>either list</option><option value="both" ${BATCH.keep === "both" ? "selected" : ""}>both lists</option></select></label></p>
@@ -187,7 +196,7 @@ function configureHTML() {
     </div></div>
   <h2>Selected TAs (${sel.length}): PRVDR and charging rates</h2><p class="small muted">Each PRVDR is filled from your lists (nz_suburb_provider.csv, then nz_suburb_map.csv's PROVIDER) or the TA's saved provider. Change it here at any time.</p>
   <div class="card scroll">${sel.length ? `<table><thead><tr><th class="l">TA and scope</th><th class="l">PRVDR</th><th class="l">Charging (2026/27)</th><th></th></tr></thead><tbody>${selRows}</tbody></table>` : '<p class="muted">Select TAs on the map or in the table below.</p>'}
-    ${sel.length ? `<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="allocate">Next: allocate →</button><button class="btn" id="batch-clear" type="button">Clear selection</button></div>` : ""}</div>
+    ${sel.length ? `<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="allocate">Next: 2.2 Allocate →</button><button class="btn" id="batch-clear" type="button">Clear selection</button></div>` : ""}</div>
   <h2>All regions with charging rates (${BATCH.tas.length} TAs)</h2>
   <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="bta-filter" value="${esc(filt)}" placeholder="TA, PRVDR or region"></label>
     <button class="btn" type="button" id="bta-all">Select shown</button><button class="btn" type="button" id="bta-none">Deselect shown</button></div>
@@ -235,7 +244,7 @@ function allocRows(c) {
   return out;
 }
 function allocateHTML() {
-  const sel = [...BATCH.sel].sort(); if (!sel.length) return `<p class="muted">Select TAs on the Configure stage first.</p>`;
+  const sel = [...BATCH.sel].sort(); if (!sel.length) return `<p class="muted">Select TAs in 2.1 Inputs and TAs first.</p>`;
   const codes = codesInFiles(), opts = (cur) => `<option value="">(no match)</option>` + BATCH.providers.map((p) => `<option value="${p.prvdr}" ${p.prvdr === cur ? "selected" : ""}>${esc(p.prvdr)} · ${esc(p.name)}</option>`).join("");
   const codeRows = codes.map((e) => `<tr><td class="l"><code>${esc(e.code)}</code></td><td>${e.rows || "–"}</td><td class="l small">${esc([...e.files].join(", "))}</td>
     <td class="l"><select data-pmatch="${esc(e.key)}" aria-label="Provider for ${esc(e.code)}">${opts(e.mine || e.saved)}</select></td>
@@ -264,11 +273,11 @@ function allocateHTML() {
   }
   return `<div class="card"><h3>Provider codes in your files</h3>
     ${codes.length ? `<table><thead><tr><th class="l">PRVDR / PROVIDER</th><th>Rows</th><th class="l">File</th><th class="l">Saved provider</th><th class="l"></th></tr></thead><tbody>${codeRows}</tbody></table>
-      <p class="small muted">Codes resolve through your match, else a saved provider's PRVDR, legacy code, alias or name. Matches feed each TA's PRVDR on the Configure stage.</p>` : '<p class="small muted">No provider codes: add nz_suburb_provider.csv or nz_suburb_map.csv on the Configure stage.</p>'}</div>
+      <p class="small muted">Codes resolve through your match, else a saved provider's PRVDR, legacy code, alias or name. Matches feed each TA's PRVDR in 2.1.</p>` : '<p class="small muted">No provider codes: add nz_suburb_provider.csv or nz_suburb_map.csv in 2.1.</p>'}</div>
   <div class="row" style="margin:14px 0 8px">${sel.map((x) => `<button class="btn ${x === c ? "primary" : ""}" type="button" data-ata="${x}">${esc(taOf(x).name)}${BATCH.linz[x] ? ` (${allocRows(x).filter((r) => !r.alloc).length})` : ""}</button>`).join("")}
     <button class="btn" type="button" id="alinz-all">Load LINZ suburbs for all</button></div>
   ${detail}
-  <div class="row" style="margin-top:12px"><button class="btn primary" type="button" data-btab="vsuburbs">Next: validate suburbs →</button></div>`;
+  <div class="row" style="margin-top:12px"><button class="btn primary" type="button" data-btab="vsuburbs">Next: 2.3 Validate suburbs →</button></div>`;
 }
 function setAlloc(r, names) {
   const k = allocKey(r.file, r.name, r.territory);
@@ -336,7 +345,7 @@ async function validateAll() {
   if (!BATCH.vTA) BATCH.vTA = sel[0]; drawBatch();
 }
 function validateHTML() {
-  const sel = [...BATCH.sel].sort(); if (!sel.length) return `<p class="muted">Select TAs on the Configure stage first.</p>`;
+  const sel = [...BATCH.sel].sort(); if (!sel.length) return `<p class="muted">Select TAs in 2.1 Inputs and TAs first.</p>`;
   const v = BATCH.valid, done = sel.every((c) => v[c] && v[c].status === "done");
   const rows = sel.map((c) => { const t = taOf(c), r = v[c];
     const st = !r ? '<span class="muted">not checked</span>' : r.status === "checking" ? '<span class="tag warn">checking…</span>' : r.status === "error" ? `<span class="tag bad">${esc(r.message)}</span>`
@@ -352,7 +361,7 @@ function validateHTML() {
       <div class="card scroll"><h3>${esc(t.name)}</h3>
       ${scoped ? `<p class="small"><b>${r.matched.length}</b> of your names matched LINZ suburbs.</p>
         ${r.unmatched.length ? `<p class="small"><span class="tag warn">Not found in LINZ</span> ${r.unmatched.map((n) => { const sug = similar(n, r.linz.map((x) => x.name)); return `<br>· ${esc(n)}${sug.length ? ` <span class="muted">→ did you mean ${sug.map(esc).join(", ")}?</span>` : ""}`; }).join("")}</p>
-        <p class="small muted">Allocate them on the <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">Allocate</button> stage, or fix the names in your list. Names not found aren't loaded.</p>` : ""}
+        <p class="small muted">Allocate them in <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">2.2 Allocate</button>, or fix the names in your list. Names not found aren't loaded.</p>` : ""}
         <table><thead><tr><th class="l">Your name</th><th class="l">LINZ suburb</th><th class="l">Type</th></tr></thead><tbody>${r.matched.map((m) => `<tr><td class="l">${esc(m.input)}</td><td class="l">${esc(m.linz.name)}${m.allocated ? ' <span class="tag info">allocated</span>' : ""}</td><td class="l small">${esc(m.linz.type || "")}</td></tr>`).join("")}</tbody></table>`
       : `<p class="small">No suburb list for this TA: all ${r.linz.length} LINZ suburbs and localities will be loaded${t.parts > 1 ? ', <span class="tag bad">too large: add a suburb list</span>' : ""}.</p>`}</div></div>`;
   }
@@ -360,7 +369,7 @@ function validateHTML() {
     ${can("editor") ? '<button class="btn primary" id="validate-go" type="button">Validate suburbs</button>' : lock("editor", "Validation")}</div>
     <p class="small muted">Each TA's LINZ suburbs are fetched once and cached for everyone, so validating again, or later, makes no request. Allocated rows count as matched. Click a row to see it on the map.</p>
     <table><tbody>${rows}</tbody></table>
-    ${done ? '<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="load">Next: load →</button></div>' : ""}</div>
+    ${done ? '<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="load">Next: 3 Load →</button></div>' : ""}</div>
   <h2 style="margin-top:16px">${esc(t.name || "")}</h2>${detail}`;
 }
 
@@ -437,10 +446,12 @@ async function tileCSV(batchId) {
 // ---------------------------------------------------------------- events
 document.addEventListener("click", async (e) => {
   const t = e.target, cl = (s) => t.closest && t.closest(s);
-  const tab = cl("[data-btab]"); if (tab && isB()) { stage = tab.dataset.btab; store.set("stage", stage); BATCH.view = null; render(); return scrollTo(0, 0); }
-  const as = cl("[data-asub]"); if (as && stage === "allocate" && BATCH.aPick && !window._dragMoved) { const r = curAllocRows().find((x) => x.key === BATCH.aPick); if (r) { const cur = ((r.alloc && r.alloc.linzSuburbs) || []).map((x) => x.name), n = as.dataset.asub;
+  const tab = cl("[data-btab]"); if (tab && isB()) { const k = tab.dataset.btab; BATCH.view = null;
+    if (CFG_STEPS.some(([x]) => x === k)) { bsub = k; store.set("batch-sub", k); if (stage === "configure") return drawBatch(); stage = "configure"; } else stage = k;
+    store.set("stage", stage); render(); return scrollTo(0, 0); }
+  const as = cl("[data-asub]"); if (as && isSub("allocate") && BATCH.aPick && !window._dragMoved) { const r = curAllocRows().find((x) => x.key === BATCH.aPick); if (r) { const cur = ((r.alloc && r.alloc.linzSuburbs) || []).map((x) => x.name), n = as.dataset.asub;
     setAlloc(r, cur.some((x) => norm(x) === norm(n)) ? cur.filter((x) => norm(x) !== norm(n)) : [...cur, n]); BATCH.aPick = r.key; } return drawBatch(); }
-  const ta = cl("[data-ta]"); if (ta && stage === "configure" && !window._dragMoved) { const c = ta.dataset.ta; BATCH.sel.has(c) ? BATCH.sel.delete(c) : BATCH.sel.add(c); saveSel(); BATCH.valid = {}; return drawBatch(); }
+  const ta = cl("[data-ta]"); if (ta && isSub("select") && !window._dragMoved) { const c = ta.dataset.ta; BATCH.sel.has(c) ? BATCH.sel.delete(c) : BATCH.sel.add(c); saveSel(); BATCH.valid = {}; return drawBatch(); }
   const z = cl("[data-zoom]");
   if (z) { const svg = z.closest(".zmap").querySelector("svg"), b = svg.getAttribute("viewBox").split(" ").map(Number), act = z.dataset.zoom;
     if (act === "reset") return setView(svg, svg.dataset.full.split(" ").map(Number));
@@ -464,6 +475,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "apick-done") { BATCH.aPick = null; return drawBatch(); }
   if (t.dataset && t.dataset.punmatch) { delete BATCH.matches[t.dataset.punmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bcfg-export") return exportBuilder();
+  if (t.id === "bcfg-clear") { BATCH.builder = null; return drawBatch(); }
   if (t.dataset && t.dataset.tprvdrReset) { delete BATCH.prvdr[t.dataset.tprvdrReset]; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.tunsel) { BATCH.sel.delete(t.dataset.tunsel); saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.sclear) { delete BATCH.files[t.dataset.sclear]; delete BATCH.fileNames[t.dataset.sclear]; BATCH.valid = {}; return drawBatch(); }
@@ -485,6 +497,14 @@ document.addEventListener("change", async (e) => {
   if (t.id === "batch-keep") { BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "cfg-pick") return loadConfig(t.value);
   if (t.dataset && t.dataset.pmatch !== undefined) { t.value ? BATCH.matches[t.dataset.pmatch] = t.value : delete BATCH.matches[t.dataset.pmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
+  if (t.id === "bin-files" && t.files && t.files.length) {
+    const msgs = [];
+    for (const f of [...t.files]) { const n = f.name.toLowerCase();
+      if (n.endsWith(".json")) { try { msgs.push(importBuilder(JSON.parse(await f.text()), f.name)); } catch (err) { msgs.push(err instanceof SyntaxError ? `${f.name} is not valid JSON` : err.message); } continue; }
+      const k = /provider/.test(n) ? "provider" : /map/.test(n) ? "map" : /ref/.test(n) ? "ref" : null;
+      if (!k) { msgs.push(`${f.name}: not recognised (name it nz_suburb_map, nz_suburb_ref or nz_suburb_provider)`); continue; }
+      BATCH.files[k] = readCSV(await f.text()); BATCH.fileNames[k] = f.name; msgs.push(`${f.name}: ${BATCH.files[k].length} rows`); }
+    BATCH.savedScope = null; BATCH.valid = {}; toastMsg(msgs.join(" · ")); return drawBatch(); }
   if (t.id === "bcfg-import" && t.files && t.files[0]) { const f = t.files[0];
     try { toastMsg(importBuilder(JSON.parse(await f.text()), f.name)); } catch (err) { toastMsg(err instanceof SyntaxError ? `${f.name} is not valid JSON` : err.message); } return drawBatch(); }
   if (t.dataset && t.dataset.sfile && t.files && t.files[0]) {
