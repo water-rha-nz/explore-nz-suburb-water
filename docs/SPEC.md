@@ -2,7 +2,7 @@
 
 Version 0.2 (draft), 2026-11-23
 
-**Status:** specification and static demo only. Supabase and Google Cloud accounts exist, but no Supabase project or OAuth client has been created yet; sections 12–13 give the setup. The demo is in `demo/`, built from the Taupō and Tauranga pilot.
+**Status:** specification, static demo and setup prerequisites. Supabase and Google Cloud accounts exist. The Supabase CLI, `supabase/config.toml`, three parsed migrations and a bootstrap script are ready; the project and OAuth client are created by following `docs/SETUP.md` (sections 12–13 give the design). The demo is in `demo/`, built from the Taupō and Tauranga pilot.
 
 ## 1. Purpose
 A web application that prepares, maintains and exports **suburb-level metadata for residential water-demand analysis anywhere in New Zealand**. It covers every explanatory variable of Ghavidelfar, Shamseldin & Melville (2018) *except water consumption*.
