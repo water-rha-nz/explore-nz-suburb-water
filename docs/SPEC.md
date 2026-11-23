@@ -564,6 +564,15 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 
 Refreshing a region's data, job progress and download rates are on **3 Load**.
 
+**Data map (1 Region).** A zoomable, pannable map of everything in the database, kept light: all layers come from data loaded at sign-in plus one cached request for TA outlines.
+- **Fill layer (choose one):** a suburb statistic (household size, median income, owner-occupied %, separate houses %, bedrooms, titles/km², median section, median garden, % sections with a pool, annual rainfall, ET₀, rainfall − ET₀), in quintiles. Census values come from a chosen census year.
+- **Overlays (any combination):** pool-area dots, green-space dots, rainfall bars, suburb names. Symbols keep a constant screen size as you zoom.
+- **Legend:** additive, one block per active layer, each with its source link. Clicking a suburb lists its figures, each with a source link, including its provider's water charges.
+- **Imagery:** fetched only at full zoom (under ~2.5 km across), through `map_items` (row-level security: property-level detail is for labellers and editors; at most 3 km × 3 km, capped rows). It shows detected pools at true size and pool and garden validation chips (signed URLs, approximate placement).
+- **Sources:** listed on the page with direct links (LINZ layers, imagery captures as STAC collections, Stats NZ census tables and SA2 boundaries, Open-Meteo, each provider's rates page).
+
+**Header.** The header shows the **study**: the saved configuration in use, selectable. Choosing one loads it and limits the region picker to its TAs. The region picker appears only on stages that work on one region (Imagery onwards).
+
 ## 25. Batch preparation: 2 Configure (2.1 Inputs and TAs → 2.2 Allocate → 2.3 Validate suburbs) → 3 Load
 These two stages replace the reference builder's Load and Allocate stages. The stage bar runs 1 Region, 2 Configure, 3 Load, then Imagery, Validate, Context, Explore and Export; Configure has three sub-steps.
 1. **2.1 Inputs and TAs:**
@@ -576,6 +585,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
    - uploaded files apply **only to the selected TAs**: files never change the selection, but TAs they mention can be added with **Select them**;
    - each selected TA's **PRVDR** is filled from the reference CSVs, resolved as the builder does: `nz_suburb_provider.csv` PRVDR, then `nz_suburb_map.csv` PROVIDER (the most common code among the TA's rows, through your matches; legacy codes, aliases and provider names map to current codes), then a loaded saved configuration, then the TA's saved provider. Provider rows (no M_TERRITORY in the builder's format) reach their TA through the same suburb or spelling in your map/ref lists, else the TA's LINZ suburbs. Your acronym is shown with the saved provider it resolves to (used for rates and stored in the database); codes matching no provider are flagged with a link to 2.2. Only a hand pick (`prvdr_manual`) outranks your files, and it can be reset;
    - each selected TA shows that PRVDR's **charging rates** (type, fixed $/yr, volumetric $/m³, date checked) with a link to the provider's **source**;
+   - **timeline per TA / provider:** a weather extraction period (from/to; blank end = latest) and the census years to use (2013, 2018, 2023), with *apply to all*. Timelines are saved in the configuration (`timelines`), queued with each region (`regions.timeline`, job params) and scale the Open-Meteo estimate. The worker fetches only the missing parts of the period (before or after stored data) and publishes only the chosen census years; all stored years stay shared;
    - **saved configurations** (`batch_configs`) store the selected TAs, PRVDRs, keep rule, provider-code matches (`prvdr_matches`), allocations (`allocations`) and the resulting suburb names, never file contents; they are private to their owner;
    - **input files:** the builder config and the three lists, each in its own slot or several at once (routed by file name);
    - **builder configs:** `nz_suburb_builder_config.json` from `suburb_lookup.html` can be imported (keep rule, `prvdrMatches`, `suburbAllocations`; it lists which of the lists it expects) and exported in the same format, keeping fields this app doesn't use (data folder, outputs, other settings).

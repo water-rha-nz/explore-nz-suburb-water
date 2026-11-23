@@ -15,11 +15,11 @@ const isSub = (k) => stage === "configure" && bsub === k;
 const BATCH = { tas: null, providers: [], sel: new Set(JSON.parse(store.get("batch-sel", "[]"))), prvdr: JSON.parse(store.get("batch-prvdr-v2", "{}")), cfgPrvdr: {},
   files: {}, keep: store.get("batch-keep", "any"), config: null, configs: [], valid: {}, vTA: null,
   batches: [], jobs: [], regions: [], view: null, savedScope: null, fileNames: {}, linz: {}, aTA: null, aPick: null, builder: null,
-  matches: JSON.parse(store.get("batch-matches", "{}")), alloc: JSON.parse(store.get("batch-alloc", "{}")), picks: JSON.parse(store.get("batch-picks", "{}")) };
+  matches: JSON.parse(store.get("batch-matches", "{}")), alloc: JSON.parse(store.get("batch-alloc", "{}")), picks: JSON.parse(store.get("batch-picks", "{}")), tl: JSON.parse(store.get("batch-tl", "{}")) };
 const isB = () => Object.prototype.hasOwnProperty.call(BSTAGES, stage);
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 const saveSel = () => { store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
-  store.set("batch-matches", JSON.stringify(BATCH.matches)); store.set("batch-alloc", JSON.stringify(BATCH.alloc)); store.set("batch-picks", JSON.stringify(BATCH.picks)); };
+  store.set("batch-matches", JSON.stringify(BATCH.matches)); store.set("batch-alloc", JSON.stringify(BATCH.alloc)); store.set("batch-picks", JSON.stringify(BATCH.picks)); store.set("batch-tl", JSON.stringify(BATCH.tl)); };
 const taOf = (c) => (BATCH.tas || []).find((x) => x.code === c) || {};
 
 // ---------------------------------------------------------------- scope files (rules of suburb_lookup.html)
@@ -139,12 +139,27 @@ function prvdrSource(c) {
 }
 const rateFor = (p) => (D.water_rates || []).find((w) => w.PROVIDER === p);
 
+// ---------------------------------------------------------------- timelines per TA / provider: weather period and census years
+const CENSUS_YEARS = ["2013", "2018", "2023"], CLIMATE_FROM = "2013-01-01";
+const latestDay = () => new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);   // the archive lags ~2 days
+const tlOf = (c) => BATCH.tl[c] || {};
+const tlDays = (c) => { const t = tlOf(c), a = new Date(t.climate_start || CLIMATE_FROM), b = new Date(t.climate_end && t.climate_end < latestDay() ? t.climate_end : latestDay()); return Math.max(0, (b - a) / 864e5 + 1); };
+function timelineCell(c) {
+  const t = tlOf(c), yrs = t.census_years || CENSUS_YEARS;
+  return `<div class="small" style="white-space:normal;min-width:210px">Weather <input type="date" data-tl="${c}" data-tlk="climate_start" value="${esc(t.climate_start || CLIMATE_FROM)}" min="1940-01-01" max="${latestDay()}" aria-label="Weather from">
+    to <input type="date" data-tl="${c}" data-tlk="climate_end" value="${esc(t.climate_end || "")}" min="1940-01-01" max="${latestDay()}" placeholder="latest" aria-label="Weather to (blank = latest)">
+    <br>Census ${CENSUS_YEARS.map((y) => `<label><input type="checkbox" data-tly="${c}" value="${y}" ${yrs.includes(y) ? "checked" : ""}> ${y}</label>`).join(" ")}
+    <br><span class="muted">${fmt(tlDays(c) / 365.25, 1)} years of daily weather${t.climate_end ? "" : " (to latest)"}</span> <button class="btn" type="button" data-tlall="${c}" style="padding:1px 6px">apply to all</button></div>`;
+}
+const tlFor = (c) => { const t = tlOf(c), o = {}; if (t.climate_start && t.climate_start !== CLIMATE_FROM) o.climate_start = t.climate_start; if (t.climate_end) o.climate_end = t.climate_end;
+  if (t.census_years && t.census_years.length < CENSUS_YEARS.length) o.census_years = t.census_years.map(Number); return o; };
+
 // ---------------------------------------------------------------- data
 async function loadBatchData() {
   if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 }));
   if (!BATCH.providers.length) BATCH.providers = await q(sb.from("providers").select("prvdr,legacy_prvdr,name,aliases,territories").order("prvdr"));
   if (can("editor")) {
-    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,updated_at").order("updated_at", { ascending: false }));
+    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,timelines,updated_at").order("updated_at", { ascending: false }));
     BATCH.batches = await q(sb.from("batches").select("id,name,ta_codes,keep_mode,status,created_at").order("id", { ascending: false }).limit(10));
     BATCH.regions = await q(sb.from("regions").select("id,name,ta_code,status,scope,batch_id,prvdr"));
     const ids = BATCH.regions.filter((r) => r.batch_id).map((r) => r.id);
@@ -178,7 +193,7 @@ document.addEventListener("pointerdown", (e) => { const svg = e.target.closest &
 document.addEventListener("pointermove", (e) => { if (!DRAG) return; const dx = e.clientX - DRAG.x, dy = e.clientY - DRAG.y; if (Math.abs(dx) + Math.abs(dy) > 4) DRAG.moved = true;
   if (DRAG.moved) { const r = DRAG.svg.getBoundingClientRect(), b = DRAG.b; setView(DRAG.svg, [b[0] - dx * b[2] / r.width, b[1] - dy * b[3] / r.height, b[2], b[3]]); } });
 document.addEventListener("pointerup", () => { if (DRAG) { window._dragMoved = DRAG.moved; setTimeout(() => { window._dragMoved = false; }, 0); } DRAG = null; });
-function setView(svg, box) { svg.setAttribute("viewBox", box.join(" ")); BATCH.view = { id: svg.closest(".zmap").dataset.zmap, box }; }
+function setView(svg, box) { svg.setAttribute("viewBox", box.join(" ")); BATCH.view = { id: svg.closest(".zmap").dataset.zmap, box }; if (window.onZoomMap) window.onZoomMap(svg, box); }
 
 // ---------------------------------------------------------------- stage shell
 const LEADS = {
@@ -210,6 +225,7 @@ function configureHTML() {
     return `<tr><td class="l"><b>${esc(t.name)}</b><br><span class="small muted">${s ? `${s.studies || s.keep.length} ${s.studies ? "study " : ""}suburbs (${esc(s.basis)})` : t.parts > 1 ? "needs a suburb list" : "whole TA"}</span></td>
       <td class="l">${(() => { const f = filePrvdr(c), acr = !BATCH.prvdr[c] && f && f.code ? f.acronyms.filter((a) => norm(a) !== norm(p)) : [];
         return `${acr.length ? `<b>${acr.map(esc).join(", ")}</b> <span class="small muted">(your PRVDR) →</span><br>` : ""}<select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}">${opts(p)}</select><br><span class="small muted">${prvdrSource(c)}${BATCH.prvdr[c] ? ` · <button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:1px 6px">reset</button>` : ""}</span>${f && f.unresolved.length ? `<br><span class="tag warn">${f.unresolved.map(esc).join(", ")}: no saved provider</span> <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">match in 2.2</button>` : ""}`; })()}</td><td class="l small" style="white-space:normal;min-width:260px">${rate}</td>
+      <td class="l">${timelineCell(c)}</td>
       <td><button class="btn" type="button" data-tunsel="${c}" aria-label="Remove ${esc(t.name)}">×</button></td></tr>`; }).join("");
   return `<div class="grid g2">
     <div class="card">${zoomMap("cfg", layers, mapBox(BATCH.tas.map((t) => t.geom.coordinates)))}<p class="small muted" style="margin:6px 0 0">Scroll to zoom, drag to pan, click a TA to select it.</p></div>
@@ -228,7 +244,7 @@ function configureHTML() {
       ${newFound.length ? `<p class="small">Your files also mention ${newFound.length} TA(s) that aren't selected: ${newFound.map((c) => esc(taOf(c).name)).join(", ")}. <button class="btn" id="sel-found" type="button">Select them</button></p>` : ""}
     </div></div>
   <h2>Selected TAs (${sel.length}): PRVDR and charging rates</h2><p class="small muted">Each PRVDR is filled from your lists (nz_suburb_provider.csv, then nz_suburb_map.csv's PROVIDER) or the TA's saved provider. Change it here at any time.</p>
-  <div class="card scroll">${sel.length ? `<table><thead><tr><th class="l">TA and scope</th><th class="l">PRVDR</th><th class="l">Charging (2026/27)</th><th></th></tr></thead><tbody>${selRows}</tbody></table>` : '<p class="muted">Select TAs on the map or in the table below.</p>'}
+  <div class="card scroll">${sel.length ? `<table><thead><tr><th class="l">TA and scope</th><th class="l">PRVDR</th><th class="l">Charging (2026/27)</th><th class="l">Timeline: weather and census</th><th></th></tr></thead><tbody>${selRows}</tbody></table>` : '<p class="muted">Select TAs on the map or in the table below.</p>'}
     ${sel.length ? `<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="allocate">Next: 2.2 Allocate →</button><button class="btn" id="batch-clear" type="button">Clear selection</button></div>` : ""}</div>
   <h2>All regions with charging rates (${BATCH.tas.length} TAs)</h2>
   <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="bta-filter" value="${esc(filt)}" placeholder="TA, PRVDR or region"></label>
@@ -541,7 +557,8 @@ function loadHTML() {
   const notReady = sel.filter((c) => !(v[c] && v[c].status === "done"));
   const blocked = sel.filter((c) => v[c] && v[c].status === "done" && ((v[c].scoped && !v[c].matched.length) || (!v[c].scoped && taOf(c).parts > 1)));
   const budget = (((D.limits || {}).defaults || {}).openmeteo || {}).budget_day || 6000;
-  const tot = sel.reduce((t, c) => t + (+((ix[c] || {}).EST_OPENMETEO_CALLS_PER_PART) || 0) * (v[c] && v[c].scoped ? 0.5 : 1), 0);
+  const fullDays = (new Date(latestDay()) - new Date(CLIMATE_FROM)) / 864e5 + 1;   // the index estimates assume weather from 2013
+  const tot = sel.reduce((t, c) => t + (+((ix[c] || {}).EST_OPENMETEO_CALLS_PER_PART) || 0) * (v[c] && v[c].scoped ? 0.5 : 1) * (tlDays(c) / fullDays), 0);
   return `<div class="card"><h3>Ready to load</h3>
     <table><thead><tr><th class="l">TA</th><th class="l">PRVDR</th><th>Suburbs to load</th><th class="l">Status</th></tr></thead><tbody>${sel.map((c) => { const r = v[c];
       return `<tr><td class="l">${esc(taOf(c).name)}</td><td class="l">${esc(prvdrFor(c))}</td><td>${r && r.status === "done" ? (r.scoped ? r.matched.length : r.linz.length) : "–"}</td>
@@ -581,7 +598,7 @@ async function queueBatch() {
     const t = taOf(c), r = v[c], s = sc[c], p = prvdrFor(c);
     const existing = BATCH.regions.find((x) => x.ta_code === c); const id = existing ? existing.id : "ta-" + c;
     const scope = r.scoped ? [...new Set(r.matched.map((m) => m.linz.name))] : null;
-    await q(sb.from("regions").upsert({ id, name: t.name + (scope ? ` (${scope.length} suburbs)` : ""), territorial_authorities: [t.name], ta_code: c, scope, prvdr: p, status: existing ? existing.status : "draft", batch_id: b.id }));
+    await q(sb.from("regions").upsert({ id, name: t.name + (scope ? ` (${scope.length} suburbs)` : ""), territorial_authorities: [t.name], ta_code: c, scope, prvdr: p, timeline: tlFor(c), status: existing ? existing.status : "draft", batch_id: b.id }));
     const pairs = (r.pairs || []).filter((m) => m.row || m.manual);
     if (pairs.length || (s && s.rows.length)) {
       const old = await q(sb.from("m_suburbs").select("id").eq("region_id", id).not("source_file", "is", null));
@@ -590,7 +607,7 @@ async function queueBatch() {
         return [`${norm(m.mname)}|${norm(m.linz.name)}`, { region_id: id, m_suburb: m.mname, m_territory: x.territory || t.name, prvdr: x.prvdr || p, other_spellings: x.spellings || null, linz_ref: m.linz.name, source_file: m.manual ? "allocation" : x.file }]; })).values()];
       if (rows.length) await q(sb.from("m_suburbs").insert(rows));
     }
-    await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps: ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"] } }));
+    await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps: ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"], timeline: tlFor(c) } }));
   }
   toastMsg(`Queued ${sel.length} region job(s): the worker runs them one at a time`);
   await loadBatchData(); drawBatch();
@@ -602,19 +619,21 @@ async function saveConfig() {
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
     prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     suburb_picks: Object.fromEntries(Object.entries(BATCH.picks).filter(([c]) => BATCH.sel.has(c))),
+    timelines: Object.fromEntries(Object.entries(BATCH.tl).filter(([c]) => BATCH.sel.has(c))),
     prvdr_matches: Object.fromEntries(Object.entries(BATCH.matches).map(([k, v]) => [k.toUpperCase(), v])), allocations: Object.values(BATCH.alloc) };
   if (BATCH.config && BATCH.config.name === name) { await q(sb.from("batch_configs").update(rec).eq("id", BATCH.config.id)); }
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
-  toastMsg(`Saved configuration "${name}"`); await loadBatchData(); drawBatch();
+  toastMsg(`Saved configuration "${name}"`); await loadBatchData(); STUDY.id = String(BATCH.config.id); store.set("study", STUDY.id); loadStudies(); drawBatch();
 }
 function loadConfig(id) {
   const c = BATCH.configs.find((x) => String(x.id) === String(id));
+  if (typeof STUDY !== "undefined") { STUDY.id = c ? String(c.id) : ""; store.set("study", STUDY.id); setTimeout(renderHeader, 0); }
   if (!c) { BATCH.config = null; BATCH.savedScope = null; BATCH.cfgPrvdr = {}; return drawBatch(); }
   BATCH.config = { id: c.id, name: c.name }; BATCH.sel = new Set(c.ta_codes); BATCH.keep = c.keep_mode;
   BATCH.cfgPrvdr = { ...c.prvdr_by_ta }; BATCH.prvdr = Object.fromEntries((c.prvdr_manual || []).filter((k) => c.prvdr_by_ta[k]).map((k) => [k, c.prvdr_by_ta[k]]));
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
-  BATCH.picks = { ...(c.suburb_picks || {}) };
+  BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) };
   BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
 }
 async function tileCSV(batchId) {
@@ -639,7 +658,7 @@ document.addEventListener("click", async (e) => {
   if (z) { const svg = z.closest(".zmap").querySelector("svg"), b = svg.getAttribute("viewBox").split(" ").map(Number), act = z.dataset.zoom;
     if (act === "reset") return setView(svg, svg.dataset.full.split(" ").map(Number));
     if (act === "sel") { const id = z.closest(".zmap").dataset.zmap;
-      const g = id === "cfg" ? [...BATCH.sel].map((c) => taOf(c).geom && taOf(c).geom.coordinates).filter(Boolean)
+      const g = id === "ovw" ? allSubs().map(({ s }) => s.geom) : id === "cfg" ? [...BATCH.sel].map((c) => taOf(c).geom && taOf(c).geom.coordinates).filter(Boolean)
         : id.startsWith("alc-") ? ((scopeOf(id.slice(4)) || {}).matched || []).map((m) => m.linz.geom.coordinates)
         : ((BATCH.valid[id.slice(4)] || {}).matched || []).map((m) => m.linz.geom.coordinates);
       return g.length ? setView(svg, mapBox(g)) : setView(svg, svg.dataset.full.split(" ").map(Number)); }
@@ -670,6 +689,7 @@ document.addEventListener("click", async (e) => {
     if (!x) return toastMsg(`"${n}" is not a LINZ suburb in ${taOf(c).name}`); togglePick(c, x.name, true); return drawBatch(); }
   if (t.dataset && t.dataset.punmatch) { delete BATCH.matches[t.dataset.punmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bcfg-export") return exportBuilder();
+  if (t.dataset && t.dataset.tlall) { const src = tlOf(t.dataset.tlall); for (const c of BATCH.sel) BATCH.tl[c] = { ...src }; saveSel(); toastMsg(`Timeline of ${taOf(t.dataset.tlall).name} applied to ${BATCH.sel.size} TAs`); return drawBatch(); }
   if (t.dataset && t.dataset.refined) return downloadRefined(t.dataset.refined);
   if (t.id === "bcfg-clear") { BATCH.builder = null; return drawBatch(); }
   if (t.dataset && t.dataset.tprvdrReset) { delete BATCH.prvdr[t.dataset.tprvdrReset]; saveSel(); return drawBatch(); }
@@ -681,7 +701,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "validate-go" && can("editor")) { t.disabled = true; try { await validateAll(); } finally { t.disabled = false; } return; }
   if (t.id === "batch-queue" && can("editor")) { t.disabled = true; try { await queueBatch(); } catch (err) { toastMsg("Not queued: " + err.message); t.disabled = false; } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
-  if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); BATCH.config = null; await loadBatchData(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
+  if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
   if (t.id === "batch-refresh") { await loadBatchData(); return drawBatch(); }
   if (t.dataset && t.dataset.tiles) return tileCSV(+t.dataset.tiles).catch((err) => toastMsg(err.message));
   if (t.dataset && t.dataset.publish && can("editor")) { try { await q(sb.from("regions").update({ status: "published" }).eq("id", t.dataset.publish)); toastMsg("Published: reload to add it to the region list"); await loadBatchData(); drawBatch(); } catch (err) { toastMsg(err.message); } }
@@ -694,6 +714,12 @@ document.addEventListener("change", async (e) => {
   if (t.id === "batch-keep") { BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "cfg-pick") return loadConfig(t.value);
   if (t.id === "map-all") { store.set("map-all", t.checked ? "1" : "0"); BATCH.aPick = null; return drawBatch(); }
+  if (t.dataset && t.dataset.tl) { const c = t.dataset.tl, o = { ...tlOf(c) }; t.value ? o[t.dataset.tlk] = t.value : delete o[t.dataset.tlk];
+    if (o.climate_start && o.climate_end && o.climate_start > o.climate_end) { toastMsg("The weather period ends before it starts"); return drawBatch(); }
+    BATCH.tl[c] = o; saveSel(); return drawBatch(); }
+  if (t.dataset && t.dataset.tly) { const c = t.dataset.tly, o = { ...tlOf(c) }, cur = new Set(o.census_years || CENSUS_YEARS);
+    t.checked ? cur.add(t.value) : cur.delete(t.value); if (!cur.size) { toastMsg("Keep at least one census year"); return drawBatch(); }
+    o.census_years = CENSUS_YEARS.filter((y) => cur.has(y)); BATCH.tl[c] = o; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.pinc !== undefined) { togglePick(curTA(), t.dataset.pinc, t.checked); return drawBatch(); }
   if (t.dataset && t.dataset.pmatch !== undefined) { t.value ? BATCH.matches[t.dataset.pmatch] = t.value : delete BATCH.matches[t.dataset.pmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bin-files" && t.files && t.files.length) {
@@ -716,3 +742,36 @@ document.addEventListener("input", (e) => { if (e.target.id === "apick-filter") 
 
 // stage headings take their number from the stage bar (stages were inserted and replaced)
 STAGES.forEach(([id], i) => { const f = V[id]; if (f) V[id] = (...a) => f(...a).replace(/<h1>\d+ · /, `<h1>${i + 1} · `); });
+
+// ---------------------------------------------------------------- header: the study (saved configuration) instead of a bare region picker
+// The region picker is shown only on stages that work on one region, limited to the chosen study's TAs.
+const STUDY = { id: store.get("study", ""), list: null };
+const REGION_STAGES = new Set(["imagery", "validate", "context", "explore", "export"]);
+async function loadStudies() {
+  try { STUDY.list = can("editor") ? await q(sb.from("batch_configs").select("id,name,ta_codes").order("name")) : []; } catch (e) { STUDY.list = []; }
+  renderHeader();
+}
+const studyOf = () => (STUDY.list || []).find((c) => String(c.id) === String(STUDY.id));
+const _rhStudy = renderHeader;
+renderHeader = function () {
+  _rhStudy();
+  const sel = $("#region"), lab = sel && sel.closest && sel.closest("label"); if (!lab) return;
+  let w = $("#study-wrap");
+  if (!w && lab.parentNode && lab.parentNode.insertBefore) { w = document.createElement("label"); w.id = "study-wrap"; w.className = "small"; lab.parentNode.insertBefore(w, lab); }
+  if (STUDY.list === null) { STUDY.list = []; loadStudies(); }
+  const cur = studyOf();
+  if (w) { w.hidden = lab.hidden;
+    w.innerHTML = `<span class="muted">Study</span> <select id="study" aria-label="Study (saved configuration)"><option value="">All regions</option>${(STUDY.list || []).map((c) => `<option value="${c.id}" ${cur && cur.id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`; }
+  if (cur && D && D.regions) {
+    const keys = Object.entries(D.regions).filter(([, g]) => (cur.ta_codes || []).includes(g.ta_code)).map(([k]) => k);
+    if (keys.length) { if (!keys.includes(region)) { region = keys[0]; store.set("region", region); }
+      sel.innerHTML = keys.map((k) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(D.regions[k].label)}</option>`).join(""); }
+  }
+  lab.style.display = REGION_STAGES.has(stage) ? "" : "none";
+};
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "study") return;
+  STUDY.id = e.target.value; store.set("study", STUDY.id);
+  if (STUDY.id) { try { await loadBatchData(); loadConfig(STUDY.id); } catch (err) { toastMsg(err.message); } }
+  render();
+});
