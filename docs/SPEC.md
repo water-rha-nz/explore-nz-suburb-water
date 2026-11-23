@@ -604,9 +604,13 @@ These two stages replace the reference builder's Load and Allocate stages. The s
    - **builder configs:** `nz_suburb_builder_config.json` from `suburb_lookup.html` can be imported (keep rule, `prvdrMatches`, `suburbAllocations`; it lists which of the lists it expects) and exported in the same format, keeping fields this app doesn't use (data folder, outputs, other settings).
 2. **2.2 Allocate** (as the builder's Allocate tab):
    - every PRVDR / PROVIDER value in your files, with the saved provider it resolves to and a picker to assign or override it;
-   - per selected TA, **study suburb → LINZ mappings** (full-width table; unmatched rows by default, *show all* for every study suburb). A study suburb can map to several LINZ suburbs and several study suburbs to one LINZ suburb; mappings are added by "did you mean" suggestions, typing a name, clicking the map, or the *study suburb → LINZ suburb* control, which also adds study suburbs that aren't in your files (`file: "manual"`). A mapping you set wins over the name match (*use name match* resets it). Unmapped rows aren't loaded, and Load writes one `m_suburbs` row per study → LINZ pair.
-   - **suburbs to load** per TA (from your lists, or the whole TA without one): untick or click a suburb on the map to exclude it, add any other LINZ suburb by name or click; include/exclude all (filterable). Picks are saved with the configuration (`suburb_picks`) and as `suburbPicks` in an exported builder config;
-   - **‹ Previous / Next ›** move through the selected TAs (shown with their PRVDR), here and in 2.3.
+   - on opening, each selected TA's LINZ suburbs are loaded from the shared cache, so study names are cross-referenced without validating first;
+   - **one table of study suburbs per TA** (from the provider file, or the keep-lists), each with its status: *not found* (listed first), *mapped* (by an allocation) or *matched* (by name or spelling), its LINZ suburbs as removable chips, and "did you mean" suggestions;
+   - **assigning on the map:** tick one or more study suburbs, then click LINZ areas to assign them; clicking an area again unassigns it from all ticked suburbs. A study suburb can use several LINZ suburbs and a LINZ suburb several study suburbs. With nothing ticked, clicking an area ticks the study suburbs that use it;
+   - untick *Load* to leave a study suburb out (`suburb_picks.skip`); earlier include/exclude picks still apply and can be cleared. Study suburbs not in your files can be added;
+   - **incomplete allocation is flagged:** the TA buttons and the Next button show how many study suburbs are still unassigned, and moving on to 2.3 asks for confirmation;
+   - old builder configs keep working: allocations keyed on the provider list (M_SUBURB) and on the map list (NZ_SUBURB_REF, or M_SUBURB when blank) apply to the matching study suburbs;
+   - derived data (scope, PRVDRs, allocation rows, SVG paths) is cached and recomputed only when its inputs change, so switching steps and clicking the map stay quick.
 3. **2.3 Validate suburbs:**
    - each selected TA's scoped names are checked against LINZ suburbs (macron-insensitive); allocated rows count as matched, 2.2's picks apply; not-found names show "did you mean" suggestions;
    - the located suburbs are drawn on a zoomable map: in scope in blue, the TA's other suburbs in grey;
