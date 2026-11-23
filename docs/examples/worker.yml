@@ -1,0 +1,35 @@
+# Example: run the worker on GitHub Actions. Move to .github/workflows/worker.yml
+# (pushing workflow files needs a token with the `workflow` scope). See docs/SPEC.md section 17.4.
+name: worker
+on:
+  workflow_dispatch:
+    inputs:
+      ta: { description: "Territorial authority (as in index/regions.csv)", required: false }
+      steps: { description: "Steps", required: false, default: "linz,census,climate,imagery,aggregate" }
+  repository_dispatch:
+    types: [job-queued]          # sent by the queue-job Edge Function
+  schedule:
+    - cron: "15 14 * * *"        # 03:15 NZDT: climate top-up for published regions (within budget)
+concurrency: { group: worker, cancel-in-progress: false }
+permissions: { contents: read, packages: read }
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    environment: production      # secrets scoped to this environment
+    steps:
+      - run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - run: docker pull ghcr.io/${{ github.repository }}-worker:latest && docker tag ghcr.io/${{ github.repository }}-worker:latest nzsw
+      - name: Run
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_STORAGE_KEY: ${{ secrets.SUPABASE_STORAGE_KEY }}
+          LINZ_API_KEY: ${{ secrets.LINZ_API_KEY }}
+          STATSNZ_ADE_KEY: ${{ secrets.STATSNZ_ADE_KEY }}
+          STATSNZ_DATAFINDER_KEY: ${{ secrets.STATSNZ_DATAFINDER_KEY }}
+        run: |
+          ARGS="worker"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.ta }}" ]; then ARGS="run --ta \"${{ inputs.ta }}\" --steps ${{ inputs.steps }}"; fi
+          if [ "${{ github.event_name }}" = "schedule" ]; then ARGS="run --published --steps climate-topup"   # 1 Open-Meteo call per cached cell; stops at the daily budget; fi
+          eval docker run --rm -e SUPABASE_DB_URL -e SUPABASE_URL -e SUPABASE_STORAGE_KEY -e LINZ_API_KEY -e STATSNZ_ADE_KEY -e STATSNZ_DATAFINDER_KEY nzsw $ARGS

@@ -1,0 +1,65 @@
+PRVDR,LEGACY_PRVDR,PROVIDER,CHARGING_TYPE,TERRITORIES
+ASHDC,ADC_ASH,Ashburton District Council,Flat,Ashburton District
+BLRDC,BDC_BLR,Buller District Council,Flat + metered,Buller District
+CCC,,Christchurch City Council,Capital value + excess,Christchurch City
+CHBDC,,Central Hawke's Bay District Council,Flat,Central Hawke's Bay District
+CIC,,Chatham Islands Council,Flat,Chatham Islands Territory
+CLDC,,Clutha District Council,Flat + metered,Clutha District
+CODC,,Central Otago District Council,Flat + metered,Central Otago District
+CTNDC,CDC_CTN,Carterton District Council,Flat + excess,Carterton District
+DCC,,Dunedin City Council,Flat,Dunedin City
+FNDC,,Far North District Council,Flat + metered,Far North District
+GISDC,GDC_GIS,Gisborne District Council,Flat (metered commercial),Gisborne District
+GORDC,GDC_GOR,Gore District Council,Flat,Gore District
+GRYDC,GDC_GRY,Grey District Council,Flat,Grey District
+HRKDC,HDC_HRK,Hauraki District Council,Metered,Hauraki District
+HRWDC,HDC_HRW,Horowhenua District Council,Flat + excess,Horowhenua District
+HSTDC,HDC_HST,Hastings District Council,Flat,Hastings District
+IAWAIHAM,IAWAI_HAM,IAWAI (Hamilton),Capital value,Hamilton City
+IAWAIWDC,IAWAI_WDC,IAWAI (Waikato District),Volumetric,Waikato District
+ICC,,Invercargill City Council,Flat,Invercargill City
+KAWDC,,Kawerau District Council,Flat,Kawerau District
+KCDC,,Kapiti Coast District Council,Volumetric,Kapiti Coast District
+KHWSHRN,KHWS_HRN,Kaikōura Hurunui Water Services (Hurunui),Flat,Hurunui District
+KHWSKKR,KHWS_KKR,Kaikōura Hurunui Water Services (Kaikōura),Flat,Kaikoura District
+KPRDC,KDC_KPR,Kaipara District Council,Metered,Kaipara District
+MCKDC,,Mackenzie District Council,Flat,Mackenzie District
+MLBDC,MDC_MLB,Marlborough District Council,Flat + metered,Marlborough District
+MNWDC,MDC_MNW,Manawatū District Council,Flat,Manawatu District
+MSTN,,Masterton District Council,Flat + metered,Masterton District
+NCC,,Nelson City Council,Volumetric,Nelson City
+NPDC,,New Plymouth District Council,Volumetric,New Plymouth District
+NPRCC,NCC_NPR,Napier City Council,Flat,Napier City
+OPDC,,Ōpōtiki District Council,Flat + metered,Opotiki District
+PNCC,,Palmerston North City Council,Flat,Palmerston North City
+QLDC,,Queenstown Lakes District Council,Flat,Queenstown-Lakes District
+RLC,,Rotorua Lakes Council,Flat + metered,Rotorua District
+RNGDC,RDC_RNG,Rangitīkei District Council,Flat + metered,Rangitikei District
+RPHDC,RDC_RPH,Ruapehu District Council,Flat,Ruapehu District
+SELWYN,,Selwyn Water,Volumetric + fixed,Selwyn District
+STDC,,South Taranaki District Council,Flat + metered,South Taranaki District
+STHDC,SDC_STH,Southland District Council,Flat,Southland District
+STRDC,SDC_STR,Stratford District Council,Flat,Stratford District
+SWRDC,SWDC_SWR,South Wairarapa District Council,Flat + excess,South Wairarapa District
+TCC,,Tauranga City Council,Volumetric,Tauranga City
+TCDC,,Thames-Coromandel District Council,Metered,Thames-Coromandel District
+TDC,,Taupo District Council,Flat,Taupo District
+TIAKIWAI,,Tiaki Wai,Capital value,Wellington City; Hutt City; Upper Hutt City; Porirua City
+TMRDC,TDC_TMR,Timaru District Council,Flat,Timaru District
+TRRDC,TDC_TRR,Tararua District Council,Flat + metered,Tararua District
+TSDC,,Tasman District Council,Metered,Tasman District
+WAIRDC,,Wairoa District Council,Flat + metered,Wairoa District
+WATERCARE,,Watercare,Volumetric,Auckland
+WBOPDC,,Western Bay of Plenty District Council,Metered,Western Bay of Plenty District
+WGNDC,WDC_WGN,Whanganui District Council,Flat,Whanganui District
+WHGDC,WDC_WHG,Whangarei District Council,Metered,Whangarei District
+WHKDC,,Whakatāne District Council,Metered,Whakatane District
+WMKDC,,Waimakariri District Council,Flat,Waimakariri District
+WMTDC,,Waimate District Council,Flat,Waimate District
+WSTDC,,Westland District Council,Flat,Westland District
+WTKDC,,Waitaki District Council,Flat,Waitaki District
+WWLMPDC,WWL_MPDC,Waikato Waters (Matamata-Piako),Metered,Matamata-Piako District
+WWLOTODC,WWL_OTODC,Waikato Waters (Ōtorohanga),Flat,Otorohanga District
+WWLSWDC,WWL_SWDC,Waikato Waters (South Waikato),Flat,South Waikato District
+WWLWAIPA,WWL_WAIPA,Waikato Waters (Waipā),Metered,Waipa District
+WWLWTMO,WWL_WTMO,Waikato Waters (Waitomo),Flat + excess,Waitomo District
