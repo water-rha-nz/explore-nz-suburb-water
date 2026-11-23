@@ -575,3 +575,8 @@ A batch for a TA that already has a region reuses that region; the pilot regions
 - `created_by` columns are not readable by users. The rate setting doesn't record who changed it.
 - Uploaded files are processed in the browser; only the resulting suburb names and mappings are stored.
 - Development workspace: personal data was removed from test fixtures, and the full-access database login was deleted after setup. Tests use the worker's limited login and synthetic users.
+
+## 27. Deploying database changes
+- `.github/workflows/deploy-supabase.yml` runs when `supabase/migrations/**` or `supabase/functions/**` change on `main`, or by hand (Actions → Deploy Supabase → Run workflow). It links the project, prints a dry run, applies pending migrations, and deploys every Edge Function.
+- Credentials are only in the GitHub `production` environment, restricted to `main`: secrets `SUPABASE_DB_PASSWORD` and `SUPABASE_ACCESS_TOKEN`, variable `SUPABASE_PROJECT_REF`. Development workspaces hold no database admin login.
+- Auth settings (`config.toml`) are not pushed by the workflow; change them in the dashboard.
