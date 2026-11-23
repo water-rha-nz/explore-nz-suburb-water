@@ -9,9 +9,9 @@ This covers the steps between "accounts exist" and "a signed-in admin". The desi
   - redirect URLs: Pages, `localhost:5173` and `127.0.0.1:3000`;
   - email sign-in **off**, **Google** sign-in on;
   - the client ID and secret are read from environment variables and never committed.
-- [x] Migrations `0001_init`, `0002_worker` and `0003_storage` parse with PostgreSQL's parser (pglast / libpg_query), including the function and trigger bodies. They haven't yet been applied to a database.
+- [x] Migrations `0001_init`, `0002_worker` and `0003_storage` parse with PostgreSQL's parser (pglast / libpg_query), including the function and trigger bodies. Applied on 2026-11-23 (below).
 - [x] Credential files created, owner-only (600):
-  - `~/.config/supabase/access_token` (empty);
+  - `~/.config/supabase/access_token` (now filled by you);
   - `~/.config/supabase/db_password`: generated, 32 characters, never printed;
   - `~/.config/google/oauth_client_id` and `oauth_client_secret` (empty).
 - [x] `tools/supabase_bootstrap.sh`. With no arguments it only plans; `--apply` creates and configures. Re-running it skips finished steps.
@@ -28,16 +28,8 @@ This covers the steps between "accounts exist" and "a signed-in admin". The desi
 - **Google redirect URI:** `https://uthodoiocvnwxwfzahwd.supabase.co/auth/v1/callback`
 
 ## You do (needs your browser)
-1. **Supabase access token**
-   - Create one at https://supabase.com/dashboard/account/tokens (name it e.g. `explore-nz-suburb-water bootstrap`) and paste it into `~/.config/supabase/access_token`.
-   - If you belong to more than one organisation, also put the organisation ID in `~/.config/supabase/org_id`.
-   - Revoke the token once setup is finished if you like; the app itself never uses it.
-2. Then `tools/supabase_bootstrap.sh --apply` (I can run this):
-   - creates the project `explore-nz-suburb-water` in **Sydney (ap-southeast-2)** on the **free** plan;
-   - links it and applies the migrations;
-   - pushes the API keys as secrets;
-   - writes `.env`;
-   - prints the Google redirect URI, `https://<project-ref>.supabase.co/auth/v1/callback`.
+1. ~~Supabase access token~~ (done).
+2. ~~`tools/supabase_bootstrap.sh --apply`~~ (done: see above).
 3. **Google OAuth client** (Google Cloud console, https://console.cloud.google.com):
    1. **New Project** screen: project name `explore-nz-suburb-water` (the project ID can stay as suggested). With a personal Google account, **Organisation / Parent resource = "No organisation"** is correct. Press **Create**, then select the new project in the top bar.
    2. Menu ☰ → **APIs & Services → OAuth consent screen**, which opens the **Google Auth Platform**. Press **Get started**, then **Branding** (OAuth consent screen):
