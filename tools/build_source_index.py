@@ -12,6 +12,7 @@ Inputs
 Outputs
   index/source_index.json   one entry per TA with request templates and dependencies
   index/regions.csv         one row per TA (provider, region, SA2 count, imagery folders)
+  index/providers.csv       PRVDR codes (letters and digits only) with the reference builder's legacy codes
 
 Placeholders in templates (resolved by the worker at run time):
   {LINZ_API_KEY} {STATSNZ_DATAFINDER_KEY} {STATSNZ_ADE_KEY}   secrets, never stored
@@ -76,6 +77,20 @@ def ascii_(s):
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().replace("'", "'")
 
 
+# PRVDR codes are uppercase letters and digits only. The reference builder's legacy codes with underscores are
+# rewritten: council codes put the place abbreviation before the council type (WDC_WHG -> WHGDC, NCC_NPR -> NPRCC),
+# multi-district organisations keep their prefix (IAWAI_HAM -> IAWAIHAM). Legacy codes are kept as aliases.
+MULTI_DISTRICT = {"IAWAI", "WWL", "KHWS"}
+
+
+def prvdr_code(code):
+    m = re.fullmatch(r"([A-Z]+)_([A-Z0-9]+)", code)
+    if not m:
+        return code
+    pre, suf = m.groups()
+    return pre + suf if pre in MULTI_DISTRICT else suf + pre[-2:]
+
+
 def parse_water(html):
     s = open(html, encoding="utf-8").read()
     blk = s[s.find("const WATER"):]
@@ -83,7 +98,7 @@ def parse_water(html):
     for m in re.finditer(r'\{ provider: "([^"]+)", prvd: "([^"]+)", aliases: \[([^\]]*)\], territories: \[([^\]]*)\], charging: "([^"]*)"', blk):
         end = blk.find("checks:", m.end())
         body = blk[m.end():end if end > 0 else m.end() + 3000]
-        out.append(dict(provider=m.group(1), prvdr=m.group(2), territories=re.findall(r'"([^"]+)"', m.group(4)),
+        out.append(dict(provider=m.group(1), prvdr=prvdr_code(m.group(2)), legacy_prvdr=m.group(2), territories=re.findall(r'"([^"]+)"', m.group(4)),
                         charging=m.group(5), sources=[dict(title=t, url=u) for t, u in re.findall(r'\{ t: "([^"]+)", u: "([^"]+)" \}', body)]))
     return out
 
@@ -109,6 +124,9 @@ def main():
     os.makedirs(a.out, exist_ok=True)
 
     water = parse_water(a.lookup)
+    codes_ = [w["prvdr"] for w in water]
+    bad = [c for c in codes_ if not re.fullmatch(r"[A-Z0-9]+", c)]
+    assert not bad and len(set(codes_)) == len(codes_), f"invalid or duplicate PRVDR codes: {bad}"
     geo = parse_geo(a.geo)
     kids = {}
     for c, n in geo.items():
@@ -183,7 +201,8 @@ def main():
                 reqs.append(dict(step="water_rates.source", service="Provider website (manual review)", method="GET", url=s["url"], params={},
                                  auth=None, depends_on=[], output=f"published charges: {s['title']}"))
             entries.append(dict(ta=ta, ta_code=code, ta_name_statsnz=ta_codes[code]["name"], regional_council_code=rc,
-                                regional_council=geo.get(rc, {}).get("name"), imagery_folders=folders, prvdr=p["prvdr"], provider=p["provider"],
+                                regional_council=geo.get(rc, {}).get("name"), imagery_folders=folders, prvdr=p["prvdr"],
+                                legacy_prvdr=p["legacy_prvdr"] if p["legacy_prvdr"] != p["prvdr"] else None, provider=p["provider"],
                                 charging_type=p["charging"], sa2_count=len(codes), sa2_codes=codes, requests=reqs))
 
     meta = dict(generated=dt.date.today().isoformat(), executes_nothing=True, tas=len(entries), providers=len({e["prvdr"] for e in entries}),
@@ -193,6 +212,11 @@ def main():
                 run_order=["linz.suburbs", "linz.parcels|titles|buildings|addresses", "statsnz.sa2", "statsnz.ade.*", "imagery.list -> imagery.items -> worker imagery job",
                            "climate.daily", "water_rates.source (editor review)"])
     json.dump(dict(meta=meta, regions=entries), open(os.path.join(a.out, "source_index.json"), "w"), indent=1, ensure_ascii=False)
+    with open(os.path.join(a.out, "providers.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["PRVDR", "LEGACY_PRVDR", "PROVIDER", "CHARGING_TYPE", "TERRITORIES"])
+        for p in sorted(water, key=lambda p: p["prvdr"]):
+            w.writerow([p["prvdr"], p["legacy_prvdr"] if p["legacy_prvdr"] != p["prvdr"] else "", p["provider"], p["charging"], "; ".join(p["territories"])])
     with open(os.path.join(a.out, "regions.csv"), "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["TA", "TA_CODE", "REGIONAL_COUNCIL", "PRVDR", "PROVIDER", "CHARGING_TYPE", "SA2_COUNT", "IMAGERY_FOLDERS", "REQUESTS"])

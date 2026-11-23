@@ -77,7 +77,7 @@ All geometries are NZTM (EPSG:2193) with a PostGIS GIST index.
 | `census_metrics` | sa2_code, year | households, % separate/joined, bedrooms, % owner (by type), hh size, median income | derived |
 | `climate_daily` | grid_cell_id, date | rain, Tmean, Tmax, ET0 | Open-Meteo (fetched once per grid cell, mapped to suburbs) |
 | `water_rates` | PRVDR, valid_from | CHARGING_TYPE, FIXED_PA, VOLUMETRIC_PA, THRESHOLD_Lpd, DATE_EST, source URL, verified | `WATER` constant plus editor edits (history kept for the price variable) |
-| `providers` | PRVDR | name, aliases, TAs served | reference builder |
+| `providers` | PRVDR | name, aliases, TAs served, legacy code | reference builder; codes are **uppercase letters and digits only** (`index/providers.csv`) |
 | `jobs`, `job_runs` | id | type, region, params, status, log, counts | orchestration |
 | `exports` | id | region, as_of, format, file in Storage, checksum | export workflow |
 
@@ -361,6 +361,33 @@ The **same Docker image** runs on all of these:
 
 Note: pushing files under `.github/workflows/` needs a token with the `workflow` scope (`gh auth refresh -s workflow`). The example is kept in `docs/examples/` until then.
 
+### 17.4a Image build, registry and spin-up
+**Today nothing is hosted.** No image has been built, no workflow is active, and there is no Supabase project yet. The target lifecycle is:
+
+1. **Build once per change.** A `build-worker` GitHub Actions workflow runs on push to `main` when `backend/**` or `index/**` change. It builds `backend/Dockerfile` and pushes the image to **GitHub Container Registry** as `ghcr.io/water-rha-nz/explore-nz-suburb-water-worker:<git-sha>` and `:latest`.
+   - GHCR is free for public images and needs no extra account.
+   - The image is about 600 MB: Python plus GDAL wheels, plus the source index.
+2. **Trigger.** An editor presses *Queue* in the app.
+   - The `queue-job` Edge Function inserts a `jobs` row.
+   - It then calls the GitHub REST API (`POST /repos/water-rha-nz/explore-nz-suburb-water/dispatches`, event `job-queued`), using a fine-grained token stored as a Supabase secret and limited to that repo's Actions.
+   - Cron schedules and manual "Run workflow" clicks also start runs.
+3. **Spin-up (GitHub Actions).**
+   - GitHub allocates a fresh **GitHub-hosted Ubuntu VM** (about 4 vCPU / 16 GB for public repos) in its own cloud. Neither you nor Supabase hosts it.
+   - The workflow runs `docker pull ghcr.io/…-worker:<sha>` (about 30–60 s), then `docker run` with the secrets passed as environment variables.
+   - Inside the container, `nzsw worker` calls `claim_job()`, runs the steps, writes results to Supabase, and claims the next job until the queue is empty.
+   - The container exits and the VM is destroyed. Nothing stays running and there is no idle cost.
+4. **Spin-up (Cloud Run Jobs, for national runs).**
+   - The same image is mirrored to Google **Artifact Registry** in `australia-southeast1` (Sydney).
+   - The Edge Function calls the Cloud Run Admin API (`jobs.run`) with a service-account key held as a Supabase secret.
+   - Google starts N task containers in seconds; each takes a share of the tiles (`CLOUD_RUN_TASK_INDEX`). They exit when done, billed per second.
+   - Sydney is the same AWS/GCP metro as the LINZ imagery bucket (`ap-southeast-2`), which keeps reads fast.
+5. **Data paths** during a run:
+   - imagery is read straight from public S3 by COG window, with no download to disk;
+   - LINZ, Stats NZ and Open-Meteo are reached over HTTPS;
+   - results go to Supabase Postgres through the connection pooler, and to Supabase Storage for chips and exports.
+
+Pushing the two workflow files (`build-worker`, `worker`) needs a token with the `workflow` scope.
+
 ### 17.5 Scheduled work
 | Task | Trigger |
 |---|---|
@@ -377,6 +404,8 @@ Note: pushing files under `.github/workflows/` needs a token with the `workflow`
 - PRVDR and charging type;
 - the TA's SA2 codes;
 - `requests[]` (service, URL, params/headers, auth, `depends_on`, paging, expected output).
+
+PRVDR codes are uppercase letters and digits only. The reference builder's 31 underscore codes are rewritten: council codes put the place abbreviation before the council type (`WDC_WHG` → `WHGDC`, `NCC_NPR` → `NPRCC`), and multi-district organisations keep their prefix (`IAWAI_HAM` → `IAWAIHAM`, `WWL_WAIPA` → `WWLWAIPA`). The old codes are kept as aliases (`index/providers.csv`), so files made with the reference builder still match.
 
 The run order is: LINZ suburbs (filter by TA name; yields the bbox and suburb points) → parcels / titles / buildings / addresses (bbox, paged) → Datafinder SA2 and ADE census (chunks of 150 SA2s) → imagery collection list → STAC items → imagery job → Open-Meteo (at most 100 points per call) → provider pages for rate review. Keys are placeholders resolved from secrets at run time. See `index/README.md` for caveats.
 

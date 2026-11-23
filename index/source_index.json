@@ -89,6 +89,7 @@
     "auckland"
    ],
    "prvdr": "WATERCARE",
+   "legacy_prvdr": null,
    "provider": "Watercare",
    "charging_type": "Volumetric",
    "sa2_count": 633,
@@ -1326,6 +1327,7 @@
     "wellington"
    ],
    "prvdr": "TIAKIWAI",
+   "legacy_prvdr": null,
    "provider": "Tiaki Wai",
    "charging_type": "Capital value",
    "sa2_count": 86,
@@ -1694,6 +1696,7 @@
     "wellington"
    ],
    "prvdr": "TIAKIWAI",
+   "legacy_prvdr": null,
    "provider": "Tiaki Wai",
    "charging_type": "Capital value",
    "sa2_count": 45,
@@ -2021,6 +2024,7 @@
     "wellington"
    ],
    "prvdr": "TIAKIWAI",
+   "legacy_prvdr": null,
    "provider": "Tiaki Wai",
    "charging_type": "Capital value",
    "sa2_count": 19,
@@ -2322,6 +2326,7 @@
     "wellington"
    ],
    "prvdr": "TIAKIWAI",
+   "legacy_prvdr": null,
    "provider": "Tiaki Wai",
    "charging_type": "Capital value",
    "sa2_count": 27,
@@ -2631,6 +2636,7 @@
     "canterbury"
    ],
    "prvdr": "CCC",
+   "legacy_prvdr": null,
    "provider": "Christchurch City Council",
    "charging_type": "Capital value + excess",
    "sa2_count": 179,
@@ -3175,6 +3181,7 @@
     "bay-of-plenty"
    ],
    "prvdr": "TCC",
+   "legacy_prvdr": null,
    "provider": "Tauranga City Council",
    "charging_type": "Volumetric",
    "sa2_count": 58,
@@ -3514,7 +3521,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "IAWAI_HAM",
+   "prvdr": "IAWAIHAM",
+   "legacy_prvdr": "IAWAI_HAM",
    "provider": "IAWAI (Hamilton)",
    "charging_type": "Capital value",
    "sa2_count": 68,
@@ -3864,7 +3872,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "IAWAI_WDC",
+   "prvdr": "IAWAIWDC",
+   "legacy_prvdr": "IAWAI_WDC",
    "provider": "IAWAI (Waikato District)",
    "charging_type": "Volumetric",
    "sa2_count": 43,
@@ -4183,6 +4192,7 @@
     "manawatu-whanganui"
    ],
    "prvdr": "TDC",
+   "legacy_prvdr": null,
    "provider": "Taupo District Council",
    "charging_type": "Flat",
    "sa2_count": 29,
@@ -4536,6 +4546,7 @@
     "wellington"
    ],
    "prvdr": "KCDC",
+   "legacy_prvdr": null,
    "provider": "Kapiti Coast District Council",
    "charging_type": "Volumetric",
    "sa2_count": 25,
@@ -4833,6 +4844,7 @@
     "otago"
    ],
    "prvdr": "DCC",
+   "legacy_prvdr": null,
    "provider": "Dunedin City Council",
    "charging_type": "Flat",
    "sa2_count": 68,
@@ -5173,6 +5185,7 @@
     "manawatu-whanganui"
    ],
    "prvdr": "PNCC",
+   "legacy_prvdr": null,
    "provider": "Palmerston North City Council",
    "charging_type": "Flat",
    "sa2_count": 41,
@@ -5486,6 +5499,7 @@
     "nelson"
    ],
    "prvdr": "NCC",
+   "legacy_prvdr": null,
    "provider": "Nelson City Council",
    "charging_type": "Volumetric",
    "sa2_count": 27,
@@ -5785,6 +5799,7 @@
     "northland"
    ],
    "prvdr": "FNDC",
+   "legacy_prvdr": null,
    "provider": "Far North District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 47,
@@ -6113,7 +6128,8 @@
    "imagery_folders": [
     "northland"
    ],
-   "prvdr": "WDC_WHG",
+   "prvdr": "WHGDC",
+   "legacy_prvdr": "WDC_WHG",
    "provider": "Whangarei District Council",
    "charging_type": "Metered",
    "sa2_count": 45,
@@ -6440,7 +6456,8 @@
    "imagery_folders": [
     "northland"
    ],
-   "prvdr": "KDC_KPR",
+   "prvdr": "KPRDC",
+   "legacy_prvdr": "KDC_KPR",
    "provider": "Kaipara District Council",
    "charging_type": "Metered",
    "sa2_count": 11,
@@ -6734,6 +6751,7 @@
     "waikato"
    ],
    "prvdr": "TCDC",
+   "legacy_prvdr": null,
    "provider": "Thames-Coromandel District Council",
    "charging_type": "Metered",
    "sa2_count": 23,
@@ -7038,7 +7056,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "HDC_HRK",
+   "prvdr": "HRKDC",
+   "legacy_prvdr": "HDC_HRK",
    "provider": "Hauraki District Council",
    "charging_type": "Metered",
    "sa2_count": 11,
@@ -7321,7 +7340,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "WWL_MPDC",
+   "prvdr": "WWLMPDC",
+   "legacy_prvdr": "WWL_MPDC",
    "provider": "Waikato Waters (Matamata-Piako)",
    "charging_type": "Metered",
    "sa2_count": 19,
@@ -7622,7 +7642,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "WWL_WAIPA",
+   "prvdr": "WWLWAIPA",
+   "legacy_prvdr": "WWL_WAIPA",
    "provider": "Waikato Waters (Waipā)",
    "charging_type": "Metered",
    "sa2_count": 37,
@@ -7931,7 +7952,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "WWL_OTODC",
+   "prvdr": "WWLOTODC",
+   "legacy_prvdr": "WWL_OTODC",
    "provider": "Waikato Waters (Ōtorohanga)",
    "charging_type": "Flat",
    "sa2_count": 7,
@@ -8210,7 +8232,8 @@
    "imagery_folders": [
     "waikato"
    ],
-   "prvdr": "WWL_SWDC",
+   "prvdr": "WWLSWDC",
+   "legacy_prvdr": "WWL_SWDC",
    "provider": "Waikato Waters (South Waikato)",
    "charging_type": "Flat",
    "sa2_count": 11,
@@ -8494,7 +8517,8 @@
     "waikato",
     "manawatu-whanganui"
    ],
-   "prvdr": "WWL_WTMO",
+   "prvdr": "WWLWTMO",
+   "legacy_prvdr": "WWL_WTMO",
    "provider": "Waikato Waters (Waitomo)",
    "charging_type": "Flat + excess",
    "sa2_count": 8,
@@ -8790,6 +8814,7 @@
     "waikato"
    ],
    "prvdr": "RLC",
+   "legacy_prvdr": null,
    "provider": "Rotorua Lakes Council",
    "charging_type": "Flat + metered",
    "sa2_count": 42,
@@ -9118,6 +9143,7 @@
     "bay-of-plenty"
    ],
    "prvdr": "WBOPDC",
+   "legacy_prvdr": null,
    "provider": "Western Bay of Plenty District Council",
    "charging_type": "Metered",
    "sa2_count": 28,
@@ -9428,6 +9454,7 @@
     "bay-of-plenty"
    ],
    "prvdr": "WHKDC",
+   "legacy_prvdr": null,
    "provider": "Whakatāne District Council",
    "charging_type": "Metered",
    "sa2_count": 18,
@@ -9718,6 +9745,7 @@
     "bay-of-plenty"
    ],
    "prvdr": "KAWDC",
+   "legacy_prvdr": null,
    "provider": "Kawerau District Council",
    "charging_type": "Flat",
    "sa2_count": 4,
@@ -9994,6 +10022,7 @@
     "bay-of-plenty"
    ],
    "prvdr": "OPDC",
+   "legacy_prvdr": null,
    "provider": "Ōpōtiki District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 7,
@@ -10272,7 +10301,8 @@
    "imagery_folders": [
     "gisborne"
    ],
-   "prvdr": "GDC_GIS",
+   "prvdr": "GISDC",
+   "legacy_prvdr": "GDC_GIS",
    "provider": "Gisborne District Council",
    "charging_type": "Flat (metered commercial)",
    "sa2_count": 28,
@@ -10583,6 +10613,7 @@
     "hawkes-bay"
    ],
    "prvdr": "WAIRDC",
+   "legacy_prvdr": null,
    "provider": "Wairoa District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 6,
@@ -10860,7 +10891,8 @@
    "imagery_folders": [
     "hawkes-bay"
    ],
-   "prvdr": "HDC_HST",
+   "prvdr": "HSTDC",
+   "legacy_prvdr": "HDC_HST",
    "provider": "Hastings District Council",
    "charging_type": "Flat",
    "sa2_count": 44,
@@ -11176,7 +11208,8 @@
    "imagery_folders": [
     "hawkes-bay"
    ],
-   "prvdr": "NCC_NPR",
+   "prvdr": "NPRCC",
+   "legacy_prvdr": "NCC_NPR",
    "provider": "Napier City Council",
    "charging_type": "Flat",
    "sa2_count": 32,
@@ -11481,6 +11514,7 @@
     "hawkes-bay"
    ],
    "prvdr": "CHBDC",
+   "legacy_prvdr": null,
    "provider": "Central Hawke's Bay District Council",
    "charging_type": "Flat",
    "sa2_count": 7,
@@ -11760,6 +11794,7 @@
     "taranaki"
    ],
    "prvdr": "NPDC",
+   "legacy_prvdr": null,
    "provider": "New Plymouth District Council",
    "charging_type": "Volumetric",
    "sa2_count": 38,
@@ -12080,7 +12115,8 @@
     "taranaki",
     "manawatu-whanganui"
    ],
-   "prvdr": "SDC_STR",
+   "prvdr": "STRDC",
+   "legacy_prvdr": "SDC_STR",
    "provider": "Stratford District Council",
    "charging_type": "Flat",
    "sa2_count": 7,
@@ -12374,6 +12410,7 @@
     "taranaki"
    ],
    "prvdr": "STDC",
+   "legacy_prvdr": null,
    "provider": "South Taranaki District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 20,
@@ -12675,7 +12712,8 @@
    "imagery_folders": [
     "manawatu-whanganui"
    ],
-   "prvdr": "RDC_RPH",
+   "prvdr": "RPHDC",
+   "legacy_prvdr": "RDC_RPH",
    "provider": "Ruapehu District Council",
    "charging_type": "Flat",
    "sa2_count": 10,
@@ -12967,7 +13005,8 @@
    "imagery_folders": [
     "manawatu-whanganui"
    ],
-   "prvdr": "WDC_WGN",
+   "prvdr": "WGNDC",
+   "legacy_prvdr": "WDC_WGN",
    "provider": "Whanganui District Council",
    "charging_type": "Flat",
    "sa2_count": 28,
@@ -13268,7 +13307,8 @@
     "manawatu-whanganui",
     "hawkes-bay"
    ],
-   "prvdr": "RDC_RNG",
+   "prvdr": "RNGDC",
+   "legacy_prvdr": "RDC_RNG",
    "provider": "Rangitīkei District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 10,
@@ -13574,7 +13614,8 @@
    "imagery_folders": [
     "manawatu-whanganui"
    ],
-   "prvdr": "MDC_MNW",
+   "prvdr": "MNWDC",
+   "legacy_prvdr": "MDC_MNW",
    "provider": "Manawatū District Council",
    "charging_type": "Flat",
    "sa2_count": 17,
@@ -13864,7 +13905,8 @@
     "manawatu-whanganui",
     "wellington"
    ],
-   "prvdr": "TDC_TRR",
+   "prvdr": "TRRDC",
+   "legacy_prvdr": "TDC_TRR",
    "provider": "Tararua District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 12,
@@ -14162,7 +14204,8 @@
    "imagery_folders": [
     "manawatu-whanganui"
    ],
-   "prvdr": "HDC_HRW",
+   "prvdr": "HRWDC",
+   "legacy_prvdr": "HDC_HRW",
    "provider": "Horowhenua District Council",
    "charging_type": "Flat + excess",
    "sa2_count": 22,
@@ -14467,6 +14510,7 @@
     "wellington"
    ],
    "prvdr": "MSTN",
+   "legacy_prvdr": null,
    "provider": "Masterton District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 15,
@@ -14753,7 +14797,8 @@
    "imagery_folders": [
     "wellington"
    ],
-   "prvdr": "CDC_CTN",
+   "prvdr": "CTNDC",
+   "legacy_prvdr": "CDC_CTN",
    "provider": "Carterton District Council",
    "charging_type": "Flat + excess",
    "sa2_count": 5,
@@ -15030,7 +15075,8 @@
    "imagery_folders": [
     "wellington"
    ],
-   "prvdr": "SWDC_SWR",
+   "prvdr": "SWRDC",
+   "legacy_prvdr": "SWDC_SWR",
    "provider": "South Wairarapa District Council",
    "charging_type": "Flat + excess",
    "sa2_count": 7,
@@ -15310,6 +15356,7 @@
     "tasman"
    ],
    "prvdr": "TSDC",
+   "legacy_prvdr": null,
    "provider": "Tasman District Council",
    "charging_type": "Metered",
    "sa2_count": 36,
@@ -15617,7 +15664,8 @@
    "imagery_folders": [
     "marlborough"
    ],
-   "prvdr": "MDC_MLB",
+   "prvdr": "MLBDC",
+   "legacy_prvdr": "MDC_MLB",
    "provider": "Marlborough District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 26,
@@ -15925,7 +15973,8 @@
    "imagery_folders": [
     "west-coast"
    ],
-   "prvdr": "BDC_BLR",
+   "prvdr": "BLRDC",
+   "legacy_prvdr": "BDC_BLR",
    "provider": "Buller District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 9,
@@ -16216,7 +16265,8 @@
    "imagery_folders": [
     "west-coast"
    ],
-   "prvdr": "GDC_GRY",
+   "prvdr": "GRYDC",
+   "legacy_prvdr": "GDC_GRY",
    "provider": "Grey District Council",
    "charging_type": "Flat",
    "sa2_count": 14,
@@ -16503,6 +16553,7 @@
     "west-coast"
    ],
    "prvdr": "WSTDC",
+   "legacy_prvdr": null,
    "provider": "Westland District Council",
    "charging_type": "Flat",
    "sa2_count": 9,
@@ -16783,7 +16834,8 @@
    "imagery_folders": [
     "canterbury"
    ],
-   "prvdr": "KHWS_KKR",
+   "prvdr": "KHWSKKR",
+   "legacy_prvdr": "KHWS_KKR",
    "provider": "Kaikōura Hurunui Water Services (Kaikōura)",
    "charging_type": "Flat",
    "sa2_count": 2,
@@ -17057,7 +17109,8 @@
    "imagery_folders": [
     "canterbury"
    ],
-   "prvdr": "KHWS_HRN",
+   "prvdr": "KHWSHRN",
+   "legacy_prvdr": "KHWS_HRN",
    "provider": "Kaikōura Hurunui Water Services (Hurunui)",
    "charging_type": "Flat",
    "sa2_count": 9,
@@ -17349,6 +17402,7 @@
     "canterbury"
    ],
    "prvdr": "WMKDC",
+   "legacy_prvdr": null,
    "provider": "Waimakariri District Council",
    "charging_type": "Flat",
    "sa2_count": 37,
@@ -17658,6 +17712,7 @@
     "canterbury"
    ],
    "prvdr": "SELWYN",
+   "legacy_prvdr": null,
    "provider": "Selwyn Water",
    "charging_type": "Volumetric + fixed",
    "sa2_count": 36,
@@ -17975,7 +18030,8 @@
    "imagery_folders": [
     "canterbury"
    ],
-   "prvdr": "ADC_ASH",
+   "prvdr": "ASHDC",
+   "legacy_prvdr": "ADC_ASH",
    "provider": "Ashburton District Council",
    "charging_type": "Flat",
    "sa2_count": 20,
@@ -18267,7 +18323,8 @@
    "imagery_folders": [
     "canterbury"
    ],
-   "prvdr": "TDC_TMR",
+   "prvdr": "TMRDC",
+   "legacy_prvdr": "TDC_TMR",
    "provider": "Timaru District Council",
    "charging_type": "Flat",
    "sa2_count": 29,
@@ -18569,6 +18626,7 @@
     "canterbury"
    ],
    "prvdr": "MCKDC",
+   "legacy_prvdr": null,
    "provider": "Mackenzie District Council",
    "charging_type": "Flat",
    "sa2_count": 6,
@@ -18857,6 +18915,7 @@
     "canterbury"
    ],
    "prvdr": "WMTDC",
+   "legacy_prvdr": null,
    "provider": "Waimate District Council",
    "charging_type": "Flat",
    "sa2_count": 8,
@@ -19138,6 +19197,7 @@
     "canterbury"
    ],
    "prvdr": "WTKDC",
+   "legacy_prvdr": null,
    "provider": "Waitaki District Council",
    "charging_type": "Flat",
    "sa2_count": 17,
@@ -19451,6 +19511,7 @@
     "otago"
    ],
    "prvdr": "CODC",
+   "legacy_prvdr": null,
    "provider": "Central Otago District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 11,
@@ -19744,6 +19805,7 @@
     "otago"
    ],
    "prvdr": "QLDC",
+   "legacy_prvdr": null,
    "provider": "Queenstown Lakes District Council",
    "charging_type": "Flat",
    "sa2_count": 32,
@@ -20048,6 +20110,7 @@
     "otago"
    ],
    "prvdr": "CLDC",
+   "legacy_prvdr": null,
    "provider": "Clutha District Council",
    "charging_type": "Flat + metered",
    "sa2_count": 12,
@@ -20331,7 +20394,8 @@
    "imagery_folders": [
     "southland"
    ],
-   "prvdr": "SDC_STH",
+   "prvdr": "STHDC",
+   "legacy_prvdr": "SDC_STH",
    "provider": "Southland District Council",
    "charging_type": "Flat",
    "sa2_count": 26,
@@ -20639,7 +20703,8 @@
    "imagery_folders": [
     "southland"
    ],
-   "prvdr": "GDC_GOR",
+   "prvdr": "GORDC",
+   "legacy_prvdr": "GDC_GOR",
    "provider": "Gore District Council",
    "charging_type": "Flat",
    "sa2_count": 9,
@@ -20931,6 +20996,7 @@
     "southland"
    ],
    "prvdr": "ICC",
+   "legacy_prvdr": null,
    "provider": "Invercargill City Council",
    "charging_type": "Flat",
    "sa2_count": 28,
@@ -21231,6 +21297,7 @@
     "chatham-islands"
    ],
    "prvdr": "CIC",
+   "legacy_prvdr": null,
    "provider": "Chatham Islands Council",
    "charging_type": "Flat",
    "sa2_count": 2,

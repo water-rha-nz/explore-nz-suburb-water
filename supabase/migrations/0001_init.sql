@@ -72,7 +72,11 @@ create table suburbs (
 );
 create index on suburbs using gist (geom);
 
-create table providers (prvdr text primary key, name text not null, aliases text[], territories text[]);
+create table providers (
+  prvdr text primary key check (prvdr ~ '^[A-Z0-9]+$'),   -- letters and digits only (no underscores)
+  legacy_prvdr text,                                     -- reference builder's code, kept as an alias
+  name text not null, aliases text[], territories text[]
+);
 
 create table m_suburbs (
   id bigserial primary key, region_id text references regions, m_suburb text not null, m_territory text,
