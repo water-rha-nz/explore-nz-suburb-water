@@ -84,14 +84,15 @@ async function loadRegion(r) {
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
 }
-async function loadAll() {
+async function loadAll(progress) {
   const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr,timeline").order("id"));
   const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
   const cen = await q(sb.rpc("region_centroids"));
-  for (const r of regions) { const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = cen[r.id] || g.lonlat; d.regions[r.id] = g; } }   // drafts without data yet are listed on the Batch stage
+  let i = 0;
+  for (const r of regions) { if (progress) progress(++i, regions.length, r.name); const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = cen[r.id] || g.lonlat; d.regions[r.id] = g; } }   // drafts without data yet are listed on the Batch stage
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
@@ -301,17 +302,29 @@ renderHeader = function () {
     ${can("admin") ? `<button class="btn" type="button" data-goto="admin" ${stage === "admin" ? 'aria-current="page"' : ""}>Admin</button>` : ""}`;
   $("#signin").textContent = "Sign out";
 };
+// loading view: shown from the first moment, so a refresh never shows an empty page
+function loadingView(step, detail) {
+  const m = $("#main"); if (!m) return;
+  if (!$("#boot-load")) m.innerHTML = `<section id="boot-load" role="status" aria-live="polite" style="max-width:520px;margin:64px auto;text-align:center">
+    <style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style>
+    <div style="width:38px;height:38px;margin:0 auto 14px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite" aria-hidden="true"></div>
+    <h2 style="margin:0 0 4px">NZ Suburb Water Profiles</h2><p id="boot-step" class="lead" style="margin:0"></p><p id="boot-detail" class="small muted" style="margin:6px 0 0;min-height:1.3em"></p></section>`;
+  $("#boot-step").textContent = step; $("#boot-detail").textContent = detail || "";
+}
 (async function boot() {
+  loadingView("Starting…");
   try {
     STATIC = await fetch("data/demo.json").then((r) => r.json());
+    loadingView("Checking your sign-in…");
     const { data: { session } } = await sb.auth.getSession(); SESSION = session;
     if (!session) return gate("signin");          // only signed-out visitors see the landing page
     document.querySelector("nav.stages").hidden = false; $("#region").closest("label").hidden = false;
+    loadingView("Signing in…", session.user.email);
     PROFILE = await q(sb.from("profiles").select("email,role,status").eq("id", session.user.id).maybeSingle());
     if (!PROFILE || PROFILE.status !== "active") return gate("pending");
     user = { email: PROFILE.email, role: PROFILE.role };
-    $("#main").innerHTML = `<p class="muted">Loading regions…</p>`;
-    D = await loadAll();
+    loadingView("Loading data…", "Regions, suburbs, census and climate");
+    D = await loadAll((i, n, name) => loadingView("Loading data…", `Region ${i} of ${n}: ${name}`));
     if (!D.regions[region]) region = Object.keys(D.regions)[0];
     $("#foot").innerHTML = `NZ Suburb Water Profiles · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · Water consumption isn't handled here.`;
     render();
