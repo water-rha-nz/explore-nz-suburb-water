@@ -143,14 +143,27 @@ const rateFor = (p) => (D.water_rates || []).find((w) => w.PROVIDER === p);
 // ---------------------------------------------------------------- timelines per TA / provider: weather period and census years
 const CENSUS_YEARS = ["2013", "2018", "2023"], CLIMATE_FROM = "2013-01-01";
 const latestDay = () => new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);   // the archive lags ~2 days
-const tlOf = (c) => BATCH.tl[c] || {};
+const tlOf = (c) => c === "_default" ? BATCH.tl._default || {} : BATCH.tl[c] || BATCH.tl._default || {};
+const tlCustom = (c) => c !== "_default" && !!BATCH.tl[c];
 const tlDays = (c) => { const t = tlOf(c), a = new Date(t.climate_start || CLIMATE_FROM), b = new Date(t.climate_end && t.climate_end < latestDay() ? t.climate_end : latestDay()); return Math.max(0, (b - a) / 864e5 + 1); };
-function timelineCell(c) {
+function tlSummary(c) {
   const t = tlOf(c), yrs = t.census_years || CENSUS_YEARS;
-  return `<div class="small" style="white-space:normal;min-width:210px">Weather <input type="date" data-tl="${c}" data-tlk="climate_start" value="${esc(t.climate_start || CLIMATE_FROM)}" min="1940-01-01" max="${latestDay()}" aria-label="Weather from">
-    to <input type="date" data-tl="${c}" data-tlk="climate_end" value="${esc(t.climate_end || "")}" min="1940-01-01" max="${latestDay()}" placeholder="latest" aria-label="Weather to (blank = latest)">
-    <br>Census ${CENSUS_YEARS.map((y) => `<label><input type="checkbox" data-tly="${c}" value="${y}" ${yrs.includes(y) ? "checked" : ""}> ${y}</label>`).join(" ")}
-    <br><span class="muted">${fmt(tlDays(c) / 365.25, 1)} years of daily weather${t.climate_end ? "" : " (to latest)"}</span> <button class="btn" type="button" data-tlall="${c}" style="padding:1px 6px">apply to all</button></div>`;
+  return `${esc((t.climate_start || CLIMATE_FROM).slice(0, 4))} → ${t.climate_end ? esc(t.climate_end.slice(0, 4)) : "latest"} · census ${yrs.map((y) => "’" + y.slice(2)).join(", ")}`;
+}
+// compact editor: two dates and census-year pills
+function tlEditor(c) {
+  const t = tlOf(c), yrs = t.census_years || CENSUS_YEARS;
+  const pill = (y) => `<button type="button" class="btn" data-tlyb="${c}" data-y="${y}" aria-pressed="${yrs.includes(y)}" style="padding:1px 8px;${yrs.includes(y) ? "background:var(--accent);color:#fff;border-color:var(--accent)" : ""}">${y}</button>`;
+  return `<span class="row small" style="gap:6px;flex-wrap:wrap;align-items:center">
+    <span class="muted">Weather</span><input type="date" data-tl="${c}" data-tlk="climate_start" value="${esc(t.climate_start || CLIMATE_FROM)}" min="1940-01-01" max="${latestDay()}" aria-label="Weather from" style="width:auto">
+    <span class="muted">to</span><input type="date" data-tl="${c}" data-tlk="climate_end" value="${esc(t.climate_end || "")}" min="1940-01-01" max="${latestDay()}" aria-label="Weather to (blank = latest)" title="Blank = latest" style="width:auto">
+    <span class="muted" style="margin-left:6px">Census</span>${CENSUS_YEARS.map(pill).join("")}
+    <span class="muted">≈ ${fmt(tlDays(c) / 365.25, 1)} yrs of daily weather</span>
+    ${c === "_default" ? "" : `<button class="btn" type="button" data-tlreset="${c}" style="padding:1px 8px">use default</button><button class="btn primary" type="button" data-tledit="" style="padding:1px 8px">done</button>`}</span>`;
+}
+function timelineCell(c) {
+  return `<span class="small" style="white-space:nowrap">${tlSummary(c)}</span> ${tlCustom(c) ? '<span class="tag info" style="font-size:10px">custom</span>' : ""}
+    <button class="btn" type="button" data-tledit="${BATCH.tlEdit === c ? "" : c}" style="padding:0 6px" aria-label="Edit timeline for ${esc(taOf(c).name)}">${BATCH.tlEdit === c ? "close" : "edit"}</button>`;
 }
 const tlFor = (c) => { const t = tlOf(c), o = {}; if (t.climate_start && t.climate_start !== CLIMATE_FROM) o.climate_start = t.climate_start; if (t.climate_end) o.climate_end = t.climate_end;
   if (t.census_years && t.census_years.length < CENSUS_YEARS.length) o.census_years = t.census_years.map(Number); return o; };
@@ -258,9 +271,13 @@ function configureHTML() {
     const rate = w ? `${esc(w.CHARGING_TYPE || "–")} · fixed ${w.FIXED_PA == null ? '<span class="muted">not verified</span>' : "$" + fmt(w.FIXED_PA, 2) + "/yr"} · ${w.VOLUMETRIC_PA == null ? "no volumetric charge" : "$" + fmt(w.VOLUMETRIC_PA, 2) + "/m³"} · checked ${esc(w.DATE_EST || "–")}${w.source ? ` · <a href="${esc(w.source)}" target="_blank" rel="noopener">source</a>` : ""}` : '<span class="muted">no rates on record</span>';
     return `<tr><td class="l"><b>${esc(t.name)}</b><br><span class="small muted">${s ? `${s.studies || s.keep.length} ${s.studies ? "study " : ""}suburbs (${esc(s.basis)})` : t.parts > 1 ? "needs a suburb list" : "whole TA"}</span></td>
       <td class="l">${(() => { const f = filePrvdr(c), acr = !BATCH.prvdr[c] && f && f.code ? f.acronyms.filter((a) => norm(a) !== norm(p)) : [];
-        return `${acr.length ? `<b>${acr.map(esc).join(", ")}</b> <span class="small muted">(your PRVDR) →</span><br>` : ""}<select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}">${opts(p)}</select><br><span class="small muted">${prvdrSource(c)}${BATCH.prvdr[c] ? ` · <button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:1px 6px">reset</button>` : ""}</span>${f && f.unresolved.length ? `<br><span class="tag warn">${f.unresolved.map(esc).join(", ")}: no saved provider</span> <button class="btn" type="button" data-btab="allocate" style="padding:1px 6px">match in 2.2</button>` : ""}`; })()}</td><td class="l small" style="white-space:normal;min-width:260px">${rate}</td>
+        const src = BATCH.prvdr[c] ? "chosen" : f && f.code ? "file" : BATCH.cfgPrvdr[c] ? "saved" : "default";
+        return `<span class="row" style="gap:4px;flex-wrap:nowrap;align-items:center"><select data-tprvdr="${c}" aria-label="PRVDR for ${esc(t.name)}" title="${esc((BATCH.providers.find((x) => x.prvdr === p) || {}).name || p)}" style="max-width:8.5em">${opts(p)}</select>
+          ${BATCH.prvdr[c] ? `<button class="btn" type="button" data-tprvdr-reset="${c}" style="padding:0 5px" title="Reset to ${esc(prvdrSource(c) === "chosen by you" ? "your files / default" : "")}" aria-label="Reset PRVDR">↺</button>` : ""}</span>
+          <span class="small muted" title="${esc(prvdrSource(c))}">${acr.length ? `<b style="color:var(--ink)">${acr.map(esc).join(", ")}</b> · ` : ""}${src}</span>${f && f.unresolved.length ? ` <button class="btn" type="button" data-btab="allocate" title="${esc(f.unresolved.join(", "))}: no saved provider, match them in 2.2" style="padding:0 5px;font-size:11px">${f.unresolved.length} unmatched</button>` : ""}`; })()}</td><td class="l small" style="white-space:normal;min-width:190px">${rate}</td>
       <td class="l">${timelineCell(c)}</td>
-      <td><button class="btn" type="button" data-tunsel="${c}" aria-label="Remove ${esc(t.name)}">×</button></td></tr>`; }).join("");
+      <td><button class="btn" type="button" data-tunsel="${c}" aria-label="Remove ${esc(t.name)}">×</button></td></tr>
+      ${BATCH.tlEdit === c ? `<tr><td></td><td colspan="4" class="l" style="background:var(--accent-soft)">${tlEditor(c)}</td></tr>` : ""}`; }).join("");
   return `<div class="grid g2">
     <div class="card">${zoomMap("cfg", layers, mapBox(BATCH.tas.map((t) => t.geom.coordinates)))}<p class="small muted" style="margin:6px 0 0">Scroll to zoom, drag to pan, click a TA to select it.</p></div>
     <div class="card"><h3>Saved configurations</h3>
@@ -277,8 +294,9 @@ function configureHTML() {
       <p class="small"><label>Without nz_suburb_provider.csv, nz_suburb_map and nz_suburb_ref define the scope: keep a suburb that is in <select id="batch-keep"><option value="any" ${BATCH.keep === "any" ? "selected" : ""}>either list</option><option value="both" ${BATCH.keep === "both" ? "selected" : ""}>both lists</option></select></label></p>
       ${newFound.length ? `<p class="small">Your files also mention ${newFound.length} TA(s) that aren't selected: ${newFound.map((c) => esc(taOf(c).name)).join(", ")}. <button class="btn" id="sel-found" type="button">Select them</button></p>` : ""}
     </div></div>
-  <h2>Selected TAs (${sel.length}): PRVDR and charging rates</h2><p class="small muted">Each PRVDR is filled from your lists (nz_suburb_provider.csv, then nz_suburb_map.csv's PROVIDER) or the TA's saved provider. Change it here at any time.</p>
-  <div class="card scroll">${sel.length ? `<table><thead><tr><th class="l">TA and scope</th><th class="l">PRVDR</th><th class="l">Charging (2026/27)</th><th class="l">Timeline: weather and census</th><th></th></tr></thead><tbody>${selRows}</tbody></table>` : '<p class="muted">Select TAs on the map or in the table below.</p>'}
+  <h2>Selected TAs (${sel.length}): PRVDR and charging rates</h2><p class="small muted">PRVDR comes from your lists (nz_suburb_provider.csv, then nz_suburb_map.csv's PROVIDER) or the TA's saved provider; your own acronym is shown in bold. Change it at any time.</p>
+  <div class="card scroll">${sel.length ? `<div class="row small" style="gap:8px;margin-bottom:8px;align-items:center"><b>Default timeline</b>${tlEditor("_default")}<span class="muted">· applies to every TA without its own</span></div>
+    <table><thead><tr><th class="l">TA and scope</th><th class="l">PRVDR</th><th class="l">Charging (2026/27)</th><th class="l">Timeline</th><th></th></tr></thead><tbody>${selRows}</tbody></table>` : '<p class="muted">Select TAs on the map or in the table below.</p>'}
     ${sel.length ? `<div class="row" style="margin-top:8px"><button class="btn primary" type="button" data-btab="allocate">Next: 2.2 Allocate →</button><button class="btn" id="batch-clear" type="button">Clear selection</button></div>` : ""}</div>
   <h2>All regions with charging rates (${BATCH.tas.length} TAs)</h2>
   <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="bta-filter" value="${esc(filt)}" placeholder="TA, PRVDR or region"></label>
@@ -653,7 +671,7 @@ async function saveConfig() {
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
     prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     suburb_picks: Object.fromEntries(Object.entries(BATCH.picks).filter(([c]) => BATCH.sel.has(c))),
-    timelines: Object.fromEntries(Object.entries(BATCH.tl).filter(([c]) => BATCH.sel.has(c))),
+    timelines: Object.fromEntries(Object.entries(BATCH.tl).filter(([c]) => c === "_default" || BATCH.sel.has(c))),
     prvdr_matches: Object.fromEntries(Object.entries(BATCH.matches).map(([k, v]) => [k.toUpperCase(), v])), allocations: Object.values(BATCH.alloc) };
   if (BATCH.config && BATCH.config.name === name) { await q(sb.from("batch_configs").update(rec).eq("id", BATCH.config.id)); }
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
@@ -723,7 +741,12 @@ document.addEventListener("click", async (e) => {
     if (!x) return toastMsg(`"${n}" is not a LINZ suburb in ${taOf(c).name}`); togglePick(c, x.name, true); return drawBatch(); }
   if (t.dataset && t.dataset.punmatch) { delete BATCH.matches[t.dataset.punmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bcfg-export") return exportBuilder();
-  if (t.dataset && t.dataset.tlall) { const src = tlOf(t.dataset.tlall); for (const c of BATCH.sel) BATCH.tl[c] = { ...src }; saveSel(); toastMsg(`Timeline of ${taOf(t.dataset.tlall).name} applied to ${BATCH.sel.size} TAs`); return drawBatch(); }
+  const tlb = t.closest && t.closest("[data-tlyb]");
+  if (tlb) { const c = tlb.dataset.tlyb, o = { ...tlOf(c) }, cur = new Set(o.census_years || CENSUS_YEARS); cur.has(tlb.dataset.y) ? cur.delete(tlb.dataset.y) : cur.add(tlb.dataset.y);
+    if (!cur.size) return toastMsg("Keep at least one census year");
+    o.census_years = CENSUS_YEARS.filter((y) => cur.has(y)); BATCH.tl[c] = o; saveSel(); return drawBatch(); }
+  if (t.dataset && t.dataset.tledit !== undefined) { BATCH.tlEdit = t.dataset.tledit || null; return drawBatch(); }
+  if (t.dataset && t.dataset.tlreset) { delete BATCH.tl[t.dataset.tlreset]; BATCH.tlEdit = null; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.refined) return downloadRefined(t.dataset.refined);
   if (t.id === "bcfg-clear") { BATCH.builder = null; return drawBatch(); }
   if (t.dataset && t.dataset.tprvdrReset) { delete BATCH.prvdr[t.dataset.tprvdrReset]; saveSel(); return drawBatch(); }
@@ -751,9 +774,6 @@ document.addEventListener("change", async (e) => {
   if (t.dataset && t.dataset.tl) { const c = t.dataset.tl, o = { ...tlOf(c) }; t.value ? o[t.dataset.tlk] = t.value : delete o[t.dataset.tlk];
     if (o.climate_start && o.climate_end && o.climate_start > o.climate_end) { toastMsg("The weather period ends before it starts"); return drawBatch(); }
     BATCH.tl[c] = o; saveSel(); return drawBatch(); }
-  if (t.dataset && t.dataset.tly) { const c = t.dataset.tly, o = { ...tlOf(c) }, cur = new Set(o.census_years || CENSUS_YEARS);
-    t.checked ? cur.add(t.value) : cur.delete(t.value); if (!cur.size) { toastMsg("Keep at least one census year"); return drawBatch(); }
-    o.census_years = CENSUS_YEARS.filter((y) => cur.has(y)); BATCH.tl[c] = o; saveSel(); return drawBatch(); }
   if (t.dataset && t.dataset.pinc !== undefined) { togglePick(curTA(), t.dataset.pinc, t.checked); return drawBatch(); }
   if (t.dataset && t.dataset.pmatch !== undefined) { t.value ? BATCH.matches[t.dataset.pmatch] = t.value : delete BATCH.matches[t.dataset.pmatch]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bin-files" && t.files && t.files.length) {
