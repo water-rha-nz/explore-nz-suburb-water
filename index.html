@@ -276,19 +276,27 @@ function sourcePlanHTML(g) {
   if (!p) return "";
   const groups = {}; p.steps.forEach((s) => { const k = s.step.replace(/\[.*\]$/, ""); (groups[k] = groups[k] || { n: 0, s }).n++; });
   const filt = store.get("ta-filter", "");
+  const lim = D.limits || { services: {}, run_caps: {} }, svc = lim.services || {};
+  const partRows = (p.run_parts || []).map((rp) => `<tr><td>Part ${rp.part}</td><td>${rp.sa2}</td><td>${fmt(rp.estimate.est_features)}</td>${["linz_wfs", "statsnz_datafinder", "statsnz_ade", "openmeteo"].map((k) => { const c = rp.estimate.calls[k], b = svc[k] && svc[k].budget_day; return `<td>${fmt(c)}${b ? ` <span class="muted">/ ${fmt(b)}</span>` : ""}</td>`; }).join("")}<td class="l">${rp.estimate.problems.length ? `<span class="tag bad">${esc(rp.estimate.problems[0])}</span>` : '<span class="tag ok">fits one day</span>'}</td></tr>`).join("");
   return `<h2>Source plan for ${esc(g.ta)}</h2>
   <p class="small muted">The worker runs these requests for the region, from <code>index/source_index.json</code>. The index holds templates only (keys are placeholders), and the same plan exists for every TA with a water provider. TA ${esc(p.ta_code)} · ${esc(p.regional_council)} · ${p.sa2_count} SA2s · imagery folders: ${p.imagery_folders.map(esc).join(", ")}.</p>
   <div class="card scroll"><table><thead><tr><th>Step</th><th class="l">Service</th><th>Calls</th><th class="l">Depends on</th><th class="l">Output</th></tr></thead><tbody>
   ${Object.entries(groups).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="l">${esc(v.s.service)}</td><td>${v.n}</td><td class="l">${esc(v.s.depends_on.join(", ") || "–")}</td><td class="l" style="white-space:normal;min-width:260px">${esc(v.s.output)}</td></tr>`).join("")}
   </tbody></table></div>
-  <h2>All regions with charging rates (${all.length} TAs)</h2>
+  <h2>Usage limits for this region</h2>
+  <div class="note">${esc(lim.rule || "")} Every request is paced and counted against a daily budget set below each service's free limit. Throttling (HTTP 429/503) is handled with Retry-After, then exponential backoff. Repeated throttling pauses the service and parks the job until it can resume.</div>
+  <div class="card scroll"><table><thead><tr><th>Run part</th><th>SA2s</th><th>Est. LINZ features</th><th>LINZ requests / day budget</th><th>Datafinder</th><th>Census API</th><th>Open-Meteo (weighted)</th><th class="l">Preflight</th></tr></thead><tbody>${partRows}</tbody></table>
+  <p class="small muted">Estimates are heuristics (5,000 LINZ features per SA2; climate from 2013, one request per grid cell). The worker re-checks actual counts before each run. Caps per run: ${fmt(lim.run_caps.max_sa2_per_run)} SA2s, ${fmt(lim.run_caps.max_suburbs_per_run)} suburbs, ${fmt(lim.run_caps.max_climate_cells_per_run)} climate cells, ${fmt(svc.linz_imagery_s3 && svc.linz_imagery_s3.max_tiles_run)} imagery tiles.</p></div>
+  <div class="card scroll" style="margin-top:10px"><table><thead><tr><th>Service</th><th class="l">Published free limit</th><th>App budget / day</th><th>Min interval</th></tr></thead><tbody>
+  ${Object.entries(svc).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td class="l" style="white-space:normal">${esc(v.published)}</td><td>${v.budget_day == null ? "–" : fmt(v.budget_day)}</td><td>${fmt(v.min_interval_s, 1)} s</td></tr>`).join("")}</tbody></table></div>
+  <h2>All regions with charging rates (${all.length} TAs)</h2><p class="small muted">Each TA runs on its own, one part at a time; there is no national run. Large TAs are split into parts of at most ${fmt((D.limits || {}).run_caps ? D.limits.run_caps.max_sa2_per_run : 80)} SA2s.</p>
   <div class="row" style="margin-bottom:8px"><label class="small">Filter <input type="text" id="ta-filter" value="${esc(filt)}" placeholder="TA, provider or region"></label></div>
-  <div class="card scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>TA</th><th>Code</th><th class="l">Regional council</th><th class="l">PRVDR</th><th class="l">Charging</th><th>SA2s</th><th class="l">Imagery folders</th><th>Requests</th></tr></thead><tbody id="ta-rows">${taRows(all, filt)}</tbody></table></div>`;
+  <div class="card scroll" style="max-height:420px;overflow:auto"><table><thead><tr><th>TA</th><th>Code</th><th class="l">Regional council</th><th class="l">PRVDR</th><th class="l">Charging</th><th>SA2s</th><th class="l">Imagery folders</th><th>Requests</th><th>Run parts</th><th>Open-Meteo / part</th></tr></thead><tbody id="ta-rows">${taRows(all, filt)}</tbody></table></div>`;
 }
 function taRows(all, f) {
   const q = f.trim().toLowerCase();
   return all.filter((r) => !q || [r.TA, r.PRVDR, r.PROVIDER, r.REGIONAL_COUNCIL].join(" ").toLowerCase().includes(q))
-    .map((r) => `<tr><td>${esc(r.TA)}</td><td>${esc(r.TA_CODE)}</td><td class="l">${esc(r.REGIONAL_COUNCIL)}</td><td class="l">${esc(r.PRVDR)}</td><td class="l">${esc(r.CHARGING_TYPE)}</td><td>${esc(r.SA2_COUNT)}</td><td class="l">${esc(r.IMAGERY_FOLDERS)}</td><td>${esc(r.REQUESTS)}</td></tr>`).join("");
+    .map((r) => `<tr><td>${esc(r.TA)}</td><td>${esc(r.TA_CODE)}</td><td class="l">${esc(r.REGIONAL_COUNCIL)}</td><td class="l">${esc(r.PRVDR)}</td><td class="l">${esc(r.CHARGING_TYPE)}</td><td>${esc(r.SA2_COUNT)}</td><td class="l">${esc(r.IMAGERY_FOLDERS)}</td><td>${esc(r.REQUESTS)}</td><td>${r.RUN_PARTS > 1 ? `<span class="tag warn">${esc(r.RUN_PARTS)}</span>` : esc(r.RUN_PARTS)}</td><td>${fmt(+r.EST_OPENMETEO_CALLS_PER_PART)}</td></tr>`).join("");
 }
 document.addEventListener("input", (e) => { if (e.target.id === "ta-filter") { store.set("ta-filter", e.target.value); const el = $("#ta-rows"); if (el) el.innerHTML = taRows(D.index_regions || [], e.target.value); } });
 function jobsHTML() {
@@ -529,7 +537,8 @@ async function makeExport(f) { return await EXPORTS[f].make(); }
 document.addEventListener("click", async (e) => {
   const t = e.target;
   if (t.closest("[data-reg]")) { region = t.closest("[data-reg]").dataset.reg; store.set("region", region); render(); return; }
-  if (t.id === "queue") { const types = ["LINZ layers (WFS)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
+  if (t.id === "queue") { const rp = (R().source_plan && R().source_plan.run_parts) || []; const bad = rp.flatMap((p) => p.estimate.problems); if (bad.length) { jobs.push({ region, type: "Preflight refused: " + bad[0], status: "scheduled" }); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML(); return; }
+    const types = ["Preflight: fits today's budgets (part 1 of " + Math.max(1, rp.length) + ")", "LINZ layers (WFS, paged)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo, per grid cell)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
     let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
   if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
   const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
