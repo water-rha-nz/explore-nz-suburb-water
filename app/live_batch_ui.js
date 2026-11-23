@@ -548,8 +548,22 @@ function loadHTML() {
         <td class="l">${notReady.includes(c) ? '<span class="tag warn">validate first</span>' : blocked.includes(c) ? '<span class="tag bad">nothing to load / too large</span>' : '<span class="tag ok">ready</span>'}</td></tr>`; }).join("")}</tbody></table>
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
     ${can("editor") ? `<button class="btn primary" id="batch-queue" type="button" ${sel.length && !notReady.length && !blocked.length ? "" : "disabled"}>Queue batch (${sel.length} region${sel.length === 1 ? "" : "s"})</button>` : lock("editor", "Queuing batches")}</div>
-  ${can("editor") ? progressHTML() : ""}`;
+  ${can("editor") ? progressHTML() + regionJobsHTML() : ""}`;
 }
+// moved from 1 Region: refresh jobs for a region already in the database, job progress, and download rates / usage
+function regionJobsHTML() {
+  setTimeout(() => { if (typeof refreshJobs === "function") refreshJobs().catch(() => {}); }, 0);
+  const regs = Object.entries(D.regions || {});
+  return `<h2>Refresh a region in the database</h2><div class="grid g2"><div class="card">
+    ${regs.length ? `<p class="small"><label>Region <select id="rj-region">${regs.map(([k, g]) => `<option value="${esc(k)}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</select></label></p>
+    <div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
+    <div class="row" style="margin-top:6px"><button class="btn primary" id="queue-live" type="button">Queue job</button><button class="btn" type="button" id="rj-refresh">Refresh</button></div>
+    <p class="small muted">One region per job, run by the worker (GitHub Actions) within each service's free-tier budget. Data already stored, by anyone, is reused.</p>
+    <div id="jobs" style="margin-top:8px"></div>` : '<p class="small muted">No regions with data yet.</p>'}</div>
+    <div class="card"><h3>Download rates and today's usage</h3><div id="dl-panel"><p class="small muted">Loading…</p></div></div></div>`;
+}
+document.addEventListener("change", (e) => { if (e.target.id === "rj-region") { region = e.target.value; store.set("region", region); refreshJobs(); } });
+document.addEventListener("click", (e) => { if (e.target.id === "rj-refresh") refreshJobs(); });
 function progressHTML() {
   if (!BATCH.batches.length) return `<h2>Your batches</h2><p class="muted small">No batches yet.</p>`;
   const tag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "running" ? "warn" : "info"}">${esc(s)}</span>`;
