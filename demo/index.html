@@ -76,6 +76,11 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);c
 dialog::backdrop{background:rgba(0,0,0,.5)}
 .gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--panel);cursor:pointer}
 .locked{border:1px dashed var(--line);border-radius:10px;padding:14px;color:var(--muted);font-size:.88rem}
+.dl-row{display:grid;grid-template-columns:150px minmax(0,1fr) 230px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.dl-row:last-child{border-bottom:none}
+@media (max-width:700px){.dl-row{grid-template-columns:1fr}}
+.bar-out{height:10px;background:var(--line);border-radius:99px;overflow:hidden}.bar-in{height:100%;background:var(--accent);transition:width .3s}
+.dl-row input[type=range]{width:100%}
 footer{max-width:1240px;margin:0 auto;padding:0 16px 40px;color:var(--muted);font-size:.8rem}
 [hidden]{display:none!important}
 @media (max-width:600px){.bar{gap:8px}.brand{width:100%}}
@@ -269,6 +274,8 @@ V.region = () => {
       <div id="jobs" style="margin-top:8px">${jobsHTML()}</div>
     </div>
   </div>
+  <h2>Download progress</h2>
+  <div class="card" id="dl-panel">${dlHTML()}</div>
   ${sourcePlanHTML(g)}`;
 };
 function sourcePlanHTML(g) {
@@ -299,6 +306,52 @@ function taRows(all, f) {
     .map((r) => `<tr><td>${esc(r.TA)}</td><td>${esc(r.TA_CODE)}</td><td class="l">${esc(r.REGIONAL_COUNCIL)}</td><td class="l">${esc(r.PRVDR)}</td><td class="l">${esc(r.CHARGING_TYPE)}</td><td>${esc(r.SA2_COUNT)}</td><td class="l">${esc(r.IMAGERY_FOLDERS)}</td><td>${esc(r.REQUESTS)}</td><td>${r.RUN_PARTS > 1 ? `<span class="tag warn">${esc(r.RUN_PARTS)}</span>` : esc(r.RUN_PARTS)}</td><td>${fmt(+r.EST_OPENMETEO_CALLS_PER_PART)}</td></tr>`).join("");
 }
 document.addEventListener("input", (e) => { if (e.target.id === "ta-filter") { store.set("ta-filter", e.target.value); const el = $("#ta-rows"); if (el) el.innerHTML = taRows(D.index_regions || [], e.target.value); } });
+// ---------- download progress (simulated): live rate controls within free-tier ceilings ----------
+const DL_SERVICES = [["linz_wfs", "LINZ data service"], ["statsnz_datafinder", "Stats NZ Datafinder"], ["statsnz_ade", "Stats NZ census API"], ["openmeteo", "Open-Meteo"]];
+let DL = null; // { region, est:{svc:calls}, done:{}, rate:{}, log:[], timer }
+const lim = () => D.limits || { defaults: {}, ceilings: {} };
+const rateOf = (k) => (DL && DL.rate[k]) || (lim().defaults[k] || {}).per_min || 60;
+function dlHTML() {
+  if (!DL || DL.region !== region) return `<p class="small muted">No download running for this region. ${can("editor") ? "Press <b>Queue full refresh</b> to start one (simulated)." : "An editor starts downloads."}</p>
+    <p class="small muted">While a download runs, editors can raise each service's request rate up to its ceiling: the published free-tier limit, or a conservative fair-use maximum where none is published. If a raised rate gets throttled (HTTP 429), it is halved automatically.</p>`;
+  const ed = can("editor");
+  const rows = DL_SERVICES.map(([k, name]) => {
+    const est = DL.est[k] || 0, done = Math.min(est, DL.done[k] || 0), r = rateOf(k), ce = (lim().ceilings[k] || {}).per_min || r, de = (lim().defaults[k] || {}).per_min || r;
+    const pct = est ? 100 * done / est : 100, eta = est > done ? Math.ceil((est - done) / r) : 0;
+    return `<div class="dl-row"><div><b class="small">${name}</b><br><span class="small muted">${fmt(done)} / ${fmt(est)} calls${k === "openmeteo" ? " (weighted)" : ""}</span></div>
+      <div><div class="bar-out" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="${name} progress"><div class="bar-in" style="width:${pct.toFixed(1)}%"></div></div>
+      <span class="small muted">${pct >= 100 ? "done" : `about ${eta} min left at this rate`}</span></div>
+      <div><label class="small">${fmt(r)}/min <span class="muted">(default ${fmt(de)}, ceiling ${fmt(ce)})</span>
+      <input type="range" min="${Math.max(1, Math.round(de / 4))}" max="${ce}" step="1" value="${r}" data-rate="${k}" ${ed ? "" : "disabled"} aria-label="${name} requests per minute"></label></div></div>`;
+  }).join("");
+  return `${rows}<p class="small muted" style="margin:8px 0 0">${ed ? "Drag to change a rate; it applies to the next request." : "Rates can be changed by editors."} Simulated at 20× speed.</p>
+    ${DL.log.length ? `<pre style="max-height:120px">${DL.log.slice(-6).map(esc).join("\n")}</pre>` : ""}`;
+}
+function startDownload() {
+  const rp = (R().source_plan && R().source_plan.run_parts && R().source_plan.run_parts[0]) || { estimate: { calls: {} } };
+  DL = { region, est: { ...rp.estimate.calls }, done: {}, rate: {}, log: [], t0: Date.now() };
+  for (const [k] of DL_SERVICES) DL.rate[k] = (lim().defaults[k] || {}).per_min || 60;
+  clearInterval(window._dlTimer);
+  window._dlTimer = setInterval(() => {
+    if (!DL) return;
+    let all = true;
+    for (const [k, name] of DL_SERVICES) {
+      const est = DL.est[k] || 0; if ((DL.done[k] || 0) >= est) continue; all = false;
+      const r = rateOf(k), ce = (lim().ceilings[k] || {}).per_min || r, de = (lim().defaults[k] || {}).per_min || r;
+      // services without a published limit may throttle when pushed hard: simulate a 429 and the automatic step-down
+      if (k !== "openmeteo" && r > ce * 0.6 && Math.random() < 0.08) { DL.rate[k] = Math.max(de, Math.round(r / 2)); DL.log.push(`${new Date().toLocaleTimeString()} ${name}: HTTP 429; waited for Retry-After; rate lowered ${fmt(r)} → ${fmt(DL.rate[k])}/min`); continue; }
+      DL.done[k] = (DL.done[k] || 0) + r / 60 * 0.5 * 20;
+    }
+    const el = $("#dl-panel");
+    if (el && !(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.rate)) el.innerHTML = dlHTML();
+    if (all) { clearInterval(window._dlTimer); DL.log.push(`${new Date().toLocaleTimeString()} all downloads complete`); if (el) el.innerHTML = dlHTML(); }
+  }, 500);
+}
+document.addEventListener("input", (e) => { const k = e.target.dataset && e.target.dataset.rate; if (!k || !DL || !can("editor")) return;
+  const ce = (lim().ceilings[k] || {}).per_min || 60; const v = Math.min(+e.target.value, ce);
+  DL.rate[k] = v; DL.log.push(`${new Date().toLocaleTimeString()} ${k}: rate set to ${fmt(v)}/min by ${user.email}`);
+  const lab = e.target.closest("label"); if (lab) lab.firstChild.textContent = `${fmt(v)}/min `; });
+document.addEventListener("change", (e) => { if (e.target.dataset && e.target.dataset.rate) { const el = $("#dl-panel"); if (el) el.innerHTML = dlHTML(); } });
 function jobsHTML() {
   const mine = jobs.filter((j) => j.region === region);
   return mine.length ? mine.slice(-8).reverse().map((j) => `<div class="job"><span>${esc(j.type)}</span><span class="tag ${j.status === "done" ? "ok" : j.status === "running" ? "warn" : "info"}">${j.status}</span></div>`).join("") : `<p class="small muted">No jobs yet.</p>`;
@@ -538,7 +591,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target;
   if (t.closest("[data-reg]")) { region = t.closest("[data-reg]").dataset.reg; store.set("region", region); render(); return; }
   if (t.id === "queue") { const rp = (R().source_plan && R().source_plan.run_parts) || []; const bad = rp.flatMap((p) => p.estimate.problems); if (bad.length) { jobs.push({ region, type: "Preflight refused: " + bad[0], status: "scheduled" }); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML(); return; }
-    const types = ["Preflight: fits today's budgets (part 1 of " + Math.max(1, rp.length) + ")", "LINZ layers (WFS, paged)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo, per grid cell)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
+    const types = ["Preflight: fits today's budgets (part 1 of " + Math.max(1, rp.length) + ")", "LINZ layers (WFS, paged)", "Imagery: pools + vegetation", "Census (ADE)", "Climate (Open-Meteo, per grid cell)", "Rebuild v_suburb_metadata"]; types.forEach((ty, i) => jobs.push({ region, type: ty, status: i === 0 ? "running" : "queued" })); startDownload(); const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML(); store.set("jobs", JSON.stringify(jobs.slice(-40))); $("#jobs").innerHTML = jobsHTML();
     let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
   if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
   const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }

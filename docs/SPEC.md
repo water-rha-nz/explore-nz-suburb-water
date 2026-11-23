@@ -481,3 +481,21 @@ The worker estimates each run's cost per service, from the region's SA2s, suburb
 | Imagery | per capture; processed tiles are never re-read |
 | Climate | cells cached; only new days fetched |
 | ADE dataflow structures and the geography code list | cached locally |
+
+### 20.6 Adjusting download rates (download progress panel)
+While a region downloads, the **Download progress** panel shows each service's calls made against the run's estimate, the time remaining at the current rate, and a rate control.
+- **Editors** can raise or lower each service's rate (requests per minute), and its daily or hourly budget, while the run continues. A change applies to the next request.
+  - In production the value is written to `app_settings.rates`; locally to `~/.config/nzsw/rates.json`.
+  - The worker re-reads it before every request (`limits.effective()`).
+- **Ceilings cannot be exceeded.** Values above them are clamped (`limits.set_rate()` → `clamped_to_ceiling`).
+- **Automatic step-down:** if a raised rate is throttled (429 / SlowDown), it is halved, but never below the default. The change is logged with `reason = "auto: throttled"`, and the normal Retry-After / backoff / circuit-breaker rules still apply.
+
+| Service | Default | Ceiling | Basis for ceiling |
+|---|---|---|---|
+| Open-Meteo | 60/min · 6,000/day · 3,000/h | 600/min · 9,500/day · 4,750/h | published free limits (600/min, 10,000/day, 5,000/h), minus a margin |
+| LINZ WFS | 60/min · 1,500/day | 240/min · 5,000/day | none published: conservative fair use |
+| Stats NZ Datafinder | 60/min · 300/day | 240/min · 1,000/day | none published (same platform as LINZ) |
+| Stats NZ ADE | 30/min · 400/day | 120/min · 1,500/day | none published; shared keys get throttled |
+| LINZ imagery S3 | 4 parallel · 25 GB/day | 8 parallel · 60 GB/day | public bucket; be a good citizen |
+
+Raising rates never lifts the per-run region caps (section 20.1). A faster download is still one region.

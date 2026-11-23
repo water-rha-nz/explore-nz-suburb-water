@@ -115,6 +115,52 @@
     "max_climate_cells_per_run": 12,
     "climate_backfill_start": "2013-01-01"
    },
+   "defaults": {
+    "openmeteo": {
+     "per_min": 60,
+     "budget_day": 6000,
+     "budget_hour": 3000
+    },
+    "linz_wfs": {
+     "per_min": 60,
+     "budget_day": 1500
+    },
+    "statsnz_datafinder": {
+     "per_min": 60,
+     "budget_day": 300
+    },
+    "statsnz_ade": {
+     "per_min": 30,
+     "budget_day": 400
+    },
+    "linz_imagery_s3": {
+     "parallel": 4,
+     "bytes_day": 26843545600
+    }
+   },
+   "ceilings": {
+    "openmeteo": {
+     "per_min": 600,
+     "budget_day": 9500,
+     "budget_hour": 4750
+    },
+    "linz_wfs": {
+     "per_min": 240,
+     "budget_day": 5000
+    },
+    "statsnz_datafinder": {
+     "per_min": 240,
+     "budget_day": 1000
+    },
+    "statsnz_ade": {
+     "per_min": 120,
+     "budget_day": 1500
+    },
+    "linz_imagery_s3": {
+     "parallel": 8,
+     "bytes_day": 64424509440
+    }
+   },
    "features_per_sa2_heuristic": 5000,
    "rule": "One region per run. TAs over the cap run as parts (contiguous SA2 groups). National or multi-region runs are not possible."
   },

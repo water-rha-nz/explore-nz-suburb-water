@@ -237,6 +237,7 @@ def main():
                 datafinder_sa2_layer=SA2_LAYER, ade_tables=ADE_TABLES, ade_dimension_order=ADE_DIMS, imagery_bucket=S3,
                 keys_required=["LINZ_API_KEY", "STATSNZ_DATAFINDER_KEY", "STATSNZ_ADE_KEY"],
                 limits=dict(services={k: {kk: vv for kk, vv in v.items()} for k, v in LIM.SERVICES.items()}, run_caps=LIM.RUN_CAPS,
+                            defaults=LIM.DEFAULTS, ceilings=LIM.CEILINGS,
                             features_per_sa2_heuristic=FEATURES_PER_SA2,
                             rule="One region per run. TAs over the cap run as parts (contiguous SA2 groups). National or multi-region runs are not possible."),
                 run_order=["linz.suburbs", "linz.parcels|titles|buildings|addresses", "statsnz.sa2", "statsnz.ade.*", "imagery.list -> imagery.items -> worker imagery job",

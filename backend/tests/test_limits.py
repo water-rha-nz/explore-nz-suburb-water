@@ -2,6 +2,7 @@
 import os, sys, tempfile, threading, json
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ["NZSW_RATES"] = os.path.join(tempfile.mkdtemp(), "rates.json")   # never touch the real settings
 from nzsw import limits as L
 
 STATE = {"n": 0, "mode": "ok"}
@@ -17,6 +18,8 @@ class H(BaseHTTPRequestHandler):
             self.send_response(429); self.send_header("Retry-After", "7"); self.end_headers(); self.wfile.write(b"slow down"); return
         if m == "always_429":
             self.send_response(429); self.end_headers(); return
+        if m == "once_429" and STATE["n"] <= 1:
+            self.send_response(429); self.send_header("Retry-After", "1"); self.end_headers(); return
         if m == "s3_slowdown" and STATE["n"] <= 1:
             self.send_response(503); self.end_headers(); self.wfile.write(b"<Code>SlowDown</Code>"); return
         self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
@@ -93,6 +96,25 @@ def run():
                     est_features=60_000, ledger=L.Ledger(os.path.join(tmp, "pf2.json")))
     assert p["may_run"], p["problems"]
     print("ok  Taupō-sized run fits: " + ", ".join(f"{k} {v['estimated_calls']:,}" for k, v in p["services"].items()))
+    # 7. adjustable rates: clamped to ceilings, applied live, halved automatically when throttled
+    e = L.set_rate("openmeteo", per_min=2000, budget_day=20000)
+    assert e["per_min"] == 600 and e["budget_day"] == 9500 and e["clamped_to_ceiling"], e
+    print(f"ok  raise above ceiling clamped: openmeteo {e['per_min']:.0f}/min, {e['budget_day']:.0f}/day (published 600/min, 10,000/day)")
+    try:
+        L.set_rate("linz_imagery_s3", per_min=100); raise AssertionError("expected KeyError")
+    except KeyError:
+        print("ok  non-adjustable setting rejected")
+    L.set_rate("statsnz_ade", per_min=120)
+    STATE.update(n=0, mode="ok"); slept.clear()
+    c = mk(); c.request("statsnz_ade", "GET", url); c.request("statsnz_ade", "GET", url)
+    assert max(slept) <= 0.5 + 1e-6, slept
+    print(f"ok  rate raised mid-run applies to the next request: ADE gap {max(slept):.2f}s (was 2 s)")
+    L.set_rate("linz_wfs", per_min=240)
+    STATE.update(n=0, mode="once_429"); slept.clear()
+    c = mk(); r = c.request("linz_wfs", "GET", url)
+    assert r.status_code == 200 and L.effective("linz_wfs")["per_min"] == 120, L.effective("linz_wfs")
+    assert json.load(open(os.environ["NZSW_RATES"]))["linz_wfs"]["reason"] == "auto: throttled"
+    print("ok  throttled at a raised rate -> lowered automatically 240 -> 120/min")
     srv.shutdown()
     print("all limits tests passed")
 

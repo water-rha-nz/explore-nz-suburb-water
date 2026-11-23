@@ -32,6 +32,86 @@ SERVICES = {
                             max_tiles_run=250, max_bytes_day=25 * 1024**3, max_parallel=4),
 }
 
+# ------------------------------------------------------------------ adjustable rates (download progress panel)
+# Users with the editor role can raise a service's rate or budget while a download runs, but never above
+# the ceiling: the published free-tier limit where one exists, otherwise a conservative fair-use maximum.
+# The default is what the app uses when nobody has changed anything.
+#   per_min: requests per minute (pacing); budget_day / budget_hour: weighted calls; parallel: concurrent reads
+DEFAULTS = {
+    "openmeteo": dict(per_min=60, budget_day=6000, budget_hour=3000),
+    "linz_wfs": dict(per_min=60, budget_day=1500),
+    "statsnz_datafinder": dict(per_min=60, budget_day=300),
+    "statsnz_ade": dict(per_min=30, budget_day=400),
+    "linz_imagery_s3": dict(parallel=4, bytes_day=25 * 1024**3),
+}
+CEILINGS = {
+    "openmeteo": dict(per_min=600, budget_day=9500, budget_hour=4750),     # published: 600/min, 5,000/h, 10,000/day
+    "linz_wfs": dict(per_min=240, budget_day=5000),                         # not published: conservative fair use
+    "statsnz_datafinder": dict(per_min=240, budget_day=1000),               # not published (same platform as LINZ)
+    "statsnz_ade": dict(per_min=120, budget_day=1500),                      # not published; shared keys get throttled
+    "linz_imagery_s3": dict(parallel=8, bytes_day=60 * 1024**3),            # public bucket, no key
+}
+RATES_FILE = os.environ.get("NZSW_RATES", os.path.expanduser("~/.config/nzsw/rates.json"))
+_rates_cache = {"mtime": None, "data": {}}
+
+
+def _load_rates(path=None):
+    path = path or RATES_FILE
+    try:
+        m = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _rates_cache["mtime"] != (path, m):
+        try:
+            _rates_cache.update(mtime=(path, m), data=json.load(open(path)))
+        except ValueError:
+            return {}
+    return _rates_cache["data"]
+
+
+def effective(service, path=None):
+    """Current settings for a service: defaults, overridden by the rates file, clamped to the ceilings."""
+    out = dict(DEFAULTS.get(service, {}))
+    for k, v in (_load_rates(path).get(service) or {}).items():
+        if k in CEILINGS.get(service, {}) and isinstance(v, (int, float)) and v > 0:
+            out[k] = min(v, CEILINGS[service][k])
+    return out
+
+
+def set_rate(service, path=None, reason="user", **values):
+    """Change a service's rate/budget (from the download progress panel). Values above the ceiling are clamped.
+    Returns the settings now in force."""
+    path = path or RATES_FILE
+    if service not in CEILINGS:
+        raise KeyError(service)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = _load_rates(path).copy()
+    cur = dict(data.get(service) or {})
+    clamped = {}
+    for k, v in values.items():
+        if k not in CEILINGS[service]:
+            raise KeyError(f"{service}: {k} is not adjustable (allowed: {', '.join(CEILINGS[service])})")
+        cur[k] = min(float(v), CEILINGS[service][k])
+        if float(v) > CEILINGS[service][k]:
+            clamped[k] = CEILINGS[service][k]
+    cur["changed_at"] = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    cur["reason"] = reason
+    data[service] = cur
+    tmp = path + ".tmp"
+    json.dump(data, open(tmp, "w"), indent=1)
+    os.replace(tmp, path)
+    _rates_cache["mtime"] = None
+    eff = effective(service, path)
+    if clamped:
+        eff["clamped_to_ceiling"] = clamped
+    return eff
+
+
+def min_interval(service, path=None):
+    pm = effective(service, path).get("per_min")
+    return 60.0 / pm if pm else 0.0
+
+
 # per-run region caps: a run is one TA, or a subset of a TA's suburbs when the TA is too big
 RUN_CAPS = dict(max_tas_per_run=1, max_sa2_per_run=80, max_suburbs_per_run=60,
                 max_climate_cells_per_run=12, climate_backfill_start="2013-01-01")
@@ -116,7 +196,7 @@ class Ledger:
         return self._load().get(service, {}).get("bytes_day", {}).get(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d"), 0)
 
     def remaining(self, service, period="day"):
-        lim = SERVICES[service].get("budget_" + period)
+        lim = effective(service).get("budget_" + period, SERVICES[service].get("budget_" + period))
         return None if lim is None else max(0.0, lim - self.used(service, period))
 
 
@@ -134,14 +214,14 @@ class Client:
         """Day budget short -> QuotaExceeded (park the job until tomorrow).
         Hour budget short -> wait for the next hour (the run continues).
         A single request larger than the hourly budget can never fit -> QuotaExceeded (split it)."""
-        hb = SERVICES[service].get("budget_hour")
+        hb = effective(service).get("budget_hour", SERVICES[service].get("budget_hour"))
         if hb is not None and cost > hb:
             raise QuotaExceeded(f"{service}: one request costs {cost:.1f}, more than the hourly budget {hb}: split it "
                                 f"(fewer locations or a shorter period per request)")
         rem = self.ledger.remaining(service, "day")
         if rem is not None and cost > rem:
             raise QuotaExceeded(f"{service}: needs {cost:.1f}, {rem:.1f} left today "
-                                f"(budget {SERVICES[service]['budget_day']}; published {SERVICES[service]['published']})")
+                                f"(budget {effective(service).get('budget_day')}; published {SERVICES[service]['published']})")
         rem = self.ledger.remaining(service, "hour")
         if rem is not None and cost > rem:
             now = dt.datetime.now(dt.timezone.utc)
@@ -150,13 +230,19 @@ class Client:
             self.sleep(wait)
 
     def _pace(self, service):
-        gap = SERVICES[service]["min_interval_s"]
+        gap = min_interval(service)
         wait = self._last.get(service, 0) + gap - time.monotonic()
         if wait > 0:
             self.sleep(wait)
         self._last[service] = time.monotonic()
 
     def _note_throttle(self, service):
+        # a raised rate that gets throttled is halved automatically (never below the default)
+        eff = effective(service)
+        if "per_min" in eff and eff["per_min"] > DEFAULTS[service]["per_min"]:
+            new = max(DEFAULTS[service]["per_min"], eff["per_min"] / 2)
+            set_rate(service, reason="auto: throttled", per_min=new)
+            self.log(f"{service}: throttled at {eff['per_min']:.0f}/min; rate lowered to {new:.0f}/min")
         now = time.monotonic()
         hist = [t for t in self._throttled.get(service, []) if now - t < BREAKER_WINDOW_S] + [now]
         self._throttled[service] = hist
@@ -205,8 +291,9 @@ class Client:
         lim = SERVICES["linz_imagery_s3"]
         if n_tiles > lim["max_tiles_run"]:
             raise RunTooLarge(f"{n_tiles} imagery tiles exceeds {lim['max_tiles_run']} per run: split the region by suburbs")
-        if self.ledger.bytes_today("linz_imagery_s3") + est_bytes > lim["max_bytes_day"]:
-            raise QuotaExceeded(f"imagery: {est_bytes / 1e9:.1f} GB would exceed {lim['max_bytes_day'] / 1e9:.0f} GB/day")
+        cap = effective("linz_imagery_s3")["bytes_day"]
+        if self.ledger.bytes_today("linz_imagery_s3") + est_bytes > cap:
+            raise QuotaExceeded(f"imagery: {est_bytes / 1e9:.1f} GB would exceed {cap / 1e9:.0f} GB/day")
 
 
 # ------------------------------------------------------------------ preflight
