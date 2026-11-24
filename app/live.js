@@ -208,8 +208,20 @@ const indexOf = (id) => (D.index || []).find((x) => x.id === id) || {};
 // regions known to the study in the header (or all), from the index
 const studyIndex = () => { const st = typeof studyOf === "function" ? studyOf() : null; return (D.index || []).filter((r) => !st || (st.ta_codes || []).includes(r.ta_code)); };
 // stages that work on one region load it first
+// pages of a loaded region: fill in what a newly prepared region may not have yet (validation results), and say so plainly
+// when there are no imagery results instead of failing
+const stageName = (id) => (STAGES.find((x) => x[0] === id) || [])[1] || id;
+function regionGaps(id) {
+  const g = D.regions[region]; if (!g) return null;
+  if (!g.validation) { g.validation = { pool_user: {}, pool_claude: {}, garden: {} }; g.notValidated = true; }
+  for (const k of ["pool_user", "pool_claude", "garden"]) g.validation[k] = g.validation[k] || {};
+  const analysed = g.suburbs.some((s) => s.sections != null);
+  if (id === "imagery" && !analysed) return `<h1>0 · ${esc(stageName(id))}</h1><p class="lead">No imagery results yet for ${esc(g.label)}: its sections haven't been analysed. Check its progress on <b>3 · Load</b>, or re-run imagery there (<i>Refresh a region → Imagery</i>).</p>`;
+  return null;
+}
 for (const id of ["imagery", "validate", "context", "explore", "export"]) { const f = V[id]; if (!f) continue;
-  V[id] = (...a) => { if (D.regions[region]) return f(...a);
+  V[id] = (...a) => { if (D.regions[region]) { const gap = regionGaps(id); if (gap) return gap;
+      const html = f(...a); return D.regions[region].notValidated && (id === "imagery" || id === "validate") ? html.replace(/(<\/p>)/, `$1<div class="note">${esc(D.regions[region].label)} hasn't been validated yet: precision and recall show as –. Label image chips on <b>Validate</b> to measure them.</div>`) : html; }
     if (!region || D.empty[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${region && D.empty[region] ? `${esc(indexOf(region).name || region)} has no prepared data yet.` : "No region chosen."} Choose a region with data in the header, or load one on <b>1 · Overview</b>.</p>`;
     if (D.failed && D.failed[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${esc(indexOf(region).name || region)} couldn't be loaded: ${esc(D.failed[region])}</p><p><button class="btn primary" type="button" id="region-retry">Try again</button></p>`;
     ensureRegion(region).then(() => render()).catch((e) => { D.failed = D.failed || {}; D.failed[region] = e.message; render(); });
@@ -387,6 +399,12 @@ document.addEventListener("click", (e) => { const b = e.target.closest && e.targ
   stage = b.dataset.goto; store.set("stage", stage); render(); scrollTo(0, 0); });
 
 // ---------------------------------------------------------------- header + boot
+const _renderSafe = render;
+render = function () {
+  try { _renderSafe(); }
+  catch (e) { console.error(e); const m = $("#main");
+    if (m) m.innerHTML = `<h1>Something went wrong on this page</h1><p class="lead">${esc(e.message || String(e))}</p><p><button class="btn" type="button" data-goto-stage="region">Go to the Overview</button> <button class="btn" type="button" onclick="location.reload()">Reload</button></p>`; }
+};
 const _renderHeader = renderHeader;
 renderHeader = function () {
   _renderHeader();
