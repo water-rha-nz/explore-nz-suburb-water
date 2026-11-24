@@ -107,18 +107,28 @@ async function loadAll() {
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
   return d;
 }
-// household_ref export: sections from the database (paged; PostgREST returns at most 1,000 rows per request)
+// household_ref export: sections of the regions in scope only, cached per region. Paged by parcel id (keyset), so every page is
+// a quick index lookup however deep it goes (offset paging over all sections ran into the 30 s query limit). Progress shows in
+// the preview box.
+const SECTR = {};
 loadSections = async function () {
-  if (SECT) return;
-  const names = {}; for (const [k, g] of Object.entries(D.regions)) for (const s of g.suburbs) names[s.linz_id] = [k, s.name];
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
-    const page = await q(sb.from("sections").select("parcel_id,polygon_m2,n_titles,suburb_id,region_id").order("parcel_id").range(from, from + 999));
-    for (const r of page) { const n = Math.max(1, r.n_titles || 1), nm = names[r.suburb_id] || [r.region_id, ""];
-      rows.push([nm[0], nm[1], r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10]); }
-    if (page.length < 1000) break;
+  const ks = scopeRegions(), names = {};
+  for (const k of ks) for (const s of (D.regions[k] || { suburbs: [] }).suburbs) names[s.linz_id] = s.name;
+  const p = $("#preview");
+  for (const [i, k] of ks.entries()) {
+    if (SECTR[k]) continue;
+    const rows = [];
+    for (let last = -1; ;) {
+      const page = await retry(() => q(sb.from("sections").select("parcel_id,polygon_m2,n_titles,suburb_id").eq("region_id", k).gt("parcel_id", last).order("parcel_id").limit(1000)));
+      for (const r of page) { const n = Math.max(1, r.n_titles || 1);
+        rows.push([k, names[r.suburb_id] || "", r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10]); }
+      if (p && !p.hidden) p.textContent = `Loading sections: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ks.length}): ${rows.length.toLocaleString("en-NZ")}…`;
+      if (page.length < 1000) break;
+      last = page[page.length - 1].parcel_id;
+    }
+    SECTR[k] = rows;
   }
-  SECT = { rows };
+  SECT = { rows: Object.values(SECTR).flat() };
 };
 
 // ---------------------------------------------------------------- allocate: persist M_SUBURB names (editors)
