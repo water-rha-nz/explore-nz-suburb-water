@@ -830,18 +830,46 @@ for (const id of ["imagery", "validate", "context", "explore", "export"]) { cons
     ensureRegion(region).then(() => render()).catch((e) => toastMsg("Region not loaded: " + e.message));
     return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted">Suburbs, census, climate and imagery results</p></section>`; }; }
 { const fx = V.explore; if (fx) V.explore = (...a) => { const inner = fx(...a); return D.regions[region] ? detailedOverviewHTML() + '<hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">' + inner : inner; }; }
+// landing map: TA outlines (cached) and each region's suburb outlines, simplified and without data; click a region to load it
+const LAND = { outl: {}, busy: false };
+async function drawLanding() {
+  const host = $("#land-map"); if (!host) return;
+  try { if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 })); } catch (e) { BATCH.tas = BATCH.tas || []; }
+  const rows = studyIndex(), need = rows.filter((r) => !LAND.outl[r.id]);
+  if (need.length && !LAND.busy) { LAND.busy = true;
+    Promise.all(need.map((r) => q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs", p_tol: 60 })).then((o) => { LAND.outl[r.id] = o.map((x) => ({ name: x.name, geom: multi(x.geom) })); }).catch(() => { LAND.outl[r.id] = []; })))
+      .then(() => { LAND.busy = false; if (stage === "region") drawLanding(); }); }
+  const byTa = new Map(rows.map((r) => [r.ta_code, r]));
+  const base = (BATCH.tas || []).filter((t) => t.geom && t.geom.coordinates).map((t) => { const r = byTa.get(t.code);
+    return r ? { attr: `data-land-reg="${esc(r.id)}"`, click: true, d: pathD(t.geom.coordinates), fill: D.regions[r.id] ? "var(--accent-soft)" : "#eef3f8", stroke: "var(--accent)", sw: 1.2, title: `${r.name}: ${D.regions[r.id] ? "loaded" : D.empty[r.id] ? "no prepared data yet" : "click to load"}` }
+      : { d: pathD(t.geom.coordinates), fill: "var(--land)", stroke: "var(--landline)", sw: 0.5, title: t.name }; });
+  const subs = rows.flatMap((r) => (LAND.outl[r.id] || []).map((x) => ({ attr: `data-land-reg="${esc(r.id)}"`, click: true, d: pathD(x.geom), fill: D.regions[r.id] ? "var(--accent)" : "#ffffff", op: D.regions[r.id] ? 0.55 : 0.75, sw: 0.6, title: `${x.name} (${r.name}): ${D.regions[r.id] ? "loaded" : "click to load the region"}` })));
+  const focus = (BATCH.tas || []).filter((t) => byTa.has(t.code)).map((t) => t.geom.coordinates);
+  const nz = (BATCH.tas || []).length ? mapBox(BATCH.tas.map((t) => t.geom.coordinates)) : [0, 0, 1, 1];
+  host.innerHTML = zoomMap("land", [...base, ...subs], nz) + `<p class="small muted" style="margin:6px 0 0">Regions in the database are outlined in blue, with their suburbs; click one to load it (loaded regions are filled). ${LAND.busy ? "Loading suburb outlines…" : ""}</p>`;
+  const svg = host.querySelector && host.querySelector("svg"); if (svg && svg.setAttribute && !(BATCH.view && BATCH.view.id === "land")) setView(svg, focus.length ? mapBox(focus) : nz);
+}
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest && e.target.closest("[data-land-reg]"); if (!el || window._dragMoved || stage !== "region") return;
+  const id = el.dataset.landReg; if (D.regions[id] || D.empty[id]) { region = id; store.set("region", id); return render(); }
+  toastMsg(`Loading ${indexOf(id).name || id}…`);
+  try { await ensureRegion(id); region = id; store.set("region", id); } catch (err) { toastMsg("Not loaded: " + err.message); }
+  render();
+});
 // 1 Overview: a light landing page from the index; detail loads only for the regions you choose
 V.region = () => {
+  setTimeout(() => drawLanding().catch(() => {}), 0);
   const rows = studyIndex(), st = typeof studyOf === "function" ? studyOf() : null, loaded = rows.filter((r) => D.regions[r.id]), last = JSON.parse(store.get("loaded-regions", "[]")).filter((id) => !D.regions[id] && rows.some((r) => r.id === id));
   const tag = (r) => D.regions[r.id] ? '<span class="tag ok">loaded</span>' : D.empty[r.id] ? '<span class="tag">no data yet</span>' : LOADING[r.id] ? '<span class="tag warn">loading…</span>' : "";
   return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ` : ""}${rows.length} region${rows.length === 1 ? "" : "s"} in the database${rows.length ? `, ${rows.filter((r) => r.status === "published").length} published` : ""}. Nothing is loaded until you choose: load the regions you want, then explore them on <b>3 · Load</b> or <b>Explore</b> (data map, comparisons and sources).</p>
     ${rows.length ? `<div class="row" style="gap:8px;margin:8px 0">${rows.some((r) => !D.regions[r.id] && !D.empty[r.id]) ? `<button class="btn primary" type="button" id="ov-load-all">Load ${st ? "this study's" : "all"} regions (${rows.filter((r) => !D.regions[r.id] && !D.empty[r.id]).length})</button>` : ""}
       ${last.length ? `<button class="btn" type="button" id="ov-load-last">Load last session's regions (${last.length})</button>` : ""}
       ${loaded.length ? `<button class="btn" type="button" data-goto-stage="explore">Explore loaded regions (${loaded.length}) →</button>` : ""}</div>
+    <div class="grid" style="grid-template-columns:minmax(0,1.2fr) minmax(300px,1fr);gap:12px;align-items:start"><div class="card" id="land-map"><p class="muted small">Loading map…</p></div>
     <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
     ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l">${esc(r.prvdr || "–")}</td>
       <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
-      <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
+      <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
 };
 document.addEventListener("click", async (e) => {
   const t = e.target, b = t.closest && t.closest("[data-ov-load],#ov-load-all,#ov-load-last,[data-goto-stage]"); if (!b) return;
