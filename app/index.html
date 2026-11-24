@@ -595,8 +595,11 @@ document.addEventListener("click", async (e) => {
     let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
   if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
   const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
-  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…"; const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
-  if (t.dataset.dl) { download(t.dataset.dl, await makeExport(t.dataset.dl)); return; }
+  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…";
+    try { const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); }
+    catch (err) { p.textContent = `${t.dataset.preview}: couldn't load (${err.message || err}). Try again, or narrow the scope to one region.`; }
+    return; }
+  if (t.dataset.dl) { try { download(t.dataset.dl, await makeExport(t.dataset.dl)); } catch (err) { typeof toastMsg === "function" ? toastMsg(`${t.dataset.dl}: couldn't build (${err.message || err})`) : alert(err.message); } return; }
   if (t.dataset.vpreview) { const p = $("#vpreview"); p.hidden = false; const txt = VALPACK[t.dataset.vpreview].make(); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.vpreview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
   if (t.dataset.vdl) { download(t.dataset.vdl, VALPACK[t.dataset.vdl].make()); return; }
   if (t.id === "dl-all") { const man = { app: "NZ Suburb Water Profiles (live)", generated: new Date().toISOString(), data_as_of: D.generated, scope: scopeRegions(), files: [] };
@@ -736,18 +739,28 @@ async function loadAll() {
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
   return d;
 }
-// household_ref export: sections from the database (paged; PostgREST returns at most 1,000 rows per request)
+// household_ref export: sections of the regions in scope only, cached per region. Paged by parcel id (keyset), so every page is
+// a quick index lookup however deep it goes (offset paging over all sections ran into the 30 s query limit). Progress shows in
+// the preview box.
+const SECTR = {};
 loadSections = async function () {
-  if (SECT) return;
-  const names = {}; for (const [k, g] of Object.entries(D.regions)) for (const s of g.suburbs) names[s.linz_id] = [k, s.name];
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
-    const page = await q(sb.from("sections").select("parcel_id,polygon_m2,n_titles,suburb_id,region_id").order("parcel_id").range(from, from + 999));
-    for (const r of page) { const n = Math.max(1, r.n_titles || 1), nm = names[r.suburb_id] || [r.region_id, ""];
-      rows.push([nm[0], nm[1], r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10]); }
-    if (page.length < 1000) break;
+  const ks = scopeRegions(), names = {};
+  for (const k of ks) for (const s of (D.regions[k] || { suburbs: [] }).suburbs) names[s.linz_id] = s.name;
+  const p = $("#preview");
+  for (const [i, k] of ks.entries()) {
+    if (SECTR[k]) continue;
+    const rows = [];
+    for (let last = -1; ;) {
+      const page = await retry(() => q(sb.from("sections").select("parcel_id,polygon_m2,n_titles,suburb_id").eq("region_id", k).gt("parcel_id", last).order("parcel_id").limit(1000)));
+      for (const r of page) { const n = Math.max(1, r.n_titles || 1);
+        rows.push([k, names[r.suburb_id] || "", r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10]); }
+      if (p && !p.hidden) p.textContent = `Loading sections: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ks.length}): ${rows.length.toLocaleString("en-NZ")}…`;
+      if (page.length < 1000) break;
+      last = page[page.length - 1].parcel_id;
+    }
+    SECTR[k] = rows;
   }
-  SECT = { rows };
+  SECT = { rows: Object.values(SECTR).flat() };
 };
 
 // ---------------------------------------------------------------- allocate: persist M_SUBURB names (editors)

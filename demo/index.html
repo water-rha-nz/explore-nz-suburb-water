@@ -596,8 +596,11 @@ document.addEventListener("click", async (e) => {
     let k = 0; const step = () => { const mine = jobs.filter((j) => j.region === region && j.status !== "done"); if (!mine.length) return; mine[0].status = "done"; if (mine[1]) mine[1].status = "running"; store.set("jobs", JSON.stringify(jobs.slice(-40))); const el = $("#jobs"); if (el) el.innerHTML = jobsHTML(); if (++k < 12) setTimeout(step, 900); }; setTimeout(step, 900); return; }
   if (t.id === "reset-edits") { for (const k of Object.keys(edits)) if (k.startsWith(region + ":")) delete edits[k]; store.set("edits", JSON.stringify(edits)); render(); return; }
   const row = t.closest("[data-sel]"); if (row) { store.set("sub-" + region, row.dataset.sel); render(); return; }
-  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…"; const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
-  if (t.dataset.dl) { download(t.dataset.dl, await makeExport(t.dataset.dl)); return; }
+  if (t.dataset.preview) { const p = $("#preview"); p.hidden = false; p.textContent = "Loading…";
+    try { const txt = await makeExport(t.dataset.preview); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.preview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); }
+    catch (err) { p.textContent = `${t.dataset.preview}: couldn't load (${err.message || err}). Try again, or narrow the scope to one region.`; }
+    return; }
+  if (t.dataset.dl) { try { download(t.dataset.dl, await makeExport(t.dataset.dl)); } catch (err) { typeof toastMsg === "function" ? toastMsg(`${t.dataset.dl}: couldn't build (${err.message || err})`) : alert(err.message); } return; }
   if (t.dataset.vpreview) { const p = $("#vpreview"); p.hidden = false; const txt = VALPACK[t.dataset.vpreview].make(); const lines = txt.split(/\r?\n/); p.textContent = `${t.dataset.vpreview}: ${lines.length - 1} lines\n\n` + lines.slice(0, 14).join("\n"); return; }
   if (t.dataset.vdl) { download(t.dataset.vdl, VALPACK[t.dataset.vdl].make()); return; }
   if (t.id === "dl-all") { const man = { app: "explore-nz-suburb-water demo", generated: new Date().toISOString(), data_as_of: D.generated, scope: scopeRegions(), files: [] };
