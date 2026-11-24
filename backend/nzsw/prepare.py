@@ -254,6 +254,53 @@ def _s3_list(client, prefix, delimiter=None):
         tok = t.text
 
 
+# Tiles of LINZ aerial imagery are named <sheet><col>_<scale>_<row><col> on one national NZTM grid (Topo50 sheets 24 x 36 km from
+# origin E 988000, N 6234000; a tile is 0.48 x 0.72 m per unit of scale), so a tile's footprint follows from its name:
+# checked against real tile geometries across captures and scales (all within 5 m).
+SHEET_ROWS = "AS AT AU AV AW AX AY AZ BA BB BC BD BE BF BG BH BJ BK BL BM BN BP BQ BR BS BT BU BV BW BX BY BZ CA CB CC CD CE CF CG CH CJ CK".split()
+
+
+def tile_box(name):
+    m = re.match(r"([A-Z]{2})(\d{2})_(\d+)_(\d+)$", name)
+    if not m or m.group(1) not in SHEET_ROWS:
+        return None
+    r, c, scale, idx = SHEET_ROWS.index(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
+    h = len(idx) // 2; rr, cc = int(idx[:h]), int(idx[h:])
+    w, ht = 0.48 * scale, 0.72 * scale
+    x0 = 988000 + c * 24000 + (cc - 1) * w; y1 = 6234000 - r * 36000 - (rr - 1) * ht
+    return box(x0, y1 - ht, x0 + w, y1)
+
+
+def _catalogue(client, log):
+    """RGB+NIR collections of the public LINZ imagery catalogue, with extent (lon/lat), year, resolution and tile names."""
+    from concurrent.futures import ThreadPoolExecutor
+    sess = requests.Session()
+    def get(u):
+        for i in range(4):
+            try:
+                r = sess.get(u, timeout=30)
+                if r.status_code == 200: return r.json()
+            except (requests.RequestException, ValueError):
+                pass
+            time.sleep(1 + i)
+        return None
+    root = get(S3 + "catalog.json")
+    if not root:
+        return None
+    hrefs = [l["href"][2:] for l in root.get("links", []) if l.get("rel") == "child" and "/rgbnir/2193/" in l.get("href", "")]
+    log(f"imagery catalogue: {len(hrefs)} RGB+NIR captures to check")
+    out = []
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for href, c in zip(hrefs, ex.map(lambda h: get(S3 + h), hrefs)):
+            if not c: continue
+            m = re.search(r"_(\d{4})(?:-(\d{4}))?_(\d+(?:\.\d+)?)m/", href)
+            if not m: continue
+            bb = ((c.get("extent") or {}).get("spatial") or {}).get("bbox") or [[]]
+            out.append(dict(prefix=href.split("/rgbnir/")[0], year=int(m.group(2) or m.group(1)), res=float(m.group(3)), bbox=bb[0] if bb and len(bb[0]) == 4 else None,
+                            tiles=[l["href"][2:-5] for l in c.get("links", []) if l.get("rel") == "item" and l.get("href", "").endswith(".json")]))
+    return out
+
+
 def imagery_index(con, client, region, log):
     R = _region(con, region)
     # reuse: tiles already indexed for this region (by any user's job) cover sections that have none of their own
@@ -262,6 +309,44 @@ def imagery_index(con, client, region, log):
                                (select 1 from imagery_tiles t where t.region_id=s.region_id and st_intersects(t.geom, s.geom))""", (region,)).fetchone()[0]
     if have[0] and not uncovered:
         return f"reused: {have[0]} tiles of {have[1]} already indexed; no imagery listing needed"
+    ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from buildings b where exists (select 1 from sections s where s.region_id=%s and st_intersects(s.geom, b.geom))) t", (region,)).fetchone()
+    if ext[0] is None:
+        return "no buildings stored for the region yet: imagery not indexed"
+    reg_box = box(*ext)
+    lo = gpd.GeoSeries([reg_box], crs=2193).to_crs(4326).total_bounds
+    cat = _catalogue(client, log)
+    if cat is None:
+        log("imagery catalogue unavailable: searching the region's imagery folders instead")
+        return _imagery_index_folders(con, client, region, log, R, reg_box)
+    # captures whose extent overlaps the region; best first: 12.5 cm or finer (newest, then finest), then the next-finest
+    near = [c for c in cat if c["bbox"] and not (c["bbox"][2] < lo[0] or c["bbox"][0] > lo[2] or c["bbox"][3] < lo[1] or c["bbox"][1] > lo[3])]
+    near.sort(key=lambda c: (c["res"] > 0.125, c["res"] if c["res"] > 0.125 else 0, -c["year"], c["res"]))
+    log(f"{len(near)} RGB+NIR capture(s) overlap the region")
+    for c in near:
+        cand = [(t, g) for t in c["tiles"] for g in [tile_box(t)] if g is not None and g.intersects(reg_box)]
+        hit = []
+        for tid, g in cand:
+            n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
+                               where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))""", (region, g.wkb)).fetchone()[0]
+            if n: hit.append((tid, g))
+        if not hit:
+            continue
+        cap, coll = c["prefix"].split("/")[-1], c["prefix"]
+        con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
+                       on conflict (id) do nothing""", (cap, coll, c["year"], c["res"]))
+        for tid, g in hit:
+            base = f"{S3}{coll}/rgbnir/2193/{tid}"
+            con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
+                           on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
+        con.execute("update regions set imagery_captures = array[%s] where id=%s", (cap, region))
+        coarse = f"; coarser than 12.5 cm, so small pools may be missed" if c["res"] > 0.125 else ""
+        return f"capture {cap} ({c['year']}, {c['res']} m): {len(hit)} tiles hold the region's buildings{coarse}"
+    return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
+
+
+def _imagery_index_folders(con, client, region, log, R, reg_box):
+    """Fallback when the catalogue can't be read: the region's imagery folders from the source index (12.5 cm or finer first,
+    then coarser)."""
     idx = {e["ta_code"]: e for e in json.load(open(os.path.join(ROOT, "index", "source_index.json")))["regions"]}
     folders = idx[R["ta_code"]]["imagery_folders"]
     cands = []
@@ -271,62 +356,29 @@ def imagery_index(con, client, region, log):
             m = re.search(r"_(\d{4})(?:-(\d{4}))?_(\d+(?:\.\d+)?)m/$", c)
             if not m: continue
             year, res = int(m.group(2) or m.group(1)), float(m.group(3))
-            if res > 0.125: continue
             k, _ = _s3_list(client, c + "rgbnir/2193/")
-            items = [x for x in k if x.endswith(".json") and "collection" not in x]
-            if items: cands.append((year, -res, c.rstrip("/"), items))
-    if not cands:
-        return "no suitable imagery (no RGB+NIR capture at 0.125 m or finer): pools and gardens are not available for this region"
-    ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from buildings b where exists (select 1 from sections s where s.region_id=%s and st_intersects(s.geom, b.geom))) t", (region,)).fetchone()
-    reg_box = box(*ext) if ext[0] is not None else None
-    for year, nres, coll, items in sorted(cands, reverse=True):          # newest, then finest
-        from shapely.geometry import shape
-        tiles = []
-        # each tile's footprint is in a small public STAC file; a large capture has thousands, so fetch 16 at a time and
-        # hand back to the queue before the run's time limit (the next run starts the listing again)
-        sess = requests.Session()
-        def item(k):
-            for attempt in range(3):
-                try:
-                    r = sess.get(S3 + k, timeout=30)
-                    if r.status_code == 200: return k, r.json()
-                except requests.RequestException:
-                    pass
-                time.sleep(1 + attempt)
-            return k, None
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=16) as ex:
-            for i, (k, j) in enumerate(ex.map(item, items)):
-                if time.monotonic() > DEADLINE:
-                    ex.shutdown(wait=False, cancel_futures=True)   # don't wait for the remaining downloads
-                    raise Continue(f"time limit while listing imagery tiles ({i} of {len(items)} checked)")
-                if i % 200 == 0 and hasattr(log, "progress"):
-                    log.progress(i / max(1, len(items)), f"imagery tiles checked: {i:,} of {len(items):,}")
-                if not j or j.get("type") != "Feature": continue
-                g = gpd.GeoSeries([shape(j["geometry"])], crs=4326).to_crs(2193).iloc[0]
-                if reg_box is not None and g.intersects(reg_box):
-                    tiles.append((os.path.basename(k)[:-5], g))
-        if not tiles:
-            continue
-        # keep tiles that actually contain the region's buildings
+            items = [os.path.basename(x)[:-5] for x in k if x.endswith(".json") and "collection" not in x]
+            if items: cands.append((year, res, c.rstrip("/"), items))
+    cands.sort(key=lambda x: (x[1] > 0.125, x[1] if x[1] > 0.125 else 0, -x[0], x[1]))
+    for year, res, coll, items in cands:
         hit = []
-        for tid, g in tiles:
+        for tid in items:
+            g = tile_box(tid)
+            if g is None or not g.intersects(reg_box): continue
             n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
                                where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))""", (region, g.wkb)).fetchone()[0]
             if n: hit.append((tid, g))
         if not hit: continue
-        # every tile is indexed (no download); processing takes at most max_tiles_run per run and continues in later runs
         cap = coll.split("/")[-1]
         con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
-                       on conflict (id) do nothing""", (cap, coll, year, -nres))
+                       on conflict (id) do nothing""", (cap, coll, year, res))
         for tid, g in hit:
             base = f"{S3}{coll}/rgbnir/2193/{tid}"
             con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
                            on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
         con.execute("update regions set imagery_captures = array[%s] where id=%s", (cap, region))
-        return f"capture {cap} ({year}, {-nres} m): {len(hit)} tiles hold the region's buildings"
-    return "no suitable imagery covers the region's buildings: pools and gardens are not available for this region"
-
+        return f"capture {cap} ({year}, {res} m): {len(hit)} tiles hold the region's buildings" + ("; coarser than 12.5 cm, so small pools may be missed" if res > 0.125 else "")
+    return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
 
 # ---------------------------------------------------------------- imagery (pools, vegetation)
 def imagery(con, client, region, log):
