@@ -4,6 +4,8 @@
 //  - default: the TA's suburbs. LINZ lists 186 suburbs under more than one TA ("Tauranga City, Western Bay of Plenty District"),
 //    so the filter matches any listed TA. A fetch is logged as complete only when every batch is stored; a partial fetch is
 //    never served from the cache. The cache is fresh for 30 days (refresh: true forces a new fetch).
+//  - action "nearby": LINZ suburbs with the given names that lie just outside the TA (within ~8 km), not yet in its list;
+//    action "adopt": add chosen ones (by LINZ id) to the TA's list, flagged as adopted.
 //  - action "places": NZ Gazetteer (official place names, layer 51681) points for names that match no LINZ suburb, in NZTM,
 //    so the app can suggest the LINZ suburb that contains each place.
 import { createClient } from "npm:@supabase/supabase-js@2.119.0";
@@ -36,7 +38,7 @@ Deno.serve(async (req) => {
   const { data: role } = await admin.rpc("edge_user_role", { p_user: u.user.id });
   if (!["editor", "admin"].includes(role ?? "")) return json(req, { error: "editor role required" }, 403);
 
-  let body: { ta_code?: string; refresh?: boolean; action?: string; names?: string[] } = {};
+  let body: { ta_code?: string; refresh?: boolean; action?: string; names?: string[]; ids?: number[]; km?: number } = {};
   try { body = await req.json(); } catch { /* empty */ }
   const ta = String(body.ta_code ?? "").padStart(3, "0");
   const { data: t } = await admin.from("territorial_authorities").select("code,name,name_ascii").eq("code", ta).maybeSingle();
@@ -84,6 +86,38 @@ Deno.serve(async (req) => {
       }
     } catch (e) { return json(req, { error: String((e as Error).message) }, 502); }
     return json(req, { places, requests: chunks.length });
+  }
+
+  // ---- suburbs just outside the TA: search LINZ by name nationally, keep those within a few km of the TA (not in its list)
+  if (body.action === "nearby") {
+    const names = [...new Set((body.names ?? []).map((n) => String(n).trim()).filter(Boolean))].slice(0, 60);
+    if (!names.length) return json(req, { nearby: [] });
+    const chunks: string[][] = []; for (let i = 0; i < names.length; i += 20) chunks.push(names.slice(i, i + 20));
+    const over = await budgetLeft(chunks.length); if (over) return json(req, { error: over }, 429);
+    const nearby: unknown[] = [];
+    try {
+      for (const ch of chunks) {
+        const terms = [...new Set(ch.flatMap((n) => [n, fold(n)]))];
+        const fc = await wfs({ typeNames: "layer-113764", srsName: "EPSG:2193", count: "300",
+          cql_filter: terms.flatMap((n) => [`name ILIKE ${lit(n)}`, `name_ascii ILIKE ${lit(fold(n))}`]).join(" OR ") });
+        const { data } = await admin.rpc("edge_near_ta", { p_ta: ta, p_fc: { features: fc.features ?? [] }, p_km: Number(body.km ?? 8) });
+        nearby.push(...((data as unknown[]) ?? []));
+      }
+    } catch (e) { return json(req, { error: String((e as Error).message) }, 502); }
+    return json(req, { nearby, requests: chunks.length });
+  }
+  // ---- adopt chosen nearby suburbs into the TA's list (by LINZ id)
+  if (body.action === "adopt") {
+    const ids = [...new Set((body.ids ?? []).map(Number).filter((x) => Number.isInteger(x)))].slice(0, 30);
+    if (!ids.length) return json(req, { adopted: 0 });
+    const over = await budgetLeft(1); if (over) return json(req, { error: over }, 429);
+    try {
+      const fc = await wfs({ typeNames: "layer-113764", srsName: "EPSG:4326", count: "100", cql_filter: `id IN (${ids.join(",")})` });
+      const feats = (fc.features ?? []).map((f: any) => ({ ...f, geometry: f.geometry ? { ...f.geometry, coordinates: roundGeom(f.geometry.coordinates) } : f.geometry }));
+      const { data, error } = await admin.rpc("edge_adopt_suburbs", { p_ta: ta, p_fc: { features: feats } });
+      if (error) return json(req, { error: "store failed: " + error.message }, 500);
+      return json(req, { adopted: data ?? 0, requests: 1 });
+    } catch (e) { return json(req, { error: String((e as Error).message) }, 502); }
   }
 
   // ---- the TA's suburbs: shared cache first (complete and fresh), else fetch
