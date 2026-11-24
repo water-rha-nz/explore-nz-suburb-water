@@ -447,7 +447,7 @@ function valPackHTML() {
   const ts = tilesOf(region), top = ts.slice(0, 12);
   return `<h2>Validation pack: flagged tiles and outcome format</h2>
   <p class="small muted">Tiles are LINZ Cloud-Optimised GeoTIFFs, so a labeller or external reviewer can open each by its URL and window. The outcome file comes back in the format below, and the app imports it into <code>validation_labels</code>.</p>
-  ${can("labeller") ? `<div class="row" style="margin-bottom:8px"><label class="small">Scope <select id="scope"><option value="region" ${store.get("scope", "region") === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${store.get("scope", "region") === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+  ${can("labeller") ? `<div class="row" style="margin-bottom:8px"><label class="small">Scope <select id="scope">${scopeOptions(store.get("scope", "region"))}</select></label>
     <label class="small">Tiles <select id="vp-flag"><option value="all" ${flaggedOnly() ? "" : "selected"}>All with items</option><option value="flagged" ${flaggedOnly() ? "selected" : ""}>Priority 1 only</option></select></label></div>
   <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
   ${Object.entries(VALPACK).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-vpreview="${f}" type="button">Preview</button></td><td><button class="btn" data-vdl="${f}" type="button">Download</button></td></tr>`).join("")}
@@ -536,7 +536,13 @@ V.explore = () => {
 // ---------- exports (compatible with suburb_lookup.html) ----------
 const cq = (v) => { const s = v == null ? "" : String(v); return /[",\n\t]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 const csv = (rows, sep = ",") => rows.map((r) => r.map(cq).join(sep)).join("\r\n") + "\r\n";
-const scopeRegions = () => store.get("scope", "region") === "all" ? Object.keys(D.regions) : [region];
+// scope: one region, the chosen study's regions (live app: the header's Study), or all loaded regions
+const studyScopeIds = () => { try { const st = typeof studyOf === "function" ? studyOf() : null; return st ? (D.index || []).filter((r) => (st.ta_codes || []).includes(r.ta_code)).map((r) => r.id) : null; } catch (e) { return null; } };
+const studyScopeName = () => { try { const st = typeof studyOf === "function" ? studyOf() : null; return st ? st.name : null; } catch (e) { return null; } };
+const scopeRegions = () => { const sc = store.get("scope", "region"), ids = studyScopeIds();
+  if (sc === "study" && ids) { const got = ids.filter((k) => D.regions[k]); return got.length ? got : [region]; }
+  return sc === "all" ? Object.keys(D.regions) : [region]; };
+const scopeOptions = (sc) => `<option value="region" ${sc === "region" ? "selected" : ""}>${esc(R().label)}</option>${studyScopeName() ? `<option value="study" ${sc === "study" ? "selected" : ""}>Study: ${esc(studyScopeName())}</option>` : ""}<option value="all" ${sc === "all" ? "selected" : ""}>${typeof sb === "undefined" ? "All pilot regions" : "All loaded regions"}</option>`;
 const SUBS = () => scopeRegions().flatMap((k) => D.regions[k].suburbs.map((s) => ({ s, k, g: D.regions[k] })));
 const censusFor = (s, y) => { const yrs = ["2013", "2018", "2023"].filter((c) => s.census && s.census[c]); const pick = y <= 2015 ? "2013" : y <= 2020 ? "2018" : "2023"; return [pick, s.census && s.census[pick] ? s.census[pick] : (yrs.length ? s.census[yrs[yrs.length - 1]] : {})]; };
 const EXPORTS = {
@@ -579,7 +585,7 @@ V.export = () => {
   const sc = store.get("scope", "region");
   return `<h1>8 · Export</h1><p class="lead">The exports use the same file names, columns and delimiters as <code>suburb_lookup.html</code>, so they load straight into the original tool, plus a panel file for the example study's models. Each bundle carries its attribution and a manifest.</p>
   ${user ? "" : `<div class="note">Viewers can export published regions. ${lock("viewer", "Exporting")}</div>`}
-  <div class="row" style="margin-bottom:10px"><label class="small">Scope <select id="scope"><option value="region" ${sc === "region" ? "selected" : ""}>${esc(R().label)}</option><option value="all" ${sc === "all" ? "selected" : ""}>All pilot regions</option></select></label>
+  <div class="row" style="margin-bottom:10px"><label class="small">Scope <select id="scope">${scopeOptions(sc)}</select></label>
   <button class="btn primary" id="dl-all" type="button" ${user ? "" : "disabled"}>Download all + manifest</button></div>
   <div class="card scroll"><table><thead><tr><th>File</th><th class="l">Contents</th><th></th><th></th></tr></thead><tbody>
   ${Object.entries(EXPORTS).map(([f, e]) => `<tr><td><code>${f}</code></td><td class="l" style="white-space:normal">${esc(e.desc)}</td><td><button class="btn" data-preview="${f}" type="button">Preview</button></td><td><button class="btn" data-dl="${f}" type="button" ${user ? "" : "disabled"}>Download</button></td></tr>`).join("")}
