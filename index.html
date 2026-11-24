@@ -239,7 +239,7 @@ document.addEventListener("mousemove", (e) => { if (tip.classList.contains("show
 
 // ---------- header ----------
 function renderHeader() {
-  $("#region").innerHTML = Object.entries(D.regions).map(([k, g]) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("");
+  $("#region").innerHTML = (D.index || Object.entries(D.regions).map(([id, g]) => ({ id, name: g.label }))).map((r) => `<option value="${r.id}" ${r.id === region ? "selected" : ""}>${esc(r.name)}${D.regions[r.id] ? "" : " (not loaded)"}</option>`).join("");
   $("#stages").innerHTML = STAGES.map(([id, l], i) => `<button role="tab" type="button" data-stage="${id}" aria-selected="${id === stage}"><span class="n">${i + 1}</span>${l}</button>`).join("");
   $("#who").innerHTML = user ? `${esc(user.email)} · <span class="tag info">${user.role}</span>` : `<span class="muted">Not signed in</span>`;
   $("#signin").textContent = user ? "Sign out" : "Sign in with Google";
@@ -617,7 +617,7 @@ document.addEventListener("mouseover", (e) => { const p = e.target.closest && e.
 document.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest("#exmap path.sub")) tip.classList.remove("show"); });
 
 function render() {
-  if (!D.regions[region]) region = Object.keys(D.regions)[0];
+  if (!D.regions[region] && !(D.index || []).some((r) => r.id === region)) region = Object.keys(D.regions)[0] || ((D.index || [])[0] || {}).id;
   if (!V[stage]) stage = "region";
   renderHeader();
   $("#main").innerHTML = V[stage]();
@@ -713,15 +713,14 @@ async function loadRegion(r) {
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
 }
-async function loadAll(progress) {
+// sign-in loads only an index of the regions (one row each); a region's suburbs, census and climate load when needed
+async function loadAll() {
   const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr,timeline").order("id"));
   const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
-  const cen = await q(sb.rpc("region_centroids"));
-  let i = 0;
-  for (const r of regions) { if (progress) progress(++i, regions.length, r.name); const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = cen[r.id] || g.lonlat; d.regions[r.id] = g; } }   // drafts without data yet are listed on the Batch stage
+  d.cen = await q(sb.rpc("region_centroids")); d.index = regions; d.empty = {};
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
@@ -809,10 +808,59 @@ document.addEventListener("click", async (e) => {
 const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
+const LOADING = {};
+// load one region's detail (once); regions without prepared data are remembered as empty
+async function ensureRegion(id, progress) {
+  if (!id || D.regions[id] || D.empty[id]) return D.regions[id];
+  if (LOADING[id]) return LOADING[id];
+  const r = (D.index || []).find((x) => x.id === id); if (!r) return null;
+  return (LOADING[id] = (async () => { if (progress) progress(r);
+    try { const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = (D.cen || {})[r.id] || g.lonlat; D.regions[id] = g; rememberLoaded(); } else D.empty[id] = true; }
+    finally { delete LOADING[id]; } return D.regions[id]; })());
+}
+async function ensureRegions(ids, progress) { let i = 0; for (const id of ids) { if (progress) progress(++i, ids.length, ((D.index || []).find((x) => x.id === id) || {}).name || id); await ensureRegion(id); } }
+const rememberLoaded = () => store.set("loaded-regions", JSON.stringify(Object.keys(D.regions)));
+const indexOf = (id) => (D.index || []).find((x) => x.id === id) || {};
+// regions known to the study in the header (or all), from the index
+const studyIndex = () => { const st = typeof studyOf === "function" ? studyOf() : null; return (D.index || []).filter((r) => !st || (st.ta_codes || []).includes(r.ta_code)); };
+// stages that work on one region load it first
+for (const id of ["imagery", "validate", "context", "explore", "export"]) { const f = V[id]; if (!f) continue;
+  V[id] = (...a) => { if (D.regions[region]) return f(...a);
+    if (!region || D.empty[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${region && D.empty[region] ? `${esc(indexOf(region).name || region)} has no prepared data yet.` : "No region chosen."} Choose a region with data in the header, or load one on <b>1 · Overview</b>.</p>`;
+    ensureRegion(region).then(() => render()).catch((e) => toastMsg("Region not loaded: " + e.message));
+    return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted">Suburbs, census, climate and imagery results</p></section>`; }; }
+{ const fx = V.explore; if (fx) V.explore = (...a) => { const inner = fx(...a); return D.regions[region] ? detailedOverviewHTML() + '<hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">' + inner : inner; }; }
+// 1 Overview: a light landing page from the index; detail loads only for the regions you choose
 V.region = () => {
+  const rows = studyIndex(), st = typeof studyOf === "function" ? studyOf() : null, loaded = rows.filter((r) => D.regions[r.id]), last = JSON.parse(store.get("loaded-regions", "[]")).filter((id) => !D.regions[id] && rows.some((r) => r.id === id));
+  const tag = (r) => D.regions[r.id] ? '<span class="tag ok">loaded</span>' : D.empty[r.id] ? '<span class="tag">no data yet</span>' : LOADING[r.id] ? '<span class="tag warn">loading…</span>' : "";
+  return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ` : ""}${rows.length} region${rows.length === 1 ? "" : "s"} in the database${rows.length ? `, ${rows.filter((r) => r.status === "published").length} published` : ""}. Nothing is loaded until you choose: load the regions you want, then explore them on <b>3 · Load</b> or <b>Explore</b> (data map, comparisons and sources).</p>
+    ${rows.length ? `<div class="row" style="gap:8px;margin:8px 0">${rows.some((r) => !D.regions[r.id] && !D.empty[r.id]) ? `<button class="btn primary" type="button" id="ov-load-all">Load ${st ? "this study's" : "all"} regions (${rows.filter((r) => !D.regions[r.id] && !D.empty[r.id]).length})</button>` : ""}
+      ${last.length ? `<button class="btn" type="button" id="ov-load-last">Load last session's regions (${last.length})</button>` : ""}
+      ${loaded.length ? `<button class="btn" type="button" data-goto-stage="explore">Explore loaded regions (${loaded.length}) →</button>` : ""}</div>
+    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l">${esc(r.prvdr || "–")}</td>
+      <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
+      <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
+};
+document.addEventListener("click", async (e) => {
+  const t = e.target, b = t.closest && t.closest("[data-ov-load],#ov-load-all,#ov-load-last,[data-goto-stage]"); if (!b) return;
+  if (b.dataset.gotoStage) { stage = b.dataset.gotoStage; store.set("stage", stage); render(); return scrollTo(0, 0); }
+  const ids = b.dataset.ovLoad ? [b.dataset.ovLoad] : b.id === "ov-load-last" ? JSON.parse(store.get("loaded-regions", "[]")) : studyIndex().map((r) => r.id).filter((id) => !D.regions[id] && !D.empty[id]);
+  b.disabled = true;
+  try { await ensureRegions(ids, (i, n, name) => { b.textContent = `Loading ${i} of ${n}: ${name}…`; }); if (b.dataset.ovLoad) region = b.dataset.ovLoad; }
+  catch (err) { toastMsg("Not loaded: " + err.message); }
+  render();
+});
+// the detailed overview (data map, regions table, comparisons, sources): shown on 3 Load and Explore, for the loaded regions
+function regionPicker() {
+  const rows = studyIndex(); if (!rows.length) return "";
+  return `<div class="row small" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px"><span class="muted">Regions on the map:</span>${rows.map((r) => D.regions[r.id] ? `<span class="tag ok">${esc(r.name)}</span>` : D.empty[r.id] ? `<span class="tag" title="No prepared data yet">${esc(r.name)}</span>` : `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:0 8px">+ ${esc(r.name)}</button>`).join("")}</div>`;
+}
+function detailedOverviewHTML() {
   setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel, MAPV.selSet); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
   const regs = studyRegions(), st = studyOf();
-  if (!regs.length) return `<h1>1 · Overview</h1><p class="lead">${st ? `The study <b>${esc(st.name)}</b> has no prepared data in the database yet. Its ${(st.ta_codes || []).length} TA(s) are outlined on the map; prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.` : "No prepared data in the database yet. Prepare regions in <b>2 · Configure</b> and <b>3 · Load</b>."}</p>
+  if (!regs.length) return `<h2>Data overview</h2>${regionPicker()}<p class="lead">${st ? `No region of the study <b>${esc(st.name)}</b> is loaded yet.` : "No region is loaded yet."} Load regions above (or on <b>1 · Overview</b>) to see them on the map.</p>
     <div style="margin-top:12px">${dataMapHTML()}</div>${sourcesHTML()}`;
   const g = (regs.find(([k]) => k === region) || regs[0])[1];
   const yrs = (x) => [...new Set(x.suburbs.flatMap((s) => Object.keys(s.census || {})))].sort().join(", ") || "–";
@@ -822,7 +870,7 @@ V.region = () => {
       imagery: x.capture_id || "–", pools, garden: sub.some((s) => s.GardSize != null), census: yrs(x), climate: clim(x), status: x.status || "–" }; };
   const rows = regs.map(([k, x]) => row(k, x)), tot = (f) => rows.reduce((t, r) => t + r[f], 0);
   const cell = (v) => typeof v === "number" ? fmt(v) : esc(v);
-  return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ${rows.length} of its ${(st.ta_codes || []).length} TA(s) have prepared data in the database.` : `What's already in the database: ${rows.length} region${rows.length === 1 ? "" : "s"} with prepared data.`} Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
+  return `<h2>Data overview</h2>${regionPicker()}<p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ${rows.length} loaded region${rows.length === 1 ? "" : "s"}.` : `${rows.length} loaded region${rows.length === 1 ? "" : "s"}.`} Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
   <div class="kpis">
     <div class="kpi"><span>Regions</span><b>${fmt(rows.length)}</b></div><div class="kpi"><span>LINZ suburbs (with housing)</span><b>${fmt(tot("suburbs"))}</b><span>${fmt(tot("housing"))}</span></div>
     <div class="kpi"><span>Residential sections</span><b>${fmt(tot("sections"))}</b></div><div class="kpi"><span>SA2 areas</span><b>${fmt(tot("sa2"))}</b></div>
@@ -952,9 +1000,9 @@ function loadingView(step, detail) {
     PROFILE = await q(sb.from("profiles").select("email,role,status").eq("id", session.user.id).maybeSingle());
     if (!PROFILE || PROFILE.status !== "active") return gate("pending");
     user = { email: PROFILE.email, role: PROFILE.role };
-    loadingView("Loading data…", "Regions, suburbs, census and climate");
-    D = await loadAll((i, n, name) => loadingView("Loading data…", `Region ${i} of ${n}: ${name}`));
-    if (!D.regions[region]) region = Object.keys(D.regions)[0];
+    loadingView("Loading the region index…");
+    D = await loadAll();
+    if (!D.index.some((r) => r.id === region)) region = (D.index[0] || {}).id;
     $("#foot").innerHTML = `NZ Suburb Water Profiles · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · Water consumption isn't handled here.`;
     render();
   } catch (err) { gate("error", err.message); }
@@ -1122,7 +1170,7 @@ const CENSUS_YEARS = ["2013", "2018", "2023"], CLIMATE_FROM = "2013-01-01";
 const latestDay = () => new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);   // the archive lags ~2 days
 // each TA (and each region already in the database, key "r:<region id>") has its own timeline; "_all" is only a template
 // that "apply to all" copies to every selected TA
-const tlOf = (c) => c.startsWith("r:") ? ((D.regions || {})[c.slice(2)] || {}).timeline || {} : BATCH.tl[c] || {};
+const tlOf = (c) => c.startsWith("r:") ? (((D.index || []).find((r) => r.id === c.slice(2)) || (D.regions || {})[c.slice(2)] || {}).timeline || {}) : BATCH.tl[c] || {};
 const tlDays = (c) => { const t = tlOf(c), a = new Date(t.climate_start || CLIMATE_FROM), b = new Date(t.climate_end && t.climate_end < latestDay() ? t.climate_end : latestDay()); return Math.max(0, (b - a) / 864e5 + 1); };
 // dates typed or pasted: 2012-01-01 (also 2012/01/01, 2012.1.1, or NZ-style 1/1/2012); "" = default
 function parseDay(v) {
@@ -1146,9 +1194,9 @@ const tlFor = (c) => tlClean(tlOf(c));
 // store a timeline: a TA's in this browser (and its configuration); a region's straight to the database
 async function setTl(c, o) {
   if (!c.startsWith("r:")) { BATCH.tl[c] = o; saveSel(); return drawBatch(); }
-  const id = c.slice(2), g = (D.regions || {})[id]; if (!g) return;
+  const id = c.slice(2), g = (D.index || []).find((r) => r.id === id) || (D.regions || {})[id]; if (!g) return;
   const clean = tlClean(o), prev = g.timeline; g.timeline = clean;
-  try { await q(sb.from("regions").update({ timeline: clean }).eq("id", id)); toastMsg(`Timeline saved for ${g.label}: the next climate/census job uses it`); }
+  try { await q(sb.from("regions").update({ timeline: clean }).eq("id", id)); if ((D.regions || {})[id]) D.regions[id].timeline = clean; toastMsg(`Timeline saved for ${g.label || g.name}: the next climate/census job uses it`); }
   catch (err) { g.timeline = prev; toastMsg("Not saved: " + err.message); }
   const el = $("#rj-tl"); if (el) el.innerHTML = tlEditor(c);
 }
@@ -1666,12 +1714,13 @@ function loadHTML() {
         <td class="l">${notReady.includes(c) ? '<span class="tag warn">validate first</span>' : blocked.includes(c) ? '<span class="tag bad">nothing to load / too large</span>' : '<span class="tag ok">ready</span>'}</td></tr>`; }).join("")}</tbody></table>
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
     ${can("editor") ? `<button class="btn primary" id="batch-queue" type="button" ${sel.length && !notReady.length && !blocked.length ? "" : "disabled"}>Queue batch (${sel.length} region${sel.length === 1 ? "" : "s"})</button>` : lock("editor", "Queuing batches")}</div>
-  ${can("editor") ? progressHTML() + regionJobsHTML() : ""}`;
+  ${can("editor") ? progressHTML() + regionJobsHTML() : ""}
+  <div style="margin-top:20px">${detailedOverviewHTML()}</div>`;
 }
 // moved from 1 Region: refresh jobs for a region already in the database, job progress, and download rates / usage
 function regionJobsHTML() {
   setTimeout(() => { if (typeof refreshJobs === "function") refreshJobs().catch(() => {}); }, 0);
-  const regs = Object.entries(D.regions || {});
+  const regs = (D.index || []).map((r) => [r.id, { label: r.name }]);
   return `<h2>Refresh a region in the database</h2><div class="grid g2"><div class="card">
     ${regs.length ? `<p class="small"><label>Region <select id="rj-region">${regs.map(([k, g]) => `<option value="${esc(k)}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</select></label></p>
     <div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
@@ -1869,9 +1918,9 @@ renderHeader = function () {
   if (w) { w.hidden = lab.hidden;
     w.innerHTML = `<span class="muted">Study</span> <select id="study" aria-label="Study (saved configuration)"><option value="">All regions</option>${(STUDY.list || []).map((c) => `<option value="${c.id}" ${cur && cur.id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`; }
   if (cur && D && D.regions) {
-    const keys = Object.entries(D.regions).filter(([, g]) => (cur.ta_codes || []).includes(g.ta_code)).map(([k]) => k);
+    const keys = (D.index || []).filter((r) => (cur.ta_codes || []).includes(r.ta_code)).map((r) => r.id);
     if (keys.length) { if (!keys.includes(region)) { region = keys[0]; store.set("region", region); }
-      sel.innerHTML = keys.map((k) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(D.regions[k].label)}</option>`).join(""); }
+      sel.innerHTML = keys.map((k) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(indexOf(k).name || k)}${D.regions[k] ? "" : " (not loaded)"}</option>`).join(""); }
   }
   lab.style.display = REGION_STAGES.has(stage) ? "" : "none";
 };
@@ -1933,19 +1982,19 @@ const FILLS = [
 const FILL_GROUP = (f) => !f[4] ? "" : f[4].some((k) => k.startsWith("cen_")) ? "Census" : f[4].includes("openmeteo") ? "Climate" : f[4].includes("imagery") ? "Imagery" : "Property (LINZ)";
 const fillOf = (k) => FILLS.find((x) => x[0] === k) || FILLS[0];
 const INFO = {
-  hh_size: "Mean number of usual residents per household. Census household composition by size, for each Statistical Area 2 (SA2), apportioned to suburbs by their share of each SA2's residential sections.",
-  income: "Median household income (total, all sources). SA2 medians from the census, combined per suburb weighted by residential sections; an approximation of the suburb median.",
-  owner: "Share of households whose dwelling is owned or partly owned, or held in a family trust, rather than rented. Census tenure by SA2, apportioned to suburbs by sections.",
-  separate: "Share of households living in a separate (stand-alone) house rather than a joined dwelling such as a unit, townhouse or apartment. Census dwelling type by SA2.",
-  bedrooms: "Mean number of bedrooms per occupied dwelling. Census dwellings by SA2, apportioned to suburbs by sections.",
-  density: "LINZ property titles per km² of suburb area. Counts units and cross-leases separately, so it tracks dwellings better than sections do.",
-  lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded.",
-  garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints.",
-  pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples).",
-  tmean: "Mean air temperature for the suburb's climate grid cell (about 9 km), averaged over 2008–2025, from ERA5 reanalysis via Open-Meteo.",
-  rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo.",
-  et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall.",
-  deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus.",
+  hh_size: "Mean number of usual residents per household. Census household composition by size, for each Statistical Area 2 (SA2), apportioned to suburbs by their share of each SA2's residential sections. Why it matters: more people per household means more water used per home (showers, laundry, toilets), but usually less per person, because fixed uses such as gardens, leaks and appliances are shared.",
+  income: "Median household income (total, all sources). SA2 medians from the census, combined per suburb weighted by residential sections; an approximation of the suburb median. Why it matters: higher-income households tend to use more water outdoors (larger gardens, irrigation, pools, more appliances) and respond less to price, so income helps separate discretionary from essential use.",
+  owner: "Share of households whose dwelling is owned or partly owned, or held in a family trust, rather than rented. Census tenure by SA2, apportioned to suburbs by sections. Why it matters: owner-occupiers are more likely to invest in gardens, irrigation and pools, and also in water-efficient fittings; tenure also affects who sees the water bill, and so how households respond to volumetric charges.",
+  separate: "Share of households living in a separate (stand-alone) house rather than a joined dwelling such as a unit, townhouse or apartment. Census dwelling type by SA2. Why it matters: separate houses usually have their own outdoor space to water, so suburbs with more of them tend to have higher summer (outdoor) demand than suburbs of units and apartments.",
+  bedrooms: "Mean number of bedrooms per occupied dwelling. Census dwellings by SA2, apportioned to suburbs by sections. Why it matters: a proxy for dwelling size and how many people a home can hold; larger homes have more bathrooms and fixtures and tend to use more water.",
+  density: "LINZ property titles per km² of suburb area. Counts units and cross-leases separately, so it tracks dwellings better than sections do. Why it matters: title density shows how intensively the land is subdivided. High density means smaller lots, more units and less garden per dwelling, so lower outdoor use per home but more connections per km of pipe; low density means larger, often irrigated sections and higher peak summer demand per home.",
+  lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded. Why it matters: section size is one of the strongest drivers of outdoor water use: bigger sections have more lawn and garden to water and more room for a pool, which shows up as higher summer peaks.",
+  garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints. Why it matters: the green, potentially irrigated area per section; together with rainfall and evapotranspiration it indicates how much water gardens need in dry, warm spells.",
+  pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples). Why it matters: pools need filling and regular top-ups to replace evaporation, which adds to summer demand and to peak-day loads on the network.",
+  tmean: "Mean air temperature for the suburb's climate grid cell (about 9 km), averaged over 2008–2025, from ERA5 reanalysis via Open-Meteo. Why it matters: warmer places lose more water to evaporation and their residents water gardens more often, so temperature helps explain seasonal and peak demand.",
+  rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo. Why it matters: rainfall reduces the need to water gardens; suburbs with low rainfall in summer rely more on mains water for outdoor use.",
+  et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall. Why it matters: evapotranspiration is the drying power of the air; the higher it is, the more water lawns and gardens need to stay green, so it drives outdoor demand.",
+  deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus. Why it matters: the shortfall of rain against evapotranspiration approximates how much irrigation gardens need; a large deficit points to high outdoor and peak summer demand.",
   "size:none": "Every suburb is drawn at its real size and shape.",
   "size:sections": "Each suburb shrinks about its own centre so that its area is proportional to its number of residential sections. Dense urban suburbs stay large; big, sparsely settled localities shrink. The suburb with the most sections per km² keeps its real size.",
   "size:titles": "As for sections, but proportional to the number of property titles, which also counts units and cross-leased flats: closer to the number of dwellings.",
@@ -1955,7 +2004,8 @@ const INFO = {
   "stretch:value": "Value: colour is proportional to the actual value across the full range, on a logarithmic scale when the values are right-skewed (all positive, a long tail of high values). Shows true differences, but one outlier can make the rest look alike.",
 };
 const infoBtn = (k) => `<sup><button type="button" data-mvinfo="${k}" aria-expanded="${MAPV.info === k}" aria-label="What does this mean?" title="What does this mean?" style="border:1px solid var(--line);background:${MAPV.info === k ? "var(--accent)" : "var(--panel)"};color:${MAPV.info === k ? "#fff" : "var(--accent)"};border-radius:50%;width:14px;height:14px;padding:0;font:italic 700 9px/12px serif;cursor:pointer;vertical-align:1px">i</button></sup>`;
-const infoBox = (k) => MAPV.info === k && INFO[k] ? `<div class="small" style="margin:3px 0 6px;padding:5px 8px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;white-space:normal">${esc(INFO[k])}</div>` : "";
+const infoBox = (k) => { if (MAPV.info !== k || !INFO[k]) return ""; const [what, why] = INFO[k].split(" Why it matters: ");
+  return `<div class="small" style="margin:3px 0 6px;padding:5px 8px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;white-space:normal">${esc(what)}${why ? `<br><b>Why it matters:</b> ${esc(why)}` : ""}</div>`; };
 const SIZES = [["none", "Real area"], ["sections", "Sections", (s) => s.sections, ["linz_parcels"]], ["titles", "Titles", (s) => s.titles, ["linz_titles"]], ["pools", "Pools", (s) => s.pools, ["imagery"]]];
 const AXIS_COL = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"];
 const MAKEUP = [["Building", "#8d7b6f", (s) => +s.Footprint || 0], ["Garden", "#4daf4a", (s) => +s.GardSize || 0], ["Pool", "#2b83ba", (s) => (+s.PercPool || 0) / 100 * (+s.PoolArea || 0)],
@@ -2212,7 +2262,7 @@ function legendHTML() {
   }
   h += `${hd(MAPV.layout === "tiles" ? "Tile size" : "Scale suburbs by (cartogram)")}${MAPV.layout === "tiles" ? infoBtn("size:tiles") + infoBox("size:tiles") : ""}
     ${SIZES.map(([k, l, , src]) => `<label style="display:block"><input type="radio" name="mv-size" data-mvsize="${k}" ${k === MAPV.sizeBy ? "checked" : ""}> ${k === "none" ? (MAPV.layout === "tiles" ? "Equal tiles" : "Real area") : "Area ∝ " + l.toLowerCase()}${src ? srcRef(src) : ""}${infoBtn("size:" + k)}</label>${infoBox("size:" + k)}`).join("")}
-    ${hd("Symbols")}<p class="muted" style="margin:0 0 3px">Merge with nearby suburbs as you zoom out; hover to enlarge, click for the summary.</p>
+    ${hd("Symbols")}<p class="muted" style="margin:0 0 3px">Symbols that would overlap merge into one; hover to enlarge, click for the summary.</p>
     ${Object.entries(SYM).map(([k, [l, c]]) => `<label style="display:block"><input type="checkbox" data-mvpres="${k}" ${MAPV.pres.has(k) ? "checked" : ""}> ${symIcon(k)} ${l}${srcRef(k === "pools" || k === "green" ? ["imagery", "linz_parcels"] : k === "radar" ? ["cen_hou020", "linz_titles", "linz_parcels"] : ["openmeteo"])} <span class="muted">${{ pools: "size ∝ pools", green: "size ∝ green area", rain: "fill ∝ rainfall", temp: "fill ∝ temperature", et0: "more wisps = more ET₀", radar: "wedges: spatial statistics" }[k]}</span></label>`).join("")}
     <label style="display:block;margin-top:4px"><input type="checkbox" id="mv-labels" ${MAPV.labels ? "checked" : ""}> Suburb names${srcRef("linz_suburbs")}</label>
     <div id="mv-note" class="muted" style="margin-top:6px">${esc(MAPV.note)}</div>`;
@@ -2233,11 +2283,13 @@ function aggregate(list) {
 }
 let SYMSTYLE = false;
 function symStyle() { if (SYMSTYLE || !document.head || !document.createElement) return; SYMSTYLE = true; const st = document.createElement("style");
-  st.textContent = ".mv-sym{transform-box:fill-box;transform-origin:center;transition:transform .15s ease;cursor:pointer}.mv-sym:hover{transform:scale(2.2)}#mv-sym g.mv-sym:hover{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}";
+  st.textContent = ".mv-sym{transform-box:fill-box;transform-origin:center;transition:transform .15s ease;cursor:pointer}.mv-sym:hover{transform:scale(1.6)}#mv-sym g.mv-sym:hover{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}";
   document.head.appendChild(st); }
 const tOf = (key, v) => { const sc = scaleFor(fillOf(key)); return sc ? sc.t(v) : null; };
-function symbolSVG(x, y, a, px, ids, maxPools, maxGreen) {
-  const P = MAPV.pres, R = 13 * px, parts = [];
+const SYM_SCALE = 2;                     // symbol size relative to the original design (13 px radar radius)
+const SYM_W = 62 * SYM_SCALE, SYM_H = 34 * SYM_SCALE;   // footprint on screen (px): symbols closer than this would overlap
+function symbolSVG(x, y, a, px0, ids, maxPools, maxGreen) {
+  const px = px0 * SYM_SCALE, P = MAPV.pres, R = 13 * px, parts = [];
   const axes = MAPV.axes.map(fillOf).filter((f) => f[3]);
   if (P.has("radar") && axes.length) {
     parts.push(`<circle cx="${x}" cy="${-y}" r="${R}" fill="var(--panel)" fill-opacity=".9" stroke="var(--ink)" stroke-opacity=".35" stroke-width="${0.8 * px}"/>`);
@@ -2270,9 +2322,9 @@ const symIcon = (k) => `<svg width="16" height="16" viewBox="0 0 16 16" aria-hid
 }[k] || ""}</svg>`;
 // screen-space grouping: suburbs whose centres fall within ~60 px merge (largest first)
 function clusters(subs, px) {
-  const out = [], R = 60 * px;
+  const out = [], W = SYM_W * px, H = SYM_H * px;   // merge when the symbols' boxes would overlap
   for (const o of subs.slice().sort((a, b) => weightOf(b.s) - weightOf(a.s))) { const [x, y] = centroid(o.s);
-    const c = out.find((k) => Math.hypot(k.x - x, k.y - y) < R);
+    const c = out.find((k) => Math.abs(k.x - x) < W && Math.abs(k.y - y) < H);
     if (c) { const w0 = c.w, w1 = weightOf(o.s); c.x = (c.x * w0 + x * w1) / (w0 + w1); c.y = (c.y * w0 + y * w1) / (w0 + w1); c.w += w1; c.subs.push(o.s); }
     else out.push({ x, y, w: weightOf(o.s), subs: [o.s] }); }
   return out;
@@ -2288,7 +2340,7 @@ function symbolLayer(box, px, level) {
   if (!MAPV.pres.size || MAPV.layout === "tiles") return "";
   symStyle();
   const subs = allSubs().filter(({ s }) => inView(bboxOf(s), box, 0.05));
-  const groups = level === "groups" ? clusters(subs, px) : subs.map(({ s }) => { const [x, y] = centroid(s); return { x, y, subs: [s] }; });
+  const groups = clusters(subs, px);
   const aggs = groups.map((c) => aggregate(c.subs));
   const maxPools = Math.max(1, ...aggs.map((a) => a.pools)), maxGreen = Math.max(1, ...aggs.map((a) => a.green));
   if (level === "cells") { const keep = MAPV.pres; MAPV.pres = new Set([...keep].filter((k) => k !== "pools" && k !== "green")); const h = groups.map((c, i) => symbolSVG(c.x, c.y, aggs[i], px, c.subs.map((s) => s.linz_id), maxPools, maxGreen)).join(""); MAPV.pres = keep; return h; }
