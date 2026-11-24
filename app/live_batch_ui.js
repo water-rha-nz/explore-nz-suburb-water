@@ -415,7 +415,11 @@ function togglePick(c, name, include) {
 }
 // ‹ previous / next › through the selected TAs, labelled with each TA's provider
 function taNav(cur, attr) {
-  const sel = [...BATCH.sel].sort(), i = sel.indexOf(cur); if (sel.length < 2) return "";
+  const sel = [...BATCH.sel].sort(), i = sel.indexOf(cur);
+  const onward = attr === "data-vta" ? ["load", "Next: 3 Load ›"] : attr === "data-ata" ? ["vsuburbs", "Next: 2.3 Validate ›"] : null;
+  if (sel.length < 2) return onward ? `<button class="btn primary" type="button" ${onward[0] === "load" ? 'data-btab="load"' : 'id="alloc-next" data-todo="' + sel.reduce((t, x) => t + unassigned(x).length, 0) + '"'}>${onward[1]}</button>` : "";
+  if (onward && i === sel.length - 1) { const prev = sel[i - 1];
+    return `<span class="row" style="gap:6px"><button class="btn" type="button" ${attr}="${prev}" title="${esc(taOf(prev).name)}">‹ Previous</button><span class="small muted">${i + 1} of ${sel.length}</span><button class="btn primary" type="button" ${onward[0] === "load" ? 'data-btab="load"' : `id="alloc-next" data-todo="${sel.reduce((t, x) => t + unassigned(x).length, 0)}"`}>${onward[1]}</button></span>`; }
   const lab = (c) => `${esc(taOf(c).name)} · ${esc(prvdrFor(c))}`, prev = sel[(i - 1 + sel.length) % sel.length], next = sel[(i + 1) % sel.length];
   return `<span class="row" style="gap:6px"><button class="btn" type="button" ${attr}="${prev}" title="${lab(prev)}">‹ Previous</button><span class="small muted">${i + 1} of ${sel.length}</span><button class="btn" type="button" ${attr}="${next}" title="${lab(next)}">Next ›</button></span>`;
 }
@@ -670,7 +674,10 @@ function importBuilder(c, fname) {
 function studyExport() {
   const sel = [...BATCH.sel].sort(), sc = scopeByTA();
   const tl = (t) => ({ weatherFrom: t.climate_start || CLIMATE_FROM, weatherTo: t.climate_end || "latest", censusYears: (t.census_years || CENSUS_YEARS).map(Number) });
-  return { app: "NZ Suburb Water Profiles", version: 1, exported: new Date().toISOString(), name: BATCH.config ? BATCH.config.name : null, keepMode: BATCH.keep,
+  // your list files travel with the exported config (in this file only, never stored in the database)
+  const files = Object.fromEntries(["provider", "map", "ref"].filter((k) => (BATCH.files[k] || []).length).map((k) => { const rows = BATCH.files[k], hs = rows.headers || Object.keys(rows[0] || {});
+    return [k, { name: BATCH.fileNames[k] || `nz_suburb_${k}.csv`, sep: rows.sep || ",", headers: hs, rows: rows.map((r) => hs.map((h) => r[h.toUpperCase()] ?? "")) }]; }));
+  return { app: "NZ Suburb Water Profiles", version: 1, exported: new Date().toISOString(), name: BATCH.config ? BATCH.config.name : null, configId: BATCH.config ? BATCH.config.id : null, keepMode: BATCH.keep, files,
     timelineTemplate: tl(tlOf("_all")),
     territorialAuthorities: sel.map((c) => { const f = filePrvdr(c), S = BATCH.linz[c] ? scopeOf(c) : null;
       return { code: c, name: taOf(c).name, prvdr: prvdrFor(c), prvdrName: (BATCH.providers.find((p) => p.prvdr === prvdrFor(c)) || {}).name || null,
@@ -682,6 +689,15 @@ function studyExport() {
 }
 function importStudy(st) {
   if (!st || !Array.isArray(st.territorialAuthorities)) return "";
+  // list files carried in the config
+  let nf = 0;
+  for (const [k, f] of Object.entries(st.files || {})) { if (!["provider", "map", "ref"].includes(k) || !f || !Array.isArray(f.headers) || !Array.isArray(f.rows)) continue;
+    const H = f.headers.map((h) => String(h).trim().toUpperCase()), rows = f.rows.map((r) => Object.fromEntries(H.map((h, i) => [h, String(r[i] ?? "").trim()])));
+    rows.headers = f.headers; rows.sep = f.sep || ","; BATCH.files[k] = rows; BATCH.fileNames[k] = f.name || `nz_suburb_${k}.csv`; nf++; }
+  if (nf) { BATCH.savedScope = null; BATCH.rev++; }
+  // the saved configuration (study) this config belongs to, if it is yours
+  const match = (STUDY.list || []).find((x) => st.configId != null && String(x.id) === String(st.configId)) || (st.name ? (STUDY.list || []).find((x) => x.name === st.name) : null);
+  if (match) { BATCH.config = { id: match.id, name: match.name }; STUDY.id = String(match.id); store.set("study", STUDY.id); setTimeout(renderHeader, 0); }
   const tlIn = (t) => { if (!t) return {}; const o = {}; if (t.weatherFrom && t.weatherFrom !== CLIMATE_FROM) o.climate_start = t.weatherFrom; if (t.weatherTo && t.weatherTo !== "latest") o.climate_end = t.weatherTo;
     if (Array.isArray(t.censusYears) && t.censusYears.length) o.census_years = CENSUS_YEARS.filter((y) => t.censusYears.map(String).includes(y)); return o; };
   BATCH.sel = new Set(st.territorialAuthorities.map((t) => t.code).filter((c) => taOf(c).code));
@@ -692,7 +708,7 @@ function importStudy(st) {
     if (Array.isArray(t.suburbsInScope) && t.suburbsInScope.length) BATCH.savedScope = { ...(BATCH.savedScope || {}), [t.code]: t.suburbsInScope }; }
   if (st.timelineTemplate) BATCH.tl._all = tlIn(st.timelineTemplate);
   if (st.keepMode === "any" || st.keepMode === "both") { BATCH.keep = st.keepMode; store.set("batch-keep", st.keepMode); }
-  return `; ${BATCH.sel.size} TA(s) with PRVDRs, timelines and picks${st.name ? ` (study "${st.name}")` : ""}`;
+  return `; ${BATCH.sel.size} TA(s) with PRVDRs, timelines and picks${nf ? `; ${nf} list file(s)` : ""}${match ? `; study "${match.name}" selected` : st.name ? ` (study "${st.name}" not among your saved configurations)` : ""}`;
 }
 function exportBuilder(made) {
   const b = BATCH.builder || {}, roles = { map: "suburb_map", ref: "suburb_ref", provider: "suburb_provider" };
@@ -717,7 +733,7 @@ function similar(a, list) { const k = mkey(a); if (!k) return [];
     return [x, r + c + w]; }).filter(([, sc]) => sc >= 0.55).sort((p, q) => q[1] - p[1]).slice(0, 3).map(([x]) => x); }
 function similar_old(a, list) { const n = norm(a); return list.filter((x) => { const m = norm(x); return m.startsWith(n.slice(0, 4)) || n.startsWith(m.slice(0, 4)) || m.includes(n) || n.includes(m); }).slice(0, 3); }
 async function validateAll() {
-  const sel = [...BATCH.sel].sort();
+  const sel = [...BATCH.sel].sort().filter((c) => !(stage === "load" && BATCH.valid[c] && BATCH.valid[c].status === "done"));
   for (const c of sel) {
     BATCH.valid[c] = { status: "checking" }; drawBatch();
     try {
@@ -762,15 +778,20 @@ function loadHTML() {
   const sel = [...BATCH.sel].sort(), v = BATCH.valid, ix = Object.fromEntries((D.index_regions || []).map((r) => [r.TA_CODE, r]));
   const notReady = sel.filter((c) => !(v[c] && v[c].status === "done"));
   const blocked = sel.filter((c) => v[c] && v[c].status === "done" && ((v[c].scoped && !v[c].matched.length) || (!v[c].scoped && taOf(c).parts > 1)));
+  const ready = sel.filter((c) => !notReady.includes(c) && !blocked.includes(c));
+  const why = (c) => { const r = v[c]; if (!r) return "not validated yet"; if (r.status === "checking") return "validating…"; if (r.status === "error") return "validation failed: " + r.message;
+    if (r.scoped && !r.matched.length) return "no suburbs to load (none matched or all excluded)"; if (!r.scoped && taOf(c).parts > 1) return "too large without a suburb list"; return ""; };
   const budget = (((D.limits || {}).defaults || {}).openmeteo || {}).budget_day || 6000;
   const fullDays = (new Date(latestDay()) - new Date(CLIMATE_FROM)) / 864e5 + 1;   // the index estimates assume weather from 2013
   const tot = sel.reduce((t, c) => t + (+((ix[c] || {}).EST_OPENMETEO_CALLS_PER_PART) || 0) * (v[c] && v[c].scoped ? 0.5 : 1) * (tlDays(c) / fullDays), 0);
   return `<div class="card"><h3>Ready to load</h3>
     <table><thead><tr><th class="l">TA</th><th class="l">PRVDR</th><th>Suburbs to load</th><th class="l">Status</th></tr></thead><tbody>${sel.map((c) => { const r = v[c];
       return `<tr><td class="l">${esc(taOf(c).name)}</td><td class="l">${esc(prvdrFor(c))}</td><td>${r && r.status === "done" ? (r.scoped ? r.matched.length : r.linz.length) : "–"}</td>
-        <td class="l">${notReady.includes(c) ? '<span class="tag warn">validate first</span>' : blocked.includes(c) ? '<span class="tag bad">nothing to load / too large</span>' : '<span class="tag ok">ready</span>'}</td></tr>`; }).join("")}</tbody></table>
+        <td class="l" style="white-space:normal">${ready.includes(c) ? '<span class="tag ok">ready</span>' : `<span class="tag ${notReady.includes(c) ? "warn" : "bad"}">${esc(why(c))}</span>`}</td></tr>`; }).join("")}</tbody></table>
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
-    ${can("editor") ? `<button class="btn primary" id="batch-queue" type="button" ${sel.length && !notReady.length && !blocked.length ? "" : "disabled"}>Queue batch (${sel.length} region${sel.length === 1 ? "" : "s"})</button>` : lock("editor", "Queuing batches")}</div>
+    ${can("editor") ? `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" id="batch-queue" type="button" ${ready.length ? "" : "disabled"}>Queue batch (${ready.length} region${ready.length === 1 ? "" : "s"})</button>
+      ${notReady.length ? `<button class="btn" type="button" id="load-validate">Validate the rest (${notReady.length})</button>` : ""}
+      ${!ready.length ? `<span class="small muted">${sel.length ? "Nothing is ready yet: validate the TAs (2.3) first." : "Select TAs in 2.1 first."}</span>` : ready.length < sel.length ? `<span class="small muted">${sel.length - ready.length} TA(s) aren't ready and won't be queued.</span>` : ""}</div>` : lock("editor", "Queuing batches")}</div>
   ${can("editor") ? progressHTML() + regionJobsHTML() : ""}
   <div style="margin-top:20px">${detailedOverviewHTML()}</div>`;
 }
@@ -800,7 +821,10 @@ function progressHTML() {
     <div class="row" style="margin-top:8px"><button class="btn" data-tiles="${b.id}" type="button">Download tile list (CSV)</button><button class="btn" type="button" id="batch-refresh">Refresh</button></div></div>`; }).join("")}`;
 }
 async function queueBatch() {
-  const sc = scopeByTA(), sel = [...BATCH.sel].sort(), v = BATCH.valid;
+  const sc = scopeByTA(), v = BATCH.valid;
+  // only TAs that are validated and have something to load
+  const sel = [...BATCH.sel].sort().filter((c) => v[c] && v[c].status === "done" && !((v[c].scoped && !v[c].matched.length) || (!v[c].scoped && taOf(c).parts > 1)));
+  if (!sel.length) return toastMsg("Nothing is ready to queue: validate the TAs first");
   const [b] = await q(sb.from("batches").insert({ name: `${BATCH.config ? BATCH.config.name + " · " : ""}${sel.length} region(s), ${new Date().toLocaleDateString("en-NZ")}`, ta_codes: sel, keep_mode: BATCH.keep }).select("id"));
   for (const c of sel) {
     const t = taOf(c), r = v[c], s = sc[c], p = prvdrFor(c);
@@ -948,6 +972,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "batch-clear") { BATCH.sel.clear(); BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "bta-all" || t.id === "bta-none") { const f = norm(store.get("bta-filter", "")); for (const x of BATCH.tas) if (!f || norm([x.name, (x.prvdrs || []).join(" "), x.rc].join(" ")).includes(f)) t.id === "bta-all" ? BATCH.sel.add(x.code) : BATCH.sel.delete(x.code); saveSel(); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "validate-go" && can("editor")) { t.disabled = true; try { await validateAll(); } finally { t.disabled = false; } return; }
+  if (t.id === "load-validate" && can("editor")) { t.disabled = true; t.textContent = "Validating…"; try { await validateAll(); } finally { drawBatch(); } return; }
   if (t.id === "batch-queue" && can("editor")) { t.disabled = true; try { await queueBatch(); } catch (err) { toastMsg("Not queued: " + err.message); t.disabled = false; } return; }
   if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
