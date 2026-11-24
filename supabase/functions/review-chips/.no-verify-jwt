@@ -1,0 +1,1 @@
+review-chips checks its own single-purpose key (x-review-token), so the gateway JWT check is off.

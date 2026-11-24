@@ -507,7 +507,7 @@ def sample_validation(con, region, n=VAL_SAMPLE):
     a fixed pseudo-random spread (md5 order), each with its centre, section outline and public tile."""
     have = con.execute("select count(*) from validation_items where region_id=%s", (region,)).fetchone()[0]
     if have:
-        return f"{have} labelling items already sampled"
+        return f"{have} labelling items already sampled; " + render_review_chips(con, region)
     tile = """join lateral (select t.cog_url from imagery_tiles t where t.region_id = %(r)s and t.capture_id = {cap} and st_intersects(t.geom, {pt})
                             order by t.tile_id limit 1) t on true"""
     outline = "st_asgeojson(st_simplify(s.geom, 0.5), 1)::jsonb -> 'coordinates'"
@@ -527,7 +527,63 @@ def sample_validation(con, region, n=VAL_SAMPLE):
                 dict(r=region, n=n["garden"]))
     k = con.execute("select task, count(*) from validation_items where region_id=%s group by task", (region,)).fetchall()
     d = dict(k)
-    return f"labelling items sampled: {d.get('pool', 0)} pool candidates, {d.get('garden', 0)} gardens"
+    return f"labelling items sampled: {d.get('pool', 0)} pool candidates, {d.get('garden', 0)} gardens; " + render_review_chips(con, region)
+
+
+def _rings(c):
+    if not isinstance(c, list) or not c: return []
+    return [c] if isinstance(c[0], list) and c[0] and isinstance(c[0][0], (int, float)) else [r for x in c for r in _rings(x)]
+
+
+def render_review_chips(con, region, max_n=300, S=320):
+    """Blind-review chips: each labelling item's image as a plain JPEG (no georeferencing, no metadata) under a random token.
+    Pools: the candidate circled in red within its section (yellow). Gardens: the section beside a copy with vegetation in green
+    (NDVI rule of the capture). Built from the public LINZ tile; deadline-aware, at most max_n per run."""
+    import cv2, rasterio
+    from rasterio.windows import from_bounds
+    os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    rows = con.execute("""select v.id, v.task, v.x, v.y, v.cog_url, v.outline, c.calibration from validation_items v
+                          left join imagery_captures c on c.id = v.capture_id
+                          where v.region_id=%s and v.cog_url is not null and not exists (select 1 from review_chips r where r.item_id = v.id)
+                          order by v.id limit %s""", (region, max_n)).fetchall()
+    made = failed = 0
+    for iid, task, x, y, url, outline, calib in rows:
+        if time.monotonic() > DEADLINE:
+            break
+        try:
+            rings = _rings(outline or [])
+            pts = [p for r in rings for p in r]
+            if task == "pool" or not pts:
+                cx, cy, half = float(x), float(y), 20.0
+            else:
+                xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+                cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+                half = max(15.0, (max(xs) - min(xs)) / 2 + 6, (max(ys) - min(ys)) / 2 + 6)
+            b = (cx - half, cy - half, cx + half, cy + half)
+            with rasterio.open("/vsicurl/" + url) as src:
+                a = src.read(indexes=[1, 2, 3, 4][:src.count], window=from_bounds(*b, transform=src.transform), out_shape=(min(4, src.count), S, S), boundless=True, fill_value=0)
+            rgb = np.ascontiguousarray(np.dstack([a[2], a[1], a[0]]).astype(np.uint8))   # BGR for OpenCV
+            px = lambda X, Y: (int(round((X - b[0]) / (b[2] - b[0]) * S)), int(round((b[3] - Y) / (b[3] - b[1]) * S)))
+            def draw(img):
+                for r in rings:
+                    cv2.polylines(img, [np.array([px(p[0], p[1]) for p in r], np.int32)], True, (0, 212, 255), 2)
+                return img
+            img = draw(rgb.copy())
+            if task == "pool":
+                cv2.circle(img, px(float(x), float(y)), int(S * 0.11), (45, 45, 255), 3)
+            elif len(a) >= 4:
+                cal = {"ndvi_veg": 0.2, "nir_veg_min": 40, **(calib or {})}
+                r_, n_ = a[0].astype(float), a[3].astype(float)
+                veg = ((n_ - r_) / np.maximum(1, n_ + r_) > cal["ndvi_veg"]) & (n_ >= cal["nir_veg_min"])
+                v = rgb.copy(); v[veg] = (0.45 * v[veg] + 0.55 * np.array([60, 220, 40])).astype(np.uint8)
+                img = np.hstack([img, np.full((S, 6, 3), 255, np.uint8), draw(v)])
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if not ok: raise ValueError("encode")
+            con.execute("insert into review_chips (item_id, task, jpeg) values (%s,%s,%s) on conflict (item_id) do nothing", (iid, task, buf.tobytes()))
+            made += 1
+        except Exception:
+            failed += 1
+    return f"{made} review chips rendered" + (f", {failed} unreadable" if failed else "")
 
 
 # ---------------------------------------------------------------- publish (new region): suburb_metrics rows, then the shared update
