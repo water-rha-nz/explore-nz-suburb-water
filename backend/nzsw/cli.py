@@ -143,7 +143,9 @@ def worker(con, log=print, max_jobs=20):
         status, res = run_steps(con, region, steps, job_id=jid, log=log)
         when = None
         if status == "paused_quota":
-            when = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=6)).isoformat()
+            # daily budgets reset at midnight UTC (13:00 NZDT / 12:00 NZST): resume just after, not at an arbitrary time
+            now = dt.datetime.now(dt.timezone.utc)
+            when = (dt.datetime.combine(now.date() + dt.timedelta(days=1), dt.time(0, 2), dt.timezone.utc)).isoformat()
         con.execute("update jobs set status=%s, not_before=%s, reason=%s, counts=%s, finished_at=case when %s in ('done','failed') then now() end where id=%s",
                     (status, when, json.dumps({k: v["status"] for k, v in res.items()}), json.dumps(res), status, jid))
         if status == "queued":
