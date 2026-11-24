@@ -37,9 +37,16 @@ jobs:
         run: supabase db push --remote --dry-run -p "$SUPABASE_DB_PASSWORD"
       - name: Migrations
         run: supabase --yes db push --remote -p "$SUPABASE_DB_PASSWORD"
+      - name: Function secrets
+        env:
+          REVIEW_TOKEN: ${{ secrets.REVIEW_TOKEN }}
+        run: |
+          # single-purpose key of the review-chips function (blind second review); never printed
+          if [ -n "$REVIEW_TOKEN" ]; then supabase secrets set --project-ref "$PROJECT_REF" REVIEW_TOKEN="$REVIEW_TOKEN" >/dev/null && echo "review key set"; fi
       - name: Edge Functions
         run: |
           for d in supabase/functions/*/; do
             f=$(basename "$d"); [ "$f" = "_shared" ] && continue
-            echo "deploying $f"; supabase --yes functions deploy "$f" --use-api --project-ref "$PROJECT_REF"
+            nv=""; [ -f "$d.no-verify-jwt" ] && nv="--no-verify-jwt"    # functions that check their own key
+            echo "deploying $f $nv"; supabase --yes functions deploy "$f" --use-api --project-ref "$PROJECT_REF" $nv
           done

@@ -650,3 +650,14 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - Property-level sheets (section imagery measures, pool candidates) appear only for editors.
 - **Scope** on Export and Validate offers the chosen study ("Study: <name>") alongside one region and all loaded regions.
 - **Budgets per key:** a user's usage is recorded as '<user>:<8-hex key fingerprint>', so a replaced key gets its own daily budget (migration 0029).
+
+## 29. Blind second review (anonymous chips)
+
+- **Chips:** after sampling labelling items, the worker renders each one as a plain JPEG (no georeferencing or metadata) under a random token. Pools show the candidate circled in red within its section (yellow). Gardens show the section beside a copy with vegetation tinted green. Stored in `review_chips` (migration 0033); not readable by app users.
+- **Function `review-chips`:**
+  - opened only by a single-purpose review key: the `REVIEW_TOKEN` secret, set from the GitHub production secret by the deploy workflow;
+  - serves token, task and image only (no coordinates, tile, parcel, suburb, region or tool verdict) and records the reviewer's labels in `review_labels`;
+  - JWT gateway check off (`.no-verify-jwt`), because the function checks its own key;
+  - revoke by deleting the secret.
+- **Validate** shows a "Second reviewer (blind) vs tool" table from aggregate counts (`validation_tally.second`).
+- **Worker:** coverage for capture combining is judged per residential section (section region index, tile GiST index), and the worker session allows 10 min per statement (migration 0032).
