@@ -1,5 +1,5 @@
 // review-chips: blind second review of labelling chips (docs/SPEC.md section 29).
-// Opened only by the single-purpose review key (REVIEW_TOKEN secret, sent as x-review-token). Serves anonymous JPEG chips (random
+// Opened only by the single-purpose review key (sent as x-review-token; checked against the REVIEW_TOKEN secret or a stored hash). Serves anonymous JPEG chips (random
 // token, task and image: no coordinates, tile, parcel, suburb, region or tool verdict) and records the reviewer's labels.
 //   {action: "next", n?, task?, region?}  -> { chips: [{token, task, jpeg_b64}] }
 //   {action: "label", token, label}        -> { result: "ok" | reason }
@@ -12,9 +12,16 @@ const same = (a: string, b: string) => { if (!a || !b || a.length !== b.length) 
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
-  const key = Deno.env.get("REVIEW_TOKEN") ?? "";
-  if (key.length < 32 || !same(req.headers.get("x-review-token") ?? "", key)) return json({ error: "review key required" }, 401);
+  // the key: the REVIEW_TOKEN secret if set, else an active SHA-256 hash in review_keys (only hashes are stored)
   const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const given = req.headers.get("x-review-token") ?? "", env = Deno.env.get("REVIEW_TOKEN") ?? "";
+  let ok = env.length >= 32 && same(given, env);
+  if (!ok && given.length >= 32) {
+    const h = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(given)))).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const { data } = await db.from("review_keys").select("sha256").eq("sha256", h).eq("revoked", false).maybeSingle();
+    ok = !!data;
+  }
+  if (!ok) return json({ error: "review key required" }, 401);
   let b: { action?: string; n?: number; task?: string; region?: string; token?: string; label?: string } = {};
   try { b = await req.json(); } catch { /* empty */ }
   if (b.action === "next") {

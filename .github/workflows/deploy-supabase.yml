@@ -37,13 +37,6 @@ jobs:
         run: supabase db push --remote --dry-run -p "$SUPABASE_DB_PASSWORD"
       - name: Migrations
         run: supabase --yes db push --remote -p "$SUPABASE_DB_PASSWORD"
-      - name: Function secrets
-        continue-on-error: true
-        env:
-          REVIEW_TOKEN: ${{ secrets.REVIEW_TOKEN }}
-        run: |
-          # single-purpose key of the review-chips function (blind second review); never printed
-          if [ -n "$REVIEW_TOKEN" ]; then supabase --yes secrets set --project-ref "$PROJECT_REF" REVIEW_TOKEN="$REVIEW_TOKEN" > "$RUNNER_TEMP/s.log" 2>&1 && echo "review key set" || { sed -E 's/[0-9a-f]{32,}/***/g' "$RUNNER_TEMP/s.log"; exit 1; }; fi
       - name: Edge Functions
         run: |
           for d in supabase/functions/*/; do
