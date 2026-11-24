@@ -49,19 +49,19 @@ const FILLS = [
 const FILL_GROUP = (f) => !f[4] ? "" : f[4].some((k) => k.startsWith("cen_")) ? "Census" : f[4].includes("openmeteo") ? "Climate" : f[4].includes("imagery") ? "Imagery" : "Property (LINZ)";
 const fillOf = (k) => FILLS.find((x) => x[0] === k) || FILLS[0];
 const INFO = {
-  hh_size: "Mean number of usual residents per household. Census household composition by size, for each Statistical Area 2 (SA2), apportioned to suburbs by their share of each SA2's residential sections.",
-  income: "Median household income (total, all sources). SA2 medians from the census, combined per suburb weighted by residential sections; an approximation of the suburb median.",
-  owner: "Share of households whose dwelling is owned or partly owned, or held in a family trust, rather than rented. Census tenure by SA2, apportioned to suburbs by sections.",
-  separate: "Share of households living in a separate (stand-alone) house rather than a joined dwelling such as a unit, townhouse or apartment. Census dwelling type by SA2.",
-  bedrooms: "Mean number of bedrooms per occupied dwelling. Census dwellings by SA2, apportioned to suburbs by sections.",
-  density: "LINZ property titles per km² of suburb area. Counts units and cross-leases separately, so it tracks dwellings better than sections do.",
-  lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded.",
-  garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints.",
-  pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples).",
-  tmean: "Mean air temperature for the suburb's climate grid cell (about 9 km), averaged over 2008–2025, from ERA5 reanalysis via Open-Meteo.",
-  rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo.",
-  et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall.",
-  deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus.",
+  hh_size: "Mean number of usual residents per household. Census household composition by size, for each Statistical Area 2 (SA2), apportioned to suburbs by their share of each SA2's residential sections. Why it matters: more people per household means more water used per home (showers, laundry, toilets), but usually less per person, because fixed uses such as gardens, leaks and appliances are shared.",
+  income: "Median household income (total, all sources). SA2 medians from the census, combined per suburb weighted by residential sections; an approximation of the suburb median. Why it matters: higher-income households tend to use more water outdoors (larger gardens, irrigation, pools, more appliances) and respond less to price, so income helps separate discretionary from essential use.",
+  owner: "Share of households whose dwelling is owned or partly owned, or held in a family trust, rather than rented. Census tenure by SA2, apportioned to suburbs by sections. Why it matters: owner-occupiers are more likely to invest in gardens, irrigation and pools, and also in water-efficient fittings; tenure also affects who sees the water bill, and so how households respond to volumetric charges.",
+  separate: "Share of households living in a separate (stand-alone) house rather than a joined dwelling such as a unit, townhouse or apartment. Census dwelling type by SA2. Why it matters: separate houses usually have their own outdoor space to water, so suburbs with more of them tend to have higher summer (outdoor) demand than suburbs of units and apartments.",
+  bedrooms: "Mean number of bedrooms per occupied dwelling. Census dwellings by SA2, apportioned to suburbs by sections. Why it matters: a proxy for dwelling size and how many people a home can hold; larger homes have more bathrooms and fixtures and tend to use more water.",
+  density: "LINZ property titles per km² of suburb area. Counts units and cross-leases separately, so it tracks dwellings better than sections do. Why it matters: title density shows how intensively the land is subdivided. High density means smaller lots, more units and less garden per dwelling, so lower outdoor use per home but more connections per km of pipe; low density means larger, often irrigated sections and higher peak summer demand per home.",
+  lot: "Median area of a residential section (LINZ primary parcel) in the suburb, in m². Roads, reserves and untitled parcels are excluded. Why it matters: section size is one of the strongest drivers of outdoor water use: bigger sections have more lawn and garden to water and more room for a pool, which shows up as higher summer peaks.",
+  garden: "Median green (vegetated) area per residential section, in m², detected from near-infrared aerial imagery, excluding building footprints. Why it matters: the green, potentially irrigated area per section; together with rainfall and evapotranspiration it indicates how much water gardens need in dry, warm spells.",
+  pool: "Share of residential sections where a swimming pool was detected in the aerial imagery (validated against hand-labelled samples). Why it matters: pools need filling and regular top-ups to replace evaporation, which adds to summer demand and to peak-day loads on the network.",
+  tmean: "Mean air temperature for the suburb's climate grid cell (about 9 km), averaged over 2008–2025, from ERA5 reanalysis via Open-Meteo. Why it matters: warmer places lose more water to evaporation and their residents water gardens more often, so temperature helps explain seasonal and peak demand.",
+  rain: "Mean annual rainfall for the suburb's climate grid cell (about 9 km), averaged over 2008–2025 (the years stored for that cell), from ERA5 reanalysis via Open-Meteo. Why it matters: rainfall reduces the need to water gardens; suburbs with low rainfall in summer rely more on mains water for outdoor use.",
+  et0: "Mean annual reference evapotranspiration (FAO-56 Penman–Monteith): the water a well-watered grass surface would lose to the air. Same grid cell and years as rainfall. Why it matters: evapotranspiration is the drying power of the air; the higher it is, the more water lawns and gardens need to stay green, so it drives outdoor demand.",
+  deficit: "Annual rainfall minus reference evapotranspiration. Negative (red) means more water demand from the air than rain supplies, typically more garden watering; positive (blue) is a surplus. Why it matters: the shortfall of rain against evapotranspiration approximates how much irrigation gardens need; a large deficit points to high outdoor and peak summer demand.",
   "size:none": "Every suburb is drawn at its real size and shape.",
   "size:sections": "Each suburb shrinks about its own centre so that its area is proportional to its number of residential sections. Dense urban suburbs stay large; big, sparsely settled localities shrink. The suburb with the most sections per km² keeps its real size.",
   "size:titles": "As for sections, but proportional to the number of property titles, which also counts units and cross-leased flats: closer to the number of dwellings.",
@@ -71,7 +71,8 @@ const INFO = {
   "stretch:value": "Value: colour is proportional to the actual value across the full range, on a logarithmic scale when the values are right-skewed (all positive, a long tail of high values). Shows true differences, but one outlier can make the rest look alike.",
 };
 const infoBtn = (k) => `<sup><button type="button" data-mvinfo="${k}" aria-expanded="${MAPV.info === k}" aria-label="What does this mean?" title="What does this mean?" style="border:1px solid var(--line);background:${MAPV.info === k ? "var(--accent)" : "var(--panel)"};color:${MAPV.info === k ? "#fff" : "var(--accent)"};border-radius:50%;width:14px;height:14px;padding:0;font:italic 700 9px/12px serif;cursor:pointer;vertical-align:1px">i</button></sup>`;
-const infoBox = (k) => MAPV.info === k && INFO[k] ? `<div class="small" style="margin:3px 0 6px;padding:5px 8px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;white-space:normal">${esc(INFO[k])}</div>` : "";
+const infoBox = (k) => { if (MAPV.info !== k || !INFO[k]) return ""; const [what, why] = INFO[k].split(" Why it matters: ");
+  return `<div class="small" style="margin:3px 0 6px;padding:5px 8px;border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;white-space:normal">${esc(what)}${why ? `<br><b>Why it matters:</b> ${esc(why)}` : ""}</div>`; };
 const SIZES = [["none", "Real area"], ["sections", "Sections", (s) => s.sections, ["linz_parcels"]], ["titles", "Titles", (s) => s.titles, ["linz_titles"]], ["pools", "Pools", (s) => s.pools, ["imagery"]]];
 const AXIS_COL = ["#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#e6ab02"];
 const MAKEUP = [["Building", "#8d7b6f", (s) => +s.Footprint || 0], ["Garden", "#4daf4a", (s) => +s.GardSize || 0], ["Pool", "#2b83ba", (s) => (+s.PercPool || 0) / 100 * (+s.PoolArea || 0)],
@@ -328,7 +329,7 @@ function legendHTML() {
   }
   h += `${hd(MAPV.layout === "tiles" ? "Tile size" : "Scale suburbs by (cartogram)")}${MAPV.layout === "tiles" ? infoBtn("size:tiles") + infoBox("size:tiles") : ""}
     ${SIZES.map(([k, l, , src]) => `<label style="display:block"><input type="radio" name="mv-size" data-mvsize="${k}" ${k === MAPV.sizeBy ? "checked" : ""}> ${k === "none" ? (MAPV.layout === "tiles" ? "Equal tiles" : "Real area") : "Area ∝ " + l.toLowerCase()}${src ? srcRef(src) : ""}${infoBtn("size:" + k)}</label>${infoBox("size:" + k)}`).join("")}
-    ${hd("Symbols")}<p class="muted" style="margin:0 0 3px">Merge with nearby suburbs as you zoom out; hover to enlarge, click for the summary.</p>
+    ${hd("Symbols")}<p class="muted" style="margin:0 0 3px">Symbols that would overlap merge into one; hover to enlarge, click for the summary.</p>
     ${Object.entries(SYM).map(([k, [l, c]]) => `<label style="display:block"><input type="checkbox" data-mvpres="${k}" ${MAPV.pres.has(k) ? "checked" : ""}> ${symIcon(k)} ${l}${srcRef(k === "pools" || k === "green" ? ["imagery", "linz_parcels"] : k === "radar" ? ["cen_hou020", "linz_titles", "linz_parcels"] : ["openmeteo"])} <span class="muted">${{ pools: "size ∝ pools", green: "size ∝ green area", rain: "fill ∝ rainfall", temp: "fill ∝ temperature", et0: "more wisps = more ET₀", radar: "wedges: spatial statistics" }[k]}</span></label>`).join("")}
     <label style="display:block;margin-top:4px"><input type="checkbox" id="mv-labels" ${MAPV.labels ? "checked" : ""}> Suburb names${srcRef("linz_suburbs")}</label>
     <div id="mv-note" class="muted" style="margin-top:6px">${esc(MAPV.note)}</div>`;
@@ -349,11 +350,13 @@ function aggregate(list) {
 }
 let SYMSTYLE = false;
 function symStyle() { if (SYMSTYLE || !document.head || !document.createElement) return; SYMSTYLE = true; const st = document.createElement("style");
-  st.textContent = ".mv-sym{transform-box:fill-box;transform-origin:center;transition:transform .15s ease;cursor:pointer}.mv-sym:hover{transform:scale(2.2)}#mv-sym g.mv-sym:hover{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}";
+  st.textContent = ".mv-sym{transform-box:fill-box;transform-origin:center;transition:transform .15s ease;cursor:pointer}.mv-sym:hover{transform:scale(1.6)}#mv-sym g.mv-sym:hover{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35))}";
   document.head.appendChild(st); }
 const tOf = (key, v) => { const sc = scaleFor(fillOf(key)); return sc ? sc.t(v) : null; };
-function symbolSVG(x, y, a, px, ids, maxPools, maxGreen) {
-  const P = MAPV.pres, R = 13 * px, parts = [];
+const SYM_SCALE = 2;                     // symbol size relative to the original design (13 px radar radius)
+const SYM_W = 62 * SYM_SCALE, SYM_H = 34 * SYM_SCALE;   // footprint on screen (px): symbols closer than this would overlap
+function symbolSVG(x, y, a, px0, ids, maxPools, maxGreen) {
+  const px = px0 * SYM_SCALE, P = MAPV.pres, R = 13 * px, parts = [];
   const axes = MAPV.axes.map(fillOf).filter((f) => f[3]);
   if (P.has("radar") && axes.length) {
     parts.push(`<circle cx="${x}" cy="${-y}" r="${R}" fill="var(--panel)" fill-opacity=".9" stroke="var(--ink)" stroke-opacity=".35" stroke-width="${0.8 * px}"/>`);
@@ -386,9 +389,9 @@ const symIcon = (k) => `<svg width="16" height="16" viewBox="0 0 16 16" aria-hid
 }[k] || ""}</svg>`;
 // screen-space grouping: suburbs whose centres fall within ~60 px merge (largest first)
 function clusters(subs, px) {
-  const out = [], R = 60 * px;
+  const out = [], W = SYM_W * px, H = SYM_H * px;   // merge when the symbols' boxes would overlap
   for (const o of subs.slice().sort((a, b) => weightOf(b.s) - weightOf(a.s))) { const [x, y] = centroid(o.s);
-    const c = out.find((k) => Math.hypot(k.x - x, k.y - y) < R);
+    const c = out.find((k) => Math.abs(k.x - x) < W && Math.abs(k.y - y) < H);
     if (c) { const w0 = c.w, w1 = weightOf(o.s); c.x = (c.x * w0 + x * w1) / (w0 + w1); c.y = (c.y * w0 + y * w1) / (w0 + w1); c.w += w1; c.subs.push(o.s); }
     else out.push({ x, y, w: weightOf(o.s), subs: [o.s] }); }
   return out;
@@ -404,7 +407,7 @@ function symbolLayer(box, px, level) {
   if (!MAPV.pres.size || MAPV.layout === "tiles") return "";
   symStyle();
   const subs = allSubs().filter(({ s }) => inView(bboxOf(s), box, 0.05));
-  const groups = level === "groups" ? clusters(subs, px) : subs.map(({ s }) => { const [x, y] = centroid(s); return { x, y, subs: [s] }; });
+  const groups = clusters(subs, px);
   const aggs = groups.map((c) => aggregate(c.subs));
   const maxPools = Math.max(1, ...aggs.map((a) => a.pools)), maxGreen = Math.max(1, ...aggs.map((a) => a.green));
   if (level === "cells") { const keep = MAPV.pres; MAPV.pres = new Set([...keep].filter((k) => k !== "pools" && k !== "green")); const h = groups.map((c, i) => symbolSVG(c.x, c.y, aggs[i], px, c.subs.map((s) => s.linz_id), maxPools, maxGreen)).join(""); MAPV.pres = keep; return h; }

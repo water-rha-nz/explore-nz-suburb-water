@@ -21,6 +21,10 @@ REPL = [
     ('<tr><td>Status</td><td><span class="tag ok">published</span></td></tr>', '<tr><td>Status</td><td>${g.status === "published" ? \'<span class="tag ok">published</span>\' : `<span class="tag warn">${esc(g.status || "draft")}</span>`}</td></tr>'),
     ('app: "explore-nz-suburb-water demo"', 'app: "NZ Suburb Water Profiles (live)"'),
     ('<span class="brand">Explore NZ Suburb Water</span>', '<span class="brand">NZ Suburb Water Profiles</span>'),
+    # regions are loaded on demand: keep a region that is known (index) but not loaded yet
+    ('  if (!D.regions[region]) region = Object.keys(D.regions)[0];\n  if (!V[stage]) stage = "region";', '  if (!D.regions[region] && !(D.index || []).some((r) => r.id === region)) region = Object.keys(D.regions)[0] || ((D.index || [])[0] || {}).id;\n  if (!V[stage]) stage = "region";'),
+    ('  $("#region").innerHTML = Object.entries(D.regions).map(([k, g]) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("");',
+     '  $("#region").innerHTML = (D.index || Object.entries(D.regions).map(([id, g]) => ({ id, name: g.label }))).map((r) => `<option value="${r.id}" ${r.id === region ? "selected" : ""}>${esc(r.name)}${D.regions[r.id] ? "" : " (not loaded)"}</option>`).join("");'),
 ]
 for a, b in REPL:
     assert a in s, a[:70]

@@ -160,7 +160,7 @@ const CENSUS_YEARS = ["2013", "2018", "2023"], CLIMATE_FROM = "2013-01-01";
 const latestDay = () => new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);   // the archive lags ~2 days
 // each TA (and each region already in the database, key "r:<region id>") has its own timeline; "_all" is only a template
 // that "apply to all" copies to every selected TA
-const tlOf = (c) => c.startsWith("r:") ? ((D.regions || {})[c.slice(2)] || {}).timeline || {} : BATCH.tl[c] || {};
+const tlOf = (c) => c.startsWith("r:") ? (((D.index || []).find((r) => r.id === c.slice(2)) || (D.regions || {})[c.slice(2)] || {}).timeline || {}) : BATCH.tl[c] || {};
 const tlDays = (c) => { const t = tlOf(c), a = new Date(t.climate_start || CLIMATE_FROM), b = new Date(t.climate_end && t.climate_end < latestDay() ? t.climate_end : latestDay()); return Math.max(0, (b - a) / 864e5 + 1); };
 // dates typed or pasted: 2012-01-01 (also 2012/01/01, 2012.1.1, or NZ-style 1/1/2012); "" = default
 function parseDay(v) {
@@ -184,9 +184,9 @@ const tlFor = (c) => tlClean(tlOf(c));
 // store a timeline: a TA's in this browser (and its configuration); a region's straight to the database
 async function setTl(c, o) {
   if (!c.startsWith("r:")) { BATCH.tl[c] = o; saveSel(); return drawBatch(); }
-  const id = c.slice(2), g = (D.regions || {})[id]; if (!g) return;
+  const id = c.slice(2), g = (D.index || []).find((r) => r.id === id) || (D.regions || {})[id]; if (!g) return;
   const clean = tlClean(o), prev = g.timeline; g.timeline = clean;
-  try { await q(sb.from("regions").update({ timeline: clean }).eq("id", id)); toastMsg(`Timeline saved for ${g.label}: the next climate/census job uses it`); }
+  try { await q(sb.from("regions").update({ timeline: clean }).eq("id", id)); if ((D.regions || {})[id]) D.regions[id].timeline = clean; toastMsg(`Timeline saved for ${g.label || g.name}: the next climate/census job uses it`); }
   catch (err) { g.timeline = prev; toastMsg("Not saved: " + err.message); }
   const el = $("#rj-tl"); if (el) el.innerHTML = tlEditor(c);
 }
@@ -704,12 +704,13 @@ function loadHTML() {
         <td class="l">${notReady.includes(c) ? '<span class="tag warn">validate first</span>' : blocked.includes(c) ? '<span class="tag bad">nothing to load / too large</span>' : '<span class="tag ok">ready</span>'}</td></tr>`; }).join("")}</tbody></table>
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
     ${can("editor") ? `<button class="btn primary" id="batch-queue" type="button" ${sel.length && !notReady.length && !blocked.length ? "" : "disabled"}>Queue batch (${sel.length} region${sel.length === 1 ? "" : "s"})</button>` : lock("editor", "Queuing batches")}</div>
-  ${can("editor") ? progressHTML() + regionJobsHTML() : ""}`;
+  ${can("editor") ? progressHTML() + regionJobsHTML() : ""}
+  <div style="margin-top:20px">${detailedOverviewHTML()}</div>`;
 }
 // moved from 1 Region: refresh jobs for a region already in the database, job progress, and download rates / usage
 function regionJobsHTML() {
   setTimeout(() => { if (typeof refreshJobs === "function") refreshJobs().catch(() => {}); }, 0);
-  const regs = Object.entries(D.regions || {});
+  const regs = (D.index || []).map((r) => [r.id, { label: r.name }]);
   return `<h2>Refresh a region in the database</h2><div class="grid g2"><div class="card">
     ${regs.length ? `<p class="small"><label>Region <select id="rj-region">${regs.map(([k, g]) => `<option value="${esc(k)}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</select></label></p>
     <div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
@@ -907,9 +908,9 @@ renderHeader = function () {
   if (w) { w.hidden = lab.hidden;
     w.innerHTML = `<span class="muted">Study</span> <select id="study" aria-label="Study (saved configuration)"><option value="">All regions</option>${(STUDY.list || []).map((c) => `<option value="${c.id}" ${cur && cur.id === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>`; }
   if (cur && D && D.regions) {
-    const keys = Object.entries(D.regions).filter(([, g]) => (cur.ta_codes || []).includes(g.ta_code)).map(([k]) => k);
+    const keys = (D.index || []).filter((r) => (cur.ta_codes || []).includes(r.ta_code)).map((r) => r.id);
     if (keys.length) { if (!keys.includes(region)) { region = keys[0]; store.set("region", region); }
-      sel.innerHTML = keys.map((k) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(D.regions[k].label)}</option>`).join(""); }
+      sel.innerHTML = keys.map((k) => `<option value="${k}" ${k === region ? "selected" : ""}>${esc(indexOf(k).name || k)}${D.regions[k] ? "" : " (not loaded)"}</option>`).join(""); }
   }
   lab.style.display = REGION_STAGES.has(stage) ? "" : "none";
 };

@@ -84,15 +84,14 @@ async function loadRegion(r) {
     climate_cells, validation: (vs[0] || {}).stats || st.validation, validation_tiles: st.validation_tiles || {}, validation_items: st.validation_items || [],
     source_plan: st.source_plan, area_check: st.area_check };
 }
-async function loadAll(progress) {
+// sign-in loads only an index of the regions (one row each); a region's suburbs, census and climate load when needed
+async function loadAll() {
   const regions = await q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr,timeline").order("id"));
   const rates = await q(sb.from("water_rates").select("prvdr,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,providers(name)"));
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
-  const cen = await q(sb.rpc("region_centroids"));
-  let i = 0;
-  for (const r of regions) { if (progress) progress(++i, regions.length, r.name); const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = cen[r.id] || g.lonlat; d.regions[r.id] = g; } }   // drafts without data yet are listed on the Batch stage
+  d.cen = await q(sb.rpc("region_centroids")); d.index = regions; d.empty = {};
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
@@ -180,10 +179,59 @@ document.addEventListener("click", async (e) => {
 const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
+const LOADING = {};
+// load one region's detail (once); regions without prepared data are remembered as empty
+async function ensureRegion(id, progress) {
+  if (!id || D.regions[id] || D.empty[id]) return D.regions[id];
+  if (LOADING[id]) return LOADING[id];
+  const r = (D.index || []).find((x) => x.id === id); if (!r) return null;
+  return (LOADING[id] = (async () => { if (progress) progress(r);
+    try { const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = (D.cen || {})[r.id] || g.lonlat; D.regions[id] = g; rememberLoaded(); } else D.empty[id] = true; }
+    finally { delete LOADING[id]; } return D.regions[id]; })());
+}
+async function ensureRegions(ids, progress) { let i = 0; for (const id of ids) { if (progress) progress(++i, ids.length, ((D.index || []).find((x) => x.id === id) || {}).name || id); await ensureRegion(id); } }
+const rememberLoaded = () => store.set("loaded-regions", JSON.stringify(Object.keys(D.regions)));
+const indexOf = (id) => (D.index || []).find((x) => x.id === id) || {};
+// regions known to the study in the header (or all), from the index
+const studyIndex = () => { const st = typeof studyOf === "function" ? studyOf() : null; return (D.index || []).filter((r) => !st || (st.ta_codes || []).includes(r.ta_code)); };
+// stages that work on one region load it first
+for (const id of ["imagery", "validate", "context", "explore", "export"]) { const f = V[id]; if (!f) continue;
+  V[id] = (...a) => { if (D.regions[region]) return f(...a);
+    if (!region || D.empty[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${region && D.empty[region] ? `${esc(indexOf(region).name || region)} has no prepared data yet.` : "No region chosen."} Choose a region with data in the header, or load one on <b>1 · Overview</b>.</p>`;
+    ensureRegion(region).then(() => render()).catch((e) => toastMsg("Region not loaded: " + e.message));
+    return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted">Suburbs, census, climate and imagery results</p></section>`; }; }
+{ const fx = V.explore; if (fx) V.explore = (...a) => { const inner = fx(...a); return D.regions[region] ? detailedOverviewHTML() + '<hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">' + inner : inner; }; }
+// 1 Overview: a light landing page from the index; detail loads only for the regions you choose
 V.region = () => {
+  const rows = studyIndex(), st = typeof studyOf === "function" ? studyOf() : null, loaded = rows.filter((r) => D.regions[r.id]), last = JSON.parse(store.get("loaded-regions", "[]")).filter((id) => !D.regions[id] && rows.some((r) => r.id === id));
+  const tag = (r) => D.regions[r.id] ? '<span class="tag ok">loaded</span>' : D.empty[r.id] ? '<span class="tag">no data yet</span>' : LOADING[r.id] ? '<span class="tag warn">loading…</span>' : "";
+  return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ` : ""}${rows.length} region${rows.length === 1 ? "" : "s"} in the database${rows.length ? `, ${rows.filter((r) => r.status === "published").length} published` : ""}. Nothing is loaded until you choose: load the regions you want, then explore them on <b>3 · Load</b> or <b>Explore</b> (data map, comparisons and sources).</p>
+    ${rows.length ? `<div class="row" style="gap:8px;margin:8px 0">${rows.some((r) => !D.regions[r.id] && !D.empty[r.id]) ? `<button class="btn primary" type="button" id="ov-load-all">Load ${st ? "this study's" : "all"} regions (${rows.filter((r) => !D.regions[r.id] && !D.empty[r.id]).length})</button>` : ""}
+      ${last.length ? `<button class="btn" type="button" id="ov-load-last">Load last session's regions (${last.length})</button>` : ""}
+      ${loaded.length ? `<button class="btn" type="button" data-goto-stage="explore">Explore loaded regions (${loaded.length}) →</button>` : ""}</div>
+    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l">${esc(r.prvdr || "–")}</td>
+      <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
+      <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
+};
+document.addEventListener("click", async (e) => {
+  const t = e.target, b = t.closest && t.closest("[data-ov-load],#ov-load-all,#ov-load-last,[data-goto-stage]"); if (!b) return;
+  if (b.dataset.gotoStage) { stage = b.dataset.gotoStage; store.set("stage", stage); render(); return scrollTo(0, 0); }
+  const ids = b.dataset.ovLoad ? [b.dataset.ovLoad] : b.id === "ov-load-last" ? JSON.parse(store.get("loaded-regions", "[]")) : studyIndex().map((r) => r.id).filter((id) => !D.regions[id] && !D.empty[id]);
+  b.disabled = true;
+  try { await ensureRegions(ids, (i, n, name) => { b.textContent = `Loading ${i} of ${n}: ${name}…`; }); if (b.dataset.ovLoad) region = b.dataset.ovLoad; }
+  catch (err) { toastMsg("Not loaded: " + err.message); }
+  render();
+});
+// the detailed overview (data map, regions table, comparisons, sources): shown on 3 Load and Explore, for the loaded regions
+function regionPicker() {
+  const rows = studyIndex(); if (!rows.length) return "";
+  return `<div class="row small" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px"><span class="muted">Regions on the map:</span>${rows.map((r) => D.regions[r.id] ? `<span class="tag ok">${esc(r.name)}</span>` : D.empty[r.id] ? `<span class="tag" title="No prepared data yet">${esc(r.name)}</span>` : `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:0 8px">+ ${esc(r.name)}</button>`).join("")}</div>`;
+}
+function detailedOverviewHTML() {
   setTimeout(() => { drawDataMap().then(() => { if (MAPV.sel) suburbInfo(MAPV.sel, MAPV.selSet); }).catch((e) => { const m = $("#mv-map"); if (m) m.innerHTML = `<p class="small muted">Map unavailable: ${esc(e.message)}</p>`; }); }, 0);
   const regs = studyRegions(), st = studyOf();
-  if (!regs.length) return `<h1>1 · Overview</h1><p class="lead">${st ? `The study <b>${esc(st.name)}</b> has no prepared data in the database yet. Its ${(st.ta_codes || []).length} TA(s) are outlined on the map; prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.` : "No prepared data in the database yet. Prepare regions in <b>2 · Configure</b> and <b>3 · Load</b>."}</p>
+  if (!regs.length) return `<h2>Data overview</h2>${regionPicker()}<p class="lead">${st ? `No region of the study <b>${esc(st.name)}</b> is loaded yet.` : "No region is loaded yet."} Load regions above (or on <b>1 · Overview</b>) to see them on the map.</p>
     <div style="margin-top:12px">${dataMapHTML()}</div>${sourcesHTML()}`;
   const g = (regs.find(([k]) => k === region) || regs[0])[1];
   const yrs = (x) => [...new Set(x.suburbs.flatMap((s) => Object.keys(s.census || {})))].sort().join(", ") || "–";
@@ -193,7 +241,7 @@ V.region = () => {
       imagery: x.capture_id || "–", pools, garden: sub.some((s) => s.GardSize != null), census: yrs(x), climate: clim(x), status: x.status || "–" }; };
   const rows = regs.map(([k, x]) => row(k, x)), tot = (f) => rows.reduce((t, r) => t + r[f], 0);
   const cell = (v) => typeof v === "number" ? fmt(v) : esc(v);
-  return `<h1>1 · Overview</h1><p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ${rows.length} of its ${(st.ta_codes || []).length} TA(s) have prepared data in the database.` : `What's already in the database: ${rows.length} region${rows.length === 1 ? "" : "s"} with prepared data.`} Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
+  return `<h2>Data overview</h2>${regionPicker()}<p class="lead">${st ? `Study <b>${esc(st.name)}</b>: ${rows.length} loaded region${rows.length === 1 ? "" : "s"}.` : `${rows.length} loaded region${rows.length === 1 ? "" : "s"}.`} Click a region on the map or in the table to explore it in the later stages. To prepare more, use <b>2 · Configure</b>; jobs and download rates are on <b>3 · Load</b>.</p>
   <div class="kpis">
     <div class="kpi"><span>Regions</span><b>${fmt(rows.length)}</b></div><div class="kpi"><span>LINZ suburbs (with housing)</span><b>${fmt(tot("suburbs"))}</b><span>${fmt(tot("housing"))}</span></div>
     <div class="kpi"><span>Residential sections</span><b>${fmt(tot("sections"))}</b></div><div class="kpi"><span>SA2 areas</span><b>${fmt(tot("sa2"))}</b></div>
@@ -323,9 +371,9 @@ function loadingView(step, detail) {
     PROFILE = await q(sb.from("profiles").select("email,role,status").eq("id", session.user.id).maybeSingle());
     if (!PROFILE || PROFILE.status !== "active") return gate("pending");
     user = { email: PROFILE.email, role: PROFILE.role };
-    loadingView("Loading data…", "Regions, suburbs, census and climate");
-    D = await loadAll((i, n, name) => loadingView("Loading data…", `Region ${i} of ${n}: ${name}`));
-    if (!D.regions[region]) region = Object.keys(D.regions)[0];
+    loadingView("Loading the region index…");
+    D = await loadAll();
+    if (!D.index.some((r) => r.id === region)) region = (D.index[0] || {}).id;
     $("#foot").innerHTML = `NZ Suburb Water Profiles · data from LINZ, Stats NZ and Open-Meteo (CC BY 4.0), see <a href="${REPO}/blob/main/ATTRIBUTION.md">ATTRIBUTION.md</a> · <a href="${REPO}/blob/main/docs/SPEC.md">specification</a> · Water consumption isn't handled here.`;
     render();
   } catch (err) { gate("error", err.message); }
