@@ -27,7 +27,7 @@ const jget = (k, d) => { try { return JSON.parse(store.get(k, JSON.stringify(d))
 const SPATIAL = ["owner", "separate", "bedrooms", "density", "lot"];
 const MAPV = { fill: store.get("map-fill", "hh_size"), year: store.get("map-year", ""), layout: store.get("map-layout", "geo"), glyph: store.get("map-glyph", "colour"),
   axes: (() => { const a = jget("map-axes", SPATIAL).filter((k) => SPATIAL.includes(k)); return a.length ? a : SPATIAL.slice(); })(), sizeBy: store.get("map-size", "none"), pres: new Set(jget("map-pres", ["pools", "green", "rain", "temp", "et0", "radar"])),
-  labels: store.get("map-labels", "1") === "1", info: null, dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
+  labels: store.get("map-labels", "1") === "1", info: null, tiles: {}, imgs: {}, dom: jget("map-dom", {}), stretch: store.get("map-stretch", "rank"), items: {}, urls: {}, presence: {}, sel: null, cent: {}, bb: {}, prof: {}, grid: null, raf: 0, fetchT: 0, presT: 0, note: "" };
 const cenOf = (s) => { const c = s.census || {}; const y = MAPV.year && c[MAPV.year] ? MAPV.year : Object.keys(c).sort().pop(); return y ? c[y] : {}; };
 // suburb statistics: [key, label, digits, value(s), sources, diverging]
 const FILLS = [
@@ -238,29 +238,74 @@ function glyphs(box, px) {
   }
   return h;
 }
-// where pools and green space are: aggregated dots (grid step snapped to round distances), single items at full zoom
+// where pools and green space are, by zoom: dots per grid cell (grid step snapped to round distances) -> one dot per section
+// (editors) -> the imagery itself under section rings (closest zoom). A finer level only replaces a coarser one once its data has
+// arrived, so dots never vanish while zooming.
+const IMG_ZOOM = 700;   // view width (m) at which the aerial imagery is drawn
 function presenceLayer(svg, box, px) {
   if (!MAPV.pres.size) return "";
-  let h = "";
   if (box[2] <= 2500) {
-    const it = MAPV.items[box.map((v) => Math.round(v / 250)).join(",")]; if (!it) return "";
-    if (MAPV.pres.has("green")) for (const p of it.greens || []) { const r = Math.max(Math.sqrt((+p.veg || 0) / Math.PI), 1.2 * px);
-      h += `<circle cx="${p.x}" cy="${-p.y}" r="${r}" fill="${PRES.green[1]}" fill-opacity=".45" stroke="${PRES.green[1]}" stroke-width="${0.6 * px}"><title>Garden ≈ ${fmt(p.veg)} m²</title></circle>`; }
-    if (MAPV.pres.has("pools")) for (const p of it.pools || []) { const r = Math.max(Math.sqrt((+p.area || 20) / Math.PI), 3 * px);
-      h += `<circle cx="${p.x}" cy="${-p.y}" r="${r}" fill="${PRES.pools[1]}" stroke="#fff" stroke-width="${1.2 * px}"><title>Detected pool ≈ ${fmt(p.area)} m²</title></circle>`; }
-    return h;
+    const it = MAPV.items[box.map((v) => Math.round(v / 250)).join(",")];
+    if (it && (it.pools.length || (it.greens || []).length)) return itemDots(it, px, box[2] <= IMG_ZOOM);
+    return presenceCells(svg, box, px, 100);   // not loaded yet, or single items not visible to this account: 100 m cells
   }
-  const step = Math.max(100, niceStep(30 * px)), regs = studyRegions().filter(([, g]) => g.suburbs.some((s) => Array.isArray(s.geom) && inView(bboxOf(s), box, 0)));
+  return presenceCells(svg, box, px, Math.max(100, niceStep(30 * px)));
+}
+function itemDots(it, px, rings) {
+  let h = "";
+  if (MAPV.pres.has("green")) for (const p of it.greens || []) { const r = Math.max(Math.sqrt((+p.veg || 0) / Math.PI), 2 * px);
+    h += `<circle cx="${p.x}" cy="${-p.y}" r="${r}" fill="${rings ? "none" : PRES.green[1]}" fill-opacity=".45" stroke="${PRES.green[1]}" stroke-width="${(rings ? 2 : 0.6) * px}"><title>Garden ≈ ${fmt(p.veg)} m²</title></circle>`; }
+  if (MAPV.pres.has("pools")) for (const p of it.pools || []) { const r = Math.max(Math.sqrt((+p.area || 20) / Math.PI), 4 * px);
+    h += `<circle cx="${p.x}" cy="${-p.y}" r="${rings ? r + 3 * px : r}" fill="${rings ? "none" : PRES.pools[1]}" stroke="${rings ? PRES.pools[1] : "#fff"}" stroke-width="${(rings ? 2.5 : 1.2) * px}"><title>Detected pool ≈ ${fmt(p.area)} m²</title></circle>`; }
+  return h;
+}
+function presenceCells(svg, box, px, step) {
+  const regs = studyRegions().filter(([, g]) => g.suburbs.some((s) => Array.isArray(s.geom) && inView(bboxOf(s), box, 0)));
   const cells = [];
-  for (const [k] of regs) { const P = MAPV.presence[k + "|" + step];
-    if (!P) { clearTimeout(MAPV.presT); MAPV.presT = setTimeout(() => fetchPresence(svg, regs.map((r) => r[0]), step), 150); continue; }
-    for (const c of P) if (c.x > box[0] - step && c.x < box[0] + box[2] + step && -c.y > box[1] - step && -c.y < box[1] + box[3] + step) cells.push(c); }
+  for (const [k] of regs) {
+    let P = MAPV.presence[k + "|" + step], st = step;
+    if (!P) { clearTimeout(MAPV.presT); MAPV.presT = setTimeout(() => fetchPresence(svg, regs.map((r) => r[0]), step), 150);
+      // meanwhile keep the nearest grid already loaded for the region
+      const alt = Object.keys(MAPV.presence).filter((x) => x.startsWith(k + "|") && (MAPV.presence[x] || []).length).map((x) => +x.split("|")[1])
+        .sort((a, b) => Math.abs(Math.log(a / step)) - Math.abs(Math.log(b / step)))[0];
+      if (!alt) continue; P = MAPV.presence[k + "|" + alt]; st = alt; }
+    for (const c of P) if (c.x > box[0] - st && c.x < box[0] + box[2] + st && -c.y > box[1] - st && -c.y < box[1] + box[3] + st) cells.push({ ...c, _s: st }); }
   if (!cells.length) return "";
-  const mg = Math.max(1, ...cells.map((c) => +c.green || 0)), mp = Math.max(1, ...cells.map((c) => +c.pools || 0)), R = step * 0.5;
-  if (MAPV.pres.has("green")) for (const c of cells) if (+c.green > 0) h += `<circle cx="${c.x}" cy="${-c.y}" r="${Math.max(R * Math.sqrt(c.green / mg), 1.5 * px)}" fill="${PRES.green[1]}" fill-opacity=".5"><title>≈ ${fmt(c.green / 1e4, 2)} ha of garden across ${fmt(c.n)} sections</title></circle>`;
-  if (MAPV.pres.has("pools")) for (const c of cells) if (+c.pools > 0) h += `<circle cx="${c.x}" cy="${-c.y}" r="${Math.max(R * 0.8 * Math.sqrt(c.pools / mp), 2.2 * px)}" fill="${PRES.pools[1]}" stroke="#fff" stroke-width="${1 * px}"><title>${fmt(c.pools)} pool${c.pools === 1 ? "" : "s"} (≈ ${fmt(c.pool_m2)} m²) across ${fmt(c.n)} sections</title></circle>`;
+  const mg = Math.max(1, ...cells.map((c) => +c.green || 0)), mp = Math.max(1, ...cells.map((c) => +c.pools || 0));
+  let h = "";
+  if (MAPV.pres.has("green")) for (const c of cells) if (+c.green > 0) h += `<circle cx="${c.x}" cy="${-c.y}" r="${Math.max(c._s * 0.5 * Math.sqrt(c.green / mg), 2 * px)}" fill="${PRES.green[1]}" fill-opacity=".5"><title>≈ ${fmt(c.green / 1e4, 2)} ha of garden across ${fmt(c.n)} sections</title></circle>`;
+  if (MAPV.pres.has("pools")) for (const c of cells) if (+c.pools > 0) h += `<circle cx="${c.x}" cy="${-c.y}" r="${Math.max(c._s * 0.4 * Math.sqrt(c.pools / mp), 3 * px)}" fill="${PRES.pools[1]}" stroke="#fff" stroke-width="${1 * px}"><title>${fmt(c.pools)} pool${c.pools === 1 ? "" : "s"} (≈ ${fmt(c.pool_m2)} m²) across ${fmt(c.n)} sections</title></circle>`;
   MAPV.presStep = step;
   return h;
+}
+// the aerial imagery of the view (closest zoom), cut in the browser from the region's public LINZ tiles
+const SHEET_ROWS = "AS AT AU AV AW AX AY AZ BA BB BC BD BE BF BG BH BJ BK BL BM BN BP BQ BR BS BT BU BV BW BX BY BZ CA CB CC CD CE CF CG CH CJ CK".split(" ");
+function tileBoxJS(name) {   // same grid as backend/nzsw/prepare.py tile_box
+  const m = /^([A-Z]{2})(\d{2})_(\d+)_(\d+)$/.exec(name || ""); if (!m) return null; const r = SHEET_ROWS.indexOf(m[1]); if (r < 0) return null;
+  const c = +m[2], sc = +m[3], idx = m[4], hh = idx.length >> 1, rr = +idx.slice(0, hh), cc = +idx.slice(hh), w = 0.48 * sc, ht = 0.72 * sc;
+  const x0 = 988000 + c * 24000 + (cc - 1) * w, y1 = 6234000 - r * 36000 - (rr - 1) * ht; return [x0, y1 - ht, x0 + w, y1];
+}
+async function regionTiles(k) {
+  if (MAPV.tiles[k]) return MAPV.tiles[k];
+  const out = []; for (let i = 0; ; i += 1000) { const p = await q(sb.from("imagery_tiles").select("tile_id,cog_url").eq("region_id", k).range(i, i + 999)); out.push(...p); if (p.length < 1000) break; }
+  return (MAPV.tiles[k] = out.map((t) => ({ ...t, bb: tileBoxJS(t.tile_id) })).filter((t) => t.bb));
+}
+const imgKey = (box) => box.map((v) => Math.round(v / 40)).join(",");
+async function fetchImagery(svg, box, key) {
+  const bb = [box[0], -(box[1] + box[3]), box[0] + box[2], -box[1]];
+  try {
+    const regs = studyRegions().filter(([, g]) => g.suburbs.some((s) => Array.isArray(s.geom) && inView(bboxOf(s), box, 0))).map(([k]) => k);
+    const urls = [];
+    for (const k of regs) for (const t of await regionTiles(k)) if (t.bb[0] < bb[2] && t.bb[2] > bb[0] && t.bb[1] < bb[3] && t.bb[3] > bb[1] && !urls.includes(t.cog_url)) urls.push(t.cog_url);
+    if (!urls.length) MAPV.imgs[key] = { none: true };
+    else {
+      const W = Math.min(1400, Math.round((svg.getBoundingClientRect().width || 800) * Math.min(2, window.devicePixelRatio || 1))), H = Math.max(1, Math.round(W * box[3] / box[2]));
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
+      for (const u of urls.slice(0, 6)) await cogDraw(u, bb, W, H, ctx);
+      MAPV.imgs[key] = { url: cv.toDataURL("image/jpeg", 0.85), bb };
+    }
+  } catch (e) { MAPV.imgs[key] = { none: true, err: e.message }; }
+  if (BATCH.view && BATCH.view.id === "ovw" && imgKey(BATCH.view.box) === key) dynLayers(svg, BATCH.view.box);
 }
 async function fetchPresence(svg, regs, step) {
   for (const k of regs) { const key = k + "|" + step; if (MAPV.presence[key]) continue;
@@ -280,11 +325,18 @@ function dynLayers(svg, box) {
       MAPV.note = (it.pools.length + (it.greens || []).length + it.chips.length) ? `In view: ${fmt(it.pools.length)} pools, ${fmt((it.greens || []).length)} gardens, ${fmt(it.chips.length)} imagery chips.` : can("editor") ? "No pools, gardens or imagery chips in view." : "Single pools and gardens are visible to editors; zoom out for grouped dots.";
     } else { MAPV.note = "Loading pools, gardens and imagery in view…"; clearTimeout(MAPV.fetchT); MAPV.fetchT = setTimeout(() => fetchItems(svg, box, key), 250); }
   } else MAPV.note = !MAPV.pres.size ? "" : level === "cells" ? `Pools and green space grouped per ${fmt(Math.max(100, niceStep(30 * px)))} m cell; one symbol per suburb.` : "Nearby suburbs merged into one symbol; hover to enlarge, click for the summary.";
-  gP.innerHTML = chips + (level === "groups" ? "" : `<g style="pointer-events:none">${presenceLayer(svg, box, px)}</g>`) + (level === "items" ? "" : `<g id="mv-sym" style="pointer-events:auto">${symbolLayer(box, px, level)}</g>`);
+  let photo = "";
+  if (box[2] <= IMG_ZOOM) { const k = imgKey(box), im = MAPV.imgs[k];
+    if (!im) { clearTimeout(MAPV.imgT); MAPV.imgT = setTimeout(() => fetchImagery(svg, box, k), 300); MAPV.note = "Loading aerial imagery (LINZ, public)…"; }
+    else if (im.url) { photo = `<image href="${im.url}" x="${im.bb[0]}" y="${-im.bb[3]}" width="${im.bb[2] - im.bb[0]}" height="${im.bb[3] - im.bb[1]}" preserveAspectRatio="none" style="pointer-events:none"/>`; MAPV.note = "Aerial imagery: LINZ RGB+NIR (public). " + (MAPV.note || ""); }
+    else MAPV.note = im.err ? "Imagery unavailable: " + im.err : "No imagery indexed for this area. " + (MAPV.note || "");
+    // older tiles of other views: keep the cache small
+    const ks = Object.keys(MAPV.imgs); if (ks.length > 12) for (const x of ks.slice(0, ks.length - 12)) delete MAPV.imgs[x]; }
+  gP.innerHTML = photo + chips + (level === "groups" ? "" : `<g style="pointer-events:none">${presenceLayer(svg, box, px)}</g>`) + (level === "items" ? "" : `<g id="mv-sym" style="pointer-events:auto">${symbolLayer(box, px, level)}</g>`);
   let lab = "";
   if (MAPV.labels && box[2] < 80000) { const G = MAPV.layout === "tiles" ? tileGrid() : null;
     for (const { s } of allSubs()) { const [x, y] = G ? G.pos.get(s.linz_id) || centroid(s) : centroid(s); if (x < box[0] || x > box[0] + box[2] || -y < box[1] || -y > box[1] + box[3]) continue;
-      lab += `<text x="${x}" y="${-y + (G ? G.L * 0.46 + 12 * px : 16 * px)}" font-size="${11 * px}" text-anchor="middle" style="fill:var(--ink);paint-order:stroke;stroke:var(--panel);stroke-width:${3 * px}px">${esc(s.name)}</text>`; } }
+      lab += `<text x="${x}" y="${-y + (G ? G.L * 0.46 + 12 * px : 16 * px)}" font-size="${14 * px}" font-weight="600" text-anchor="middle" style="fill:var(--ink);paint-order:stroke;stroke:var(--panel);stroke-width:${4 * px}px">${esc(s.name)}</text>`; } }
   gL.innerHTML = lab;
   const n = $("#mv-note"); if (n) n.textContent = MAPV.note;
 }

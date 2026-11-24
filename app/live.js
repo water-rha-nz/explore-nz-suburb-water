@@ -328,9 +328,66 @@ function detailedOverviewHTML() {
 // ---------------------------------------------------------------- validation: real labelling (labellers)
 const KEYMAP = { pool: { ArrowLeft: "not_pool", ArrowUp: "water", ArrowDown: "unknown", ArrowRight: "pool" }, garden: { ArrowLeft: "over", ArrowUp: "about_right", ArrowDown: "unknown", ArrowRight: "under" } };
 const KEYTXT = { not_pool: "Not pool", water: "Water, not pool", unknown: "Unknown", pool: "Pool", over: "Too much garden", about_right: "About right", under: "Too little garden" };
+// ---- imagery in the browser: LINZ RGB+NIR tiles are public Cloud-Optimised GeoTIFFs that allow cross-site range reads, so chips
+// and full-zoom imagery are cut here from the public tiles (geotiff.js, pinned and integrity-checked, loaded only when needed)
+const GEOTIFF_URL = "https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js";
+const GEOTIFF_SRI = "sha384-m5adk5PRgt3JjiYbYoG8oXxc3EgRFKc1aCBgKzyxqxnbYpdiAMlHkR0gVDp03Q/H";
+let GTP = null; const COGS = {};
+const loadGeoTIFF = () => GTP || (GTP = new Promise((res, rej) => {
+  if (window.GeoTIFF) return res(window.GeoTIFF);
+  const sc = document.createElement("script"); sc.src = GEOTIFF_URL; sc.integrity = GEOTIFF_SRI; sc.crossOrigin = "anonymous";
+  sc.onload = () => window.GeoTIFF ? res(window.GeoTIFF) : rej(new Error("imagery reader unavailable"));
+  sc.onerror = () => { GTP = null; rej(new Error("imagery reader could not load")); }; document.head.appendChild(sc); }));
+const cogOpen = (u) => COGS[u] || (COGS[u] = loadGeoTIFF().then((G) => G.fromUrl(u)).then(async (t) => ({ t, bb: (await t.getImage()).getBoundingBox() }))
+  .catch((e) => { delete COGS[u]; throw e; }));
+// read the part of tile u inside bb (NZTM [x0,y0,x1,y1]) at the canvas scale of a W x H view of bb; draws into ctx and returns bands
+async function cogDraw(u, bb, W, H, ctx) {
+  const { t, bb: tb } = await cogOpen(u);
+  const ib = [Math.max(bb[0], tb[0]), Math.max(bb[1], tb[1]), Math.min(bb[2], tb[2]), Math.min(bb[3], tb[3])];
+  if (ib[2] <= ib[0] || ib[3] <= ib[1]) return null;
+  const w = Math.max(1, Math.round(W * (ib[2] - ib[0]) / (bb[2] - bb[0]))), h = Math.max(1, Math.round(H * (ib[3] - ib[1]) / (bb[3] - bb[1])));
+  const r = await t.readRasters({ bbox: ib, width: w, height: h });
+  const id = ctx.createImageData(w, h), A = r.length > 4 ? r[4] : null;
+  for (let i = 0; i < w * h; i++) { id.data[4 * i] = r[0][i]; id.data[4 * i + 1] = r[1][i]; id.data[4 * i + 2] = r[2][i]; id.data[4 * i + 3] = A && !A[i] ? 0 : 255; }
+  const dx = Math.round(W * (ib[0] - bb[0]) / (bb[2] - bb[0])), dy = Math.round(H * (bb[3] - ib[3]) / (bb[3] - bb[1]));
+  ctx.putImageData(id, dx, dy);
+  return { r, w, h, dx, dy };
+}
+const ringsOf = (c) => !Array.isArray(c) ? [] : typeof (c[0] || [])[0] === "number" ? [c] : c.flatMap(ringsOf);
+// a labelling chip from the public tile: section outline in yellow, the candidate circled in red (pools), or vegetation in green
+// (gardens: NDVI above the capture's threshold, as the worker measures it)
+async function cogChip(it) {
+  const rings = ringsOf(it.outline), xs = rings.flat().map((p) => p[0]), ys = rings.flat().map((p) => p[1]);
+  const half = it.task === "pool" || !xs.length ? 20 : Math.max(15, (Math.max(...xs) - Math.min(...xs)) / 2 + 6, (Math.max(...ys) - Math.min(...ys)) / 2 + 6);
+  const cx = it.task === "pool" || !xs.length ? +it.x : (Math.max(...xs) + Math.min(...xs)) / 2, cy = it.task === "pool" || !xs.length ? +it.y : (Math.max(...ys) + Math.min(...ys)) / 2;
+  const bb = [cx - half, cy - half, cx + half, cy + half], S = 360;
+  const mk = () => { const c = document.createElement("canvas"); c.width = c.height = S; return c; };
+  const cv = mk(), ctx = cv.getContext("2d"); ctx.fillStyle = "#222"; ctx.fillRect(0, 0, S, S);
+  const got = await cogDraw(it.cog_url, bb, S, S, ctx); if (!got) throw new Error("the item lies outside its imagery tile");
+  const px = (x, y) => [(x - bb[0]) / (bb[2] - bb[0]) * S, (bb[3] - y) / (bb[3] - bb[1]) * S];
+  const outline = (c) => { c.save(); c.strokeStyle = "#ffd400"; c.lineWidth = 2; for (const rg of rings) { c.beginPath(); rg.forEach((p, i) => { const [a, b] = px(p[0], p[1]); i ? c.lineTo(a, b) : c.moveTo(a, b); }); c.closePath(); c.stroke(); } c.restore(); };
+  let veg = null;
+  if (it.task === "garden") {
+    const cal = Object.assign({ ndvi_veg: 0.2, nir_veg_min: 40 }, it.cal || {});
+    const v = mk(), vc = v.getContext("2d"); vc.drawImage(cv, 0, 0);
+    const { r, w, h, dx, dy } = got, ov = vc.getImageData(dx, dy, w, h);
+    for (let i = 0; i < w * h; i++) { const R_ = r[0][i], N = r[3] ? r[3][i] : 0, nd = (N - R_) / Math.max(1, N + R_);
+      if (nd > cal.ndvi_veg && N >= cal.nir_veg_min) { ov.data[4 * i] = 40; ov.data[4 * i + 1] = 220; ov.data[4 * i + 2] = 60; } }
+    vc.putImageData(ov, dx, dy); outline(vc); veg = v.toDataURL("image/jpeg", 0.85);
+  }
+  outline(ctx);
+  if (it.task === "pool") { const [a, b] = px(+it.x, +it.y); ctx.strokeStyle = "#ff2d2d"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(a, b, S * 0.11, 0, 2 * Math.PI); ctx.stroke(); }
+  return { img: cv.toDataURL("image/jpeg", 0.88), veg };
+}
+
 async function startLabelling() {
-  const cap = R().capture_id;
-  const items = await q(sb.from("validation_items").select("id,task,grp,chip_path,tool_verdict").eq("capture_id", cap).order("id"));
+  const cap = R().capture_id, cols = "id,task,grp,chip_path,tool_verdict,x,y,cog_url,outline,capture_id";
+  // items sampled by the worker for this region; earlier (pilot) items are found by capture
+  let items = await q(sb.from("validation_items").select(cols).eq("region_id", region).order("id"));
+  if (!items.length && cap) items = await q(sb.from("validation_items").select(cols).eq("capture_id", cap).order("id"));
+  const capIds = [...new Set(items.map((i) => i.capture_id).filter(Boolean))];
+  const calib = capIds.length ? Object.fromEntries((await q(sb.from("imagery_captures").select("id,calibration").in("id", capIds))).map((c) => [c.id, c.calibration || {}])) : {};
+  items.forEach((i) => { i.cal = calib[i.capture_id]; });
   const mine = await q(sb.from("validation_labels").select("item_id").eq("user_id", SESSION.user.id));
   const done = new Set(mine.map((m) => m.item_id));
   LIVE.labelQueue = items.filter((i) => !done.has(i.id)); LIVE.labelPos = 0; LIVE.labelling = true; LIVE.total = items.length;
@@ -343,8 +400,15 @@ async function chipUrl(path) {
 async function showLabel() {
   const el = $("#label-panel"); if (!el) return;
   const it = LIVE.labelQueue[LIVE.labelPos];
-  if (!it) { el.innerHTML = `<p>Nothing left to label in this capture. Thank you!</p>`; LIVE.labelling = false; return; }
-  const img = await chipUrl(it.chip_path), img2 = it.task === "garden" ? await chipUrl(it.chip_path.replace(/\.jpg$/, "_veg.jpg")).catch(() => null) : null;
+  if (!it) { el.innerHTML = LIVE.total ? `<p>Nothing left to label in this region. Thank you!</p>` : `<p>No labelling items for this region yet. They're sampled when its imagery step finishes; for a region prepared earlier, re-run imagery on <b>3 · Load</b> (<i>Refresh a region → Imagery</i>).</p>`; LIVE.labelling = false; return; }
+  let img, img2 = null;
+  if (it.chip_path) { img = await chipUrl(it.chip_path); img2 = it.task === "garden" ? await chipUrl(it.chip_path.replace(/\.jpg$/, "_veg.jpg")).catch(() => null) : null; }
+  else {
+    el.innerHTML = `<p class="small muted">Reading imagery for item #${it.id} from the public LINZ tile…</p>`;
+    try { const c = await cogChip(it); img = c.img; img2 = c.veg; }
+    catch (e) { el.innerHTML = `<p class="small">Couldn't read the imagery for item #${it.id}: ${esc(e.message)}.</p><p><button class="btn" type="button" id="label-skip">Skip this item</button> <button class="btn" type="button" id="start-label">Try again</button></p>`; return; }
+    if (LIVE.labelQueue[LIVE.labelPos] !== it) return;   // moved on while loading
+  }
   const keys = KEYMAP[it.task];
   el.innerHTML = `<p class="small muted">${LIVE.total - LIVE.labelQueue.length + LIVE.labelPos} of ${LIVE.total} labelled by you · ${esc(it.task)} item #${it.id}${it.task === "pool" ? " · candidate in the red circle" : " · section in yellow; green = measured vegetation"}</p>
     <div class="grid ${img2 ? "g2" : ""}" style="max-width:${img2 ? 720 : 380}px"><div style="position:relative"><img src="${img}" alt="Validation chip" style="width:100%;border-radius:8px;display:block">${it.task === "pool" ? '<span style="position:absolute;left:50%;top:50%;width:34px;height:34px;margin:-17px 0 0 -17px;border:2px solid #ff3b30;border-radius:50%"></span>' : ""}</div>
@@ -367,11 +431,47 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-label]"); if (b && LIVE.labelling) return saveLabel(b.dataset.label);
   if (e.target.id === "start-label") startLabelling().catch((err) => toastMsg(err.message));
+  if (e.target.id === "label-skip") { LIVE.labelPos++; showLabel(); }
 });
 const _vValidate = V.validate;
 V.validate = () => _vValidate().replace(/<div class="card"><h3>Labelling keys<\/h3>[\s\S]*?<\/div>\s*<div class="card"><h3>Quality gate/, () =>
   `<div class="card"><h3>Label this capture</h3>${can("labeller") ? `<div id="label-panel"><p class="small muted">Image chips are private: they're served to signed-in labellers through short-lived signed links.</p><button class="btn primary" id="start-label" type="button">Start labelling</button></div>` : lock("labeller", "Labelling")}</div>
   <div class="card"><h3>Quality gate`);
+
+// Validate for regions prepared by the worker: counts across all labellers (validation_tally), the same measures as the pilot
+const _vValidateBase = V.validate;
+V.validate = () => {
+  const g = D.regions[region];
+  if (!g || (g.validation && g.validation.agree && !g.notValidated)) return _vValidateBase();
+  setTimeout(loadTally, 0);
+  return `<h1>5 · Validate</h1><p class="lead">Labellers check a sample of the tool's results for ${esc(g.label)} with the arrow keys: pool candidates the tool accepted and rejected, and garden measurements. The labels give precision (on accepted pools) and estimated recall (from rejected candidates). Image chips are cut in your browser from the public LINZ imagery.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Label this region</h3>${can("labeller") ? `<div id="label-panel"><p class="small muted">Pools: → pool · ← not pool · ↑ water, not pool · ↓ unknown. Gardens: ← too much · ↑ about right · → too little · ↓ unknown. Backspace goes back.</p><button class="btn primary" id="start-label" type="button">Start labelling</button></div>` : lock("labeller", "Labelling")}</div>
+    <div class="card"><h3>Quality gate</h3><div id="val-tally"><p class="small muted">Loading labelling counts…</p></div></div>
+  </div>
+  <h2>Labellers vs tool</h2><div class="card scroll" id="val-matrix"><p class="small muted">…</p></div>`;
+};
+async function loadTally() {
+  const el = $("#val-tally"), mx = $("#val-matrix"); if (!el) return;
+  let t; try { t = await q(sb.rpc("validation_tally", { p_region: region })); } catch (e) { el.innerHTML = `<p class="small">Counts unavailable: ${esc(e.message)}</p>`; return; }
+  const I = (t && t.items) || {}, Lb = (t && t.labels) || {}, n = (k) => +(Lb[k] || 0);
+  const items = Object.values(I).reduce((a, v) => a + +v, 0);
+  if (!items) { el.innerHTML = `<p class="small">No labelling items for this region yet. They're sampled when its imagery step finishes; for a region prepared earlier, re-run imagery on <b>3 · Load</b> (<i>Refresh a region → Imagery</i>).</p>`; if (mx) mx.innerHTML = `<p class="small muted">Nothing labelled yet.</p>`; return; }
+  const acc = (l) => n("pool:pool:" + l), rej = (l) => n("pool:not_pool:" + l);
+  const aN = acc("pool") + acc("water") + acc("not_pool"), rN = rej("pool") + rej("water") + rej("not_pool");
+  const prec = aN ? acc("pool") / aN : null, miss = rN ? rej("pool") / rN : null;
+  const A = +(I["pool:pool"] || 0), Rj = +(I["pool:not_pool"] || 0);
+  const found = prec == null ? null : prec * A, missed = miss == null ? null : miss * Rj, rec = found == null || missed == null || !(found + missed) ? null : found / (found + missed);
+  const lab = aN + rN, gate = prec != null && rec != null && prec >= 0.95 && rec >= 0.8 && lab >= 150;
+  const pct = (v, d = 1) => v == null ? "–" : fmt(100 * v, d) + "%";
+  const gd = (l) => n("garden:measured:" + l);
+  el.innerHTML = `<p><span class="tag ${gate ? "ok" : "bad"}">${gate ? "passes" : lab < 150 ? "needs more labels" : "fails"}</span> precision ≥ 95%, recall ≥ 80%, ≥ 150 labels</p>
+    <table><tbody><tr><td>Items sampled</td><td>${fmt(A)} accepted · ${fmt(Rj)} rejected pool candidates · ${fmt(+(I["garden:measured"] || 0))} gardens</td></tr>
+    <tr><td>Pool labels (excluding unknown)</td><td>${fmt(lab)}</td></tr><tr><td>Precision</td><td>${pct(prec)}</td></tr><tr><td>Miss rate among rejects</td><td>${pct(miss)}</td></tr>
+    <tr><td>Estimated recall (in the sample)</td><td>${pct(rec, 0)}</td></tr>
+    <tr><td>Gardens</td><td>${fmt(gd("about_right"))} about right · ${fmt(gd("over"))} too much · ${fmt(gd("under"))} too little · ${fmt(gd("unknown"))} unknown</td></tr></tbody></table>`;
+  if (mx) mx.innerHTML = `<table><thead><tr><th></th><th>Pool</th><th>Water, not pool</th><th>Not pool</th><th>Unknown</th></tr></thead><tbody>${[["pool", "Tool: pool", acc], ["not_pool", "Tool: not pool", rej]].map(([, l, f]) => `<tr><td>${l}</td>${["pool", "water", "not_pool", "unknown"].map((c) => `<td>${fmt(f(c))}</td>`).join("")}</tr>`).join("")}</tbody></table><p class="small muted">Counts across all labellers (each labeller's own labels stay private to them).</p>`;
+}
 
 // ---------------------------------------------------------------- admin: approve users, set roles
 V.admin = () => {

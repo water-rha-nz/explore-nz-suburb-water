@@ -12,6 +12,7 @@ on:
       region: { description: "Run steps for one region now (optional)", required: false }
       steps: { description: "Steps", required: false, default: "climate,census,publish" }
       slot: { description: "Manual slot (1 or 2): a run in another slot runs alongside", required: false, default: "1" }
+      chain: { description: "Follow-up runs so far (set by the workflow itself)", required: false, default: "0" }
 # one scheduled run and one manually started run may overlap (at most six workers); claim_job gives each job to one worker
 concurrency: { group: "worker-${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', inputs.slot || '1') || 'scheduled' }}", cancel-in-progress: false }
 permissions: { contents: read }
@@ -47,3 +48,27 @@ jobs:
         run: |
           sleep $(( (${{ matrix.leg }} - 1) * 20 ))   # stagger the legs' first requests
           python -m nzsw.cli worker
+  # a run handles a capped part of each region (LINZ features, imagery tiles, run time): while runnable jobs remain, start the next
+  # run straight away instead of waiting for the schedule (GitHub delays or skips scheduled runs). At most 40 follow-ups in a chain.
+  next:
+    needs: run
+    if: always() && (github.event_name == 'schedule' || fromJSON(inputs.chain || '0') < 40)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: { contents: read, actions: write }
+    defaults: { run: { working-directory: backend } }
+    env: { SUPABASE_DB_URL: "${{ secrets.SUPABASE_DB_URL }}" }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements-worker.txt }
+      - run: pip install -r requirements-worker.txt
+      - id: left
+        run: python -m nzsw.cli pending
+      - name: Start the next run
+        if: steps.left.outputs.more == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLOT: ${{ github.event_name == 'workflow_dispatch' && inputs.slot || '1' }}
+          CHAIN: ${{ inputs.chain || '0' }}
+        run: gh workflow run worker.yml -R "$GITHUB_REPOSITORY" --ref main -f slot="$SLOT" -f chain="$(( CHAIN + 1 ))"
