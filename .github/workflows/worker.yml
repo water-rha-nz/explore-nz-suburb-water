@@ -7,6 +7,7 @@ on:
   schedule:
     - cron: "*/15 * * * *"     # pick up jobs queued in the app
     - cron: "15 14 * * *"      # 03:15 NZDT: queue a climate top-up for each published region
+    - cron: "5 0 * * *"        # just after the daily budgets reset (00:00 UTC): resume jobs paused for quota
   workflow_dispatch:
     inputs:
       region: { description: "Run steps for one region now (optional)", required: false }
