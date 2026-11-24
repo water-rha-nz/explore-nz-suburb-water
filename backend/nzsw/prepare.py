@@ -306,17 +306,18 @@ def _catalogue(client, log):
     return out
 
 
-Q_BLD_UNCOVERED = """select count(distinct b.building_id) from buildings b join sections s on st_intersects(s.geom, b.geom)
-                      where s.region_id=%s and not exists (select 1 from imagery_tiles t where t.region_id=%s and st_intersects(t.geom, b.geom))"""
+# coverage is judged per residential section (sections carry region_id, indexed): a section counts as covered when an indexed
+# tile of the region overlaps it. Joining every building to every section region-wide was too slow for large regions.
+Q_SEC_UNCOVERED = """select count(*) from sections s where s.region_id=%s
+                     and not exists (select 1 from imagery_tiles t where t.region_id=%s and t.geom && s.geom and st_intersects(t.geom, s.geom))"""
 
 
 def _index_ranked(con, region, log, ranked):
     """ranked: (capture id, s3 prefix, year, resolution, tile names) best first. Adds, capture by capture, the tiles that hold
-    buildings not yet covered, until every building is covered. Returns a summary."""
-    total = con.execute("""select count(distinct b.building_id) from buildings b join sections s on st_intersects(s.geom, b.geom)
-                           where s.region_id=%s""", (region,)).fetchone()[0]
-    left = con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]
-    reg = con.execute("select st_asbinary(st_extent(b.geom)::geometry) from buildings b join sections s on st_intersects(s.geom, b.geom) where s.region_id=%s", (region,)).fetchone()[0]
+    residential sections not yet covered, until every section is covered. Returns a summary."""
+    total = con.execute("select count(*) from sections where region_id=%s", (region,)).fetchone()[0]
+    left = con.execute(Q_SEC_UNCOVERED, (region, region)).fetchone()[0]
+    reg = con.execute("select st_asbinary(st_extent(geom)::geometry) from sections where region_id=%s", (region,)).fetchone()[0]
     reg_box = wkb.loads(bytes(reg)) if reg else None
     used = []
     for cap, coll, year, res, names in ranked:
@@ -324,12 +325,15 @@ def _index_ranked(con, region, log, ranked):
             break
         hit = []
         for tid in names:
+            if time.monotonic() > DEADLINE:
+                raise Continue(f"time limit while indexing imagery: {len(used)} capture(s) added so far; continues in the next run")
             g = tile_box(tid)
             if g is None or not g.intersects(reg_box): continue
-            n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
-                               where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))
-                               and not exists (select 1 from imagery_tiles t where t.region_id=%s and st_intersects(t.geom, b.geom))""", (region, g.wkb, region)).fetchone()[0]
-            if n: hit.append((tid, g))
+            if con.execute("""select exists (select 1 from sections s where s.region_id=%s and s.geom && st_geomfromwkb(%s,2193)
+                                and st_intersects(s.geom, st_geomfromwkb(%s,2193))
+                                and not exists (select 1 from imagery_tiles t where t.region_id=%s and t.geom && s.geom and st_intersects(t.geom, s.geom)))""",
+                           (region, g.wkb, g.wkb, region)).fetchone()[0]:
+                hit.append((tid, g))
         if not hit:
             continue
         con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
@@ -338,17 +342,17 @@ def _index_ranked(con, region, log, ranked):
             base = f"{S3}{coll}/rgbnir/2193/{tid}"
             con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
                            on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
-        left = con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]
+        left = con.execute(Q_SEC_UNCOVERED, (region, region)).fetchone()[0]
         used.append((cap, year, res, len(hit)))
-        log(f"capture {cap} ({year}, {res} m): {len(hit)} tiles added; {left:,} building(s) still without imagery")
+        log(f"capture {cap} ({year}, {res} m): {len(hit)} tiles added; {left:,} section(s) still without imagery")
     con.execute("update regions set imagery_captures = (select array_agg(distinct capture_id) from imagery_tiles where region_id=%s) where id=%s", (region, region))
-    if not used:
-        return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
+    if not used and not con.execute("select 1 from imagery_tiles where region_id=%s limit 1", (region,)).fetchone():
+        return "no RGB+NIR imagery covers the region's sections: pools and gardens are not available for this region"
     pct = 100.0 * (total - left) / max(1, total)
     coarse = [u for u in used if u[2] > 0.125]
-    return (f"{len(used)} capture(s) ({', '.join(f'{u[0]} {u[2]} m, {u[3]} tiles' for u in used)}): {pct:.0f}% of buildings covered"
+    return (f"{len(used)} capture(s) added ({', '.join(f'{u[0]} {u[2]} m, {u[3]} tiles' for u in used)}): {pct:.0f}% of residential sections covered"
             + (f"; {len(coarse)} coarser than 12.5 cm, so small pools may be missed there" if coarse else "")
-            + (f"; {left:,} building(s) have no RGB+NIR imagery" if left else ""))
+            + (f"; {left:,} section(s) have no RGB+NIR imagery" if left else ""))
 
 
 def imagery_index(con, client, region, log):
@@ -357,9 +361,9 @@ def imagery_index(con, client, region, log):
     have = con.execute("select count(*), min(capture_id) from imagery_tiles where region_id=%s", (region,)).fetchone()
     uncovered = con.execute("""select count(*) from sections s where s.region_id=%s and not exists
                                (select 1 from imagery_tiles t where t.region_id=s.region_id and st_intersects(t.geom, s.geom))""", (region,)).fetchone()[0]
-    if have[0] and not uncovered and not con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]:
+    if have[0] and not uncovered:
         return f"reused: {have[0]} tiles already indexed; no imagery listing needed"
-    ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from buildings b where exists (select 1 from sections s where s.region_id=%s and st_intersects(s.geom, b.geom))) t", (region,)).fetchone()
+    ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from sections where region_id=%s) t", (region,)).fetchone()
     if ext[0] is None:
         return "no buildings stored for the region yet: imagery not indexed"
     reg_box = box(*ext)

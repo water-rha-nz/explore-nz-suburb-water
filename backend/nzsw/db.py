@@ -9,6 +9,7 @@ def connect(url=None):
     url = url or os.environ.get("SUPABASE_DB_URL") or open(os.path.expanduser("~/.config/supabase/worker_db_url")).read().strip()
     c = psycopg.connect(url, autocommit=True, connect_timeout=30)
     c.execute("set search_path = public, extensions")
+    c.execute("set statement_timeout = '10min'")   # long region-wide statements (imagery coverage, metrics); the app keeps 30 s
     return c
 
 
