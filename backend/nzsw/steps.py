@@ -84,6 +84,8 @@ def climate(con, client, region, log):
                                                                          d["temperature_2m_max"][i], d["et0_fao_evapotranspiration"][i]))
                 added += 1
         log(f"climate cell {cid}: {start}..{end} (~{w:.1f} weighted calls)")
+        if hasattr(log, "progress"):
+            log.progress((cells.index((cid, lat, lon, first, last)) + 1) / max(1, len(cells)))
     return f"{added} new daily rows across {len(cells)} cells ({want_start}..{want_end})"
 
 
@@ -121,8 +123,11 @@ def census(con, client, region, log):
         _apportion(con, region)
         return f"all {len(codes)} SA2s reused from stored census data (0 requests); suburb census rebuilt"
     codes = need
+    log(f"census: fetching dwellings for {len(codes)} SA2(s)")
     h = pd.concat([_ade_csv(client, "CEN23_HOU_020", codes[i:i + 150]) for i in range(0, len(codes), 150)])
+    if hasattr(log, "progress"): log.progress(1 / 3, "census: dwellings done; fetching household composition")
     f = pd.concat([_ade_csv(client, "CEN23_FHH_038", codes[i:i + 150]) for i in range(0, len(codes), 150)])
+    if hasattr(log, "progress"): log.progress(2 / 3, "census: household composition done; fetching income")
     inc = pd.concat([_ade_csv(client, "CEN23_HOU_001", codes[i:i + 150]) for i in range(0, len(codes), 150)])
     idx = lambda t, **kw: t.loc[np.logical_and.reduce([t[k] == v for k, v in kw.items()])].set_index(["sa2", "year"]).v
     out = pd.DataFrame({"households": idx(h, CEN23_NRD_002="999", CEN23_THD_001="9999", CEN23_DTD_004="999")})

@@ -3,6 +3,7 @@
   python -m nzsw.cli run <region> [--steps climate,census,publish]    run steps for one region directly
   python -m nzsw.cli enqueue <region> [--steps ...]                   queue a job (for cron: climate top-up)
 One region per job; every external call goes through limits.Client; budgets live in api_usage."""
+import time
 import argparse, datetime as dt, json, sys, traceback
 from . import limits as L
 from .db import connect, DbLedger, sync_rates
@@ -13,6 +14,28 @@ STEPS = {**STEPS, **prepare.STEPS}
 PREPARE_STEPS = ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"]
 
 DEFAULT_STEPS = ["climate", "census", "publish"]
+
+
+class Reporter:
+    """Log function for a step that also reports to the app while the step runs: the latest lines, an optional progress
+    fraction and a heartbeat, written to job_runs at most every few seconds."""
+    def __init__(self, con, run_id, log, every=4.0):
+        self.con, self.run_id, self.log, self.every, self.lines, self.frac, self.t = con, run_id, log, every, [], None, 0.0
+    def __call__(self, msg):
+        self.log(msg)
+        self.lines = (self.lines + [f"{dt.datetime.now(dt.timezone.utc):%H:%M:%S} {msg}"])[-12:]
+        self.flush()
+    def progress(self, frac, msg=None):
+        self.frac = None if frac is None else max(0.0, min(1.0, float(frac)))
+        self(msg) if msg else self.flush()
+    def flush(self, force=False):
+        if not self.run_id or (not force and time.monotonic() - self.t < self.every):
+            return
+        self.t = time.monotonic()
+        try:
+            self.con.execute("update job_runs set detail=%s, progress=%s, updated_at=now() where id=%s", ("\n".join(self.lines), self.frac, self.run_id))
+        except Exception:  # noqa: BLE001  (feedback must never break a run)
+            pass
 
 
 def run_steps(con, region, steps, job_id=None, log=print):
@@ -42,8 +65,9 @@ def run_steps(con, region, steps, job_id=None, log=print):
             raise ValueError(f"unknown step {s!r} (available: {', '.join(STEPS)})")
         t0 = dt.datetime.now(dt.timezone.utc)
         run_id = con.execute("insert into job_runs (job_id, step, status) values (%s,%s,'running') returning id", (job_id, s)).fetchone()[0] if job_id else None
+        rep = Reporter(con, run_id, log); prepare.NOTE = rep
         try:
-            msg = STEPS[s](con, client, region, log)
+            msg = STEPS[s](con, client, region, rep)
             status = "done"
         except (L.QuotaExceeded, L.ServicePaused) as e:
             msg, status = str(e), "paused_quota"
@@ -54,8 +78,13 @@ def run_steps(con, region, steps, job_id=None, log=print):
         except Exception as e:  # noqa: BLE001
             msg, status = f"{type(e).__name__}: {e}", "failed"
             log(traceback.format_exc(limit=3))
+        prepare.NOTE = None
         if run_id:
-            con.execute("update job_runs set status=%s, finished_at=now(), log=%s where id=%s", (status, msg[:4000], run_id))
+            try:
+                con.execute("update job_runs set status=%s, finished_at=now(), log=%s, detail=%s, progress=%s, updated_at=now() where id=%s",
+                            (status, msg[:4000], "\n".join(rep.lines), 1.0 if status == "done" else rep.frac, run_id))
+            except Exception:  # noqa: BLE001  (progress columns not there yet: record the result anyway)
+                con.execute("update job_runs set status=%s, finished_at=now(), log=%s where id=%s", (status, msg[:4000], run_id))
         log(f"[{region}] {s}: {status}: {msg}")
         results[s] = dict(status=status, message=msg, seconds=round((dt.datetime.now(dt.timezone.utc) - t0).total_seconds(), 1))
         if status != "done":

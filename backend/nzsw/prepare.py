@@ -38,6 +38,17 @@ def _region(con, region):
     return dict(id=r[0], ta_code=r[1], scope=r[2], ta_names=sorted({ta[0], ta[1], *(r[3] or [])}) if ta else (r[3] or []))
 
 
+NOTE = None   # the running step's reporter (set by cli.run_steps): short progress lines for the app
+
+
+def _note(msg):
+    if NOTE:
+        NOTE(msg)
+
+
+LAYER_NAMES = {113764: "suburbs", 50772: "parcels", 50804: "titles", 101290: "buildings", 111206: "SA2 boundaries"}
+
+
 def _wfs(client, service, base, layer, cql=None, bbox=None):
     k = key("linz" if service == "linz_wfs" else "statsnz_datafinder")
     url = base.format(k=k)
@@ -53,6 +64,7 @@ def _wfs(client, service, base, layer, cql=None, bbox=None):
             raise RuntimeError(f"{service} layer {layer}: HTTP {r.status_code}")
         got = r.json()["features"]
         feats += got
+        _note(f"LINZ {LAYER_NAMES.get(layer, 'layer ' + str(layer))}: {len(feats):,} features downloaded" if service == "linz_wfs" else f"Stats NZ {LAYER_NAMES.get(layer, 'layer ' + str(layer))}: {len(feats):,} features")
         if len(feats) > L.SERVICES["linz_wfs"]["max_features_run"]:
             raise L.RunTooLarge(f"layer {layer}: more than {L.SERVICES['linz_wfs']['max_features_run']:,} features: limit the region with a suburb list")
         if len(got) < page:
@@ -120,6 +132,8 @@ def linz(con, client, region, log):
         todo = todo.loc[pts.distance(anchor).sort_values().index[:cap]]
         more = len(sub) - len(loaded) - cap
     log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}{f' ({more} more in later runs)' if more else ''}")
+    if hasattr(log, "progress"):
+        log.progress(len(loaded) / max(1, len(sub)))
     full_sub, sub = sub, gpd.GeoDataFrame(todo, crs=2193)
     area = sub.union_all()
     minx, miny, maxx, maxy = gpd.GeoSeries([area], crs=2193).to_crs(4326).total_bounds
@@ -159,6 +173,8 @@ def linz(con, client, region, log):
                 cp.write_row((int(r.building_id), round(r.geometry.area, 1), r.get("capture_source_id"), "SRID=2193;" + r.geometry.wkt, dt.date.today().isoformat()))
         cur.execute("insert into buildings select * from _bld on conflict (building_id) do update set geom=excluded.geom, area_m2=excluded.area_m2")
     log(f"residential sections: {len(par)}, buildings: {len(seen)}")
+    if hasattr(log, "progress"):
+        log.progress((len(loaded) + len(sub)) / max(1, len(full_sub)))
 
     n_sa2 = _sa2_and_cells(con, client, region, full_sub, bbox)
     if more:
@@ -353,7 +369,9 @@ def imagery(con, client, region, log):
             cur.execute("update imagery_tiles set processed_at=now() where capture_id=%s and tile_id=%s and region_id=%s", (cap, tid, region))
         client.ledger.add("linz_imagery_s3", 0, nbytes=0)
         done += 1
-        log(f"tile {tid}: {len(tallies)} sections, {sum(1 for r in rows if r[-1])} pools / {len(rows)} candidates")
+        log(f"tile {tid} ({done} of {len(todo)}): {len(tallies)} sections, {sum(1 for r in rows if r[-1])} pools / {len(rows)} candidates")
+        if hasattr(log, "progress"):
+            log.progress(done / max(1, len(todo)))
     # roofs and unbuilt area per section (LINZ geometry, SQL)
     con.execute("""update section_imagery si set building_m2 = coalesce(b.a, 0), unbuilt_m2 = greatest(0, s.polygon_m2 - coalesce(b.a, 0))
                    from sections s left join lateral (select sum(st_area(st_intersection(s.geom, bb.geom))) a from buildings bb where st_intersects(s.geom, bb.geom)) b on true
