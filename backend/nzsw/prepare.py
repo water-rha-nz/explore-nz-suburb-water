@@ -73,7 +73,9 @@ def linz(con, client, region, log):
     ta_cql = f"territorial_authority_ascii IN ({_q(R['ta_names'])}) OR territorial_authority IN ({_q(R['ta_names'])})"
     subs = []
     # reuse: suburbs already in the shared cache (filled by Batch → Validate) need no LINZ request
-    cached = con.execute("select linz_id, name, name_ascii, type, st_asbinary(geom), fetched_at from linz_suburb_index where ta_code=%s", (R["ta_code"],)).fetchall()
+    # only a complete fetch of the TA is reused (a partial one is fetched again)
+    cached = con.execute("""select i.linz_id, i.name, i.name_ascii, i.type, st_asbinary(i.geom), i.fetched_at from linz_suburb_index i
+                            join linz_suburb_fetch f on f.ta_code = i.ta_code and f.complete where i.ta_code=%s""", (R["ta_code"],)).fetchall()
     if cached:
         cg = gpd.GeoDataFrame({"id": [r[0] for r in cached], "name": [r[1] for r in cached], "name_ascii": [r[2] for r in cached], "type": [r[3] for r in cached],
                                "territorial_authority": R["ta_names"][0], "population_estimate": None}, geometry=[wkb.loads(bytes(r[4])) for r in cached], crs=2193)

@@ -18,8 +18,10 @@ const BATCH = { rev: 0, tas: null, providers: [], sel: new Set(JSON.parse(store.
   batches: [], jobs: [], regions: [], view: null, savedScope: null, fileNames: {}, linz: {}, aTA: null, aPick: null, builder: null,
   matches: JSON.parse(store.get("batch-matches", "{}")), alloc: JSON.parse(store.get("batch-alloc", "{}")), picks: JSON.parse(store.get("batch-picks", "{}")), tl: JSON.parse(store.get("batch-tl", "{}")) };
 const isB = () => Object.prototype.hasOwnProperty.call(BSTAGES, stage);
+// match key: also ignores punctuation and treats "Mt"/"Mount" and "St"/"Saint" alike
+const mkey = (s) => norm(s).replace(/['’`.()]/g, "").replace(/-/g, " ").replace(/\bmt\b/g, "mount").replace(/\bst\b/g, "saint").replace(/\bpt\b/g, "point").replace(/\s+/g, " ").trim();
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
-const saveSel = () => { BATCH.rev = (BATCH.rev || 0) + 1; MEMO.fresh = false; store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
+const saveSel = () => { BATCH.rev = (BATCH.rev || 0) + 1; MEMO.fresh = false; if (typeof autosave === "function") autosave(); store.set("batch-sel", JSON.stringify([...BATCH.sel])); store.set("batch-prvdr-v2", JSON.stringify(BATCH.prvdr));
   store.set("batch-matches", JSON.stringify(BATCH.matches)); store.set("batch-alloc", JSON.stringify(BATCH.alloc)); store.set("batch-picks", JSON.stringify(BATCH.picks)); store.set("batch-tl", JSON.stringify(BATCH.tl)); };
 const taOf = (c) => (BATCH.tas || []).find((x) => x.code === c) || {};
 // memoised derived data (scope, PRVDRs, allocation rows): recomputed only when the inputs change, so drawing a step or
@@ -289,7 +291,7 @@ function drawBatch() {
   const el = $("#batch-body"); if (!el || !BATCH.tas || !isB()) return;
   if (stage === "load") { el.innerHTML = loadHTML(); return; }
   const i = CFG_STEPS.findIndex(([k]) => k === bsub);
-  el.innerHTML = `<div class="row" role="tablist" aria-label="Configure steps" style="margin-bottom:12px">${CFG_STEPS.map(([k, l], j) => `<button class="btn ${k === bsub ? "primary" : ""}" role="tab" aria-selected="${k === bsub}" data-btab="${k}" type="button">2.${j + 1} ${l}</button>`).join("")}</div>`
+  el.innerHTML = configBar() + `<div class="row" role="tablist" aria-label="Configure steps" style="margin-bottom:12px">${CFG_STEPS.map(([k, l], j) => `<button class="btn ${k === bsub ? "primary" : ""}" role="tab" aria-selected="${k === bsub}" data-btab="${k}" type="button">2.${j + 1} ${l}</button>`).join("")}</div>`
     + { select: configureHTML, allocate: allocateHTML, vsuburbs: validateHTML }[CFG_STEPS[i < 0 ? 0 : i][0]]();
 }
 
@@ -322,7 +324,7 @@ function configureHTML() {
       <h3 style="margin-top:12px">Input files (optional)</h3>
       <p class="small muted">Read in your browser and applied to the selected TAs only.</p>
       <p class="small" style="margin:6px 0"><label><b>Add several at once</b> <input type="file" multiple accept=".json,.csv,.tsv,application/json,text/csv" id="bin-files"></label><br><span class="muted">Each file goes to its slot below by name.</span></p>
-      <p class="small" style="margin:6px 0"><label><b>nz_suburb_builder_config.json</b> <input type="file" accept=".json,application/json" id="bcfg-import"></label>${BATCH.builder ? ` <span class="tag info">${esc(BATCH.builder.fname)}</span> <button class="btn" type="button" id="bcfg-clear">Clear</button>` : ""} <button class="btn" type="button" id="bcfg-export">Export</button><br>
+      <p class="small" style="margin:6px 0"><label><b>nz_suburb_builder_config.json</b> <input type="file" accept=".json,application/json" id="bcfg-import"></label>${BATCH.builder ? ` <span class="tag info">${esc(BATCH.builder.fname)}</span> <button class="btn" type="button" id="bcfg-clear">Clear</button>` : ""}<br>
         <span class="muted">From the reference builder (suburb_lookup.html): keep rule, PRVDR matches and suburb allocations.</span>${builderNote()}</p>
       ${[["provider", "nz_suburb_provider.csv", "M_SUBURB, Other spellings, PRVDR: the study suburbs in scope and their provider (sets each TA's PRVDR)"], ["map", "nz_suburb_map.csv", "M_SUBURB, PROVIDER, NZ_SUBURB_REF, M_TERRITORY: allocations of study suburbs to LINZ suburbs"], ["ref", "nz_suburb_ref.csv", "M_SUBURB, TYPE, M_TERRITORY, …: the LINZ suburb reference"]].map(([k, f, cols]) =>
         `<p class="small" style="margin:6px 0"><label><b>${f}</b> <input type="file" accept=".csv,.tsv,text/csv" data-sfile="${k}"></label>${BATCH.files[k] ? ` <span class="tag info">${esc(BATCH.fileNames[k] || "")} · ${BATCH.files[k].length} rows</span> <button class="btn" type="button" data-sclear="${k}">Clear</button>` : ""}<br><span class="muted">${cols}</span></p>`).join("")}
@@ -342,23 +344,27 @@ function configureHTML() {
 // ---------------------------------------------------------------- LINZ suburbs per TA (shared cache)
 async function ensureLinz(c, force) {
   if (BATCH.linz[c] && !force) return BATCH.linz[c];
-  const { data, error } = await sb.functions.invoke("linz-suburbs", { body: { ta_code: c } });
+  const { data, error } = await sb.functions.invoke("linz-suburbs", { body: force ? { ta_code: c, refresh: true } : { ta_code: c } });
   if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (_) { /* keep message */ } throw new Error(m); }
   const res = await q(sb.rpc("ta_suburbs", { p_ta: c, p_tol: 20 }));
+  if (BATCH.gaz) delete BATCH.gaz[c];
   BATCH.rev = (BATCH.rev || 0) + 1; MEMO.fresh = false;
   return (BATCH.linz[c] = { list: res.suburbs || [], cached: data && data.cached, requests: (data && data.requests) || 0 });
 }
 const LIDX = new WeakMap();
-const linzIndex = (linz) => { if (LIDX.has(linz)) return LIDX.get(linz); const m = new Map(); LIDX.set(linz, m); for (const x of linz) { m.set(norm(x.name), x); if (x.name_ascii) m.set(norm(x.name_ascii), x); } return m; };
+// LINZ suburbs by name: exact (macron-insensitive) keys, plus match keys (punctuation and Mt/St tolerant)
+const linzIndex = (linz) => { if (LIDX.has(linz)) return LIDX.get(linz); const m = new Map(); LIDX.set(linz, m);
+  for (const x of linz) for (const n of [x.name, x.name_ascii]) if (n) { m.set(norm(n), x); if (!m.has("~" + mkey(n))) m.set("~" + mkey(n), x); }
+  const get = m.get.bind(m); m.get = (k) => get(k) || get("~" + mkey(k)); const has = m.has.bind(m); m.has = (k) => has(k) || has("~" + mkey(k)); return m; };
 // a scoped name -> LINZ suburbs: direct match, else your allocation for that row
 function locate(name, terr, file, byNorm) {
   const a = allocFor(file, name, terr);
-  if (a) { const t = (a.linzSuburbs || []).map((x) => byNorm.get(norm(x.name))).filter(Boolean); if (t.length) return { linz: t, allocated: true }; }
-  const hit = byNorm.get(norm(name)); return hit ? { linz: [hit], allocated: false } : null;
+  if (a) { const t = (a.linzSuburbs || []).map((x) => byNorm.get(x.name)).filter(Boolean); if (t.length) return { linz: t, allocated: true }; }
+  const hit = byNorm.get(name); return hit ? { linz: [hit], allocated: false } : null;
 }
 function locateRow(n, row, byNorm) {
   const hit = locate(n, row.territory || "", row.file || "", byNorm); if (hit || row.via) return hit;
-  for (const sp of row.spellings || []) { const x = byNorm.get(norm(sp)); if (x) return { linz: [x], allocated: false }; }
+  for (const sp of row.spellings || []) { const x = byNorm.get(sp); if (x) return { linz: [x], allocated: false }; }
   return null;
 }
 // study suburbs you added in 2.2 that aren't in your files (file "manual", territory = the TA)
@@ -366,7 +372,11 @@ const manualFor = (c) => Object.values(BATCH.alloc).filter((a) => a.file === "ma
 
 // suburbs a TA would load: your names matched or allocated (or all its LINZ suburbs when no list covers it), then your
 // picks from 2.2: excluded suburbs removed, added suburbs included
-function tapicks(c) { const P = BATCH.picks[c] || {}; return { add: P.add || [], ex: P.ex || [], skip: P.skip || [] }; }
+function tapicks(c) { const P = BATCH.picks[c] || {}; return { add: P.add || [], ex: P.ex || [], skip: P.skip || [], alias: P.alias || {} }; }
+// combined study suburbs: alias name -> the study suburb it is another spelling of (per TA)
+const aliasOf = (c, n) => { const A = tapicks(c).alias; return A[norm(n)] ? A[norm(n)].to : null; };
+function setPicks(c, P) { const np = { add: P.add || [], ex: P.ex || [], skip: P.skip || [], alias: P.alias || {} };
+  np.add.length || np.ex.length || np.skip.length || Object.keys(np.alias).length ? BATCH.picks[c] = np : delete BATCH.picks[c]; BATCH.valid = {}; saveSel(); }
 function scopeOf(c) { return memo("scopeOf|" + c, () => scopeOf_(c)); }
 function scopeOf_(c) {
   const s = scopeByTA()[c], L = BATCH.linz[c]; if (!L) return null;
@@ -377,7 +387,7 @@ function scopeOf_(c) {
       if (!ok) unmatched.push(n); }
     const spell = new Set(s.rows.flatMap((r) => r.spellings || []).map(norm));
     unmatched = unmatched.filter((n) => !(spell.has(norm(n)) && pairs.length)); }
-  for (const a of manualFor(c)) for (const t of a.linzSuburbs || []) { const x = byNorm.get(norm(t.name)); if (x) pairs.push({ input: a.name, mname: a.name, manual: true, linz: x, allocated: true }); }
+  for (const a of manualFor(c)) for (const t of a.linzSuburbs || []) { const x = byNorm.get(t.name); if (x) pairs.push({ input: a.name, mname: a.name, manual: true, linz: x, allocated: true }); }
   const byId = new Map();
   for (const m of s ? pairs : [...L.list.map((x) => ({ input: x.name, linz: x, whole: true })), ...pairs]) {
     const e = byId.get(m.linz.id) || { input: m.input, linz: m.linz, allocated: false, studies: [] };
@@ -386,21 +396,22 @@ function scopeOf_(c) {
   const base = [...byId.values()];
   base.forEach((e) => { e.studies = [...new Map(e.studies.map((x) => [norm(x), x])).values()]; });
   const P = tapicks(c), skip = new Set(P.skip.map(norm));
+  for (const m of pairs) { const to = aliasOf(c, m.mname); if (to) m.mname = to; }
   if (skip.size) { for (let i = pairs.length - 1; i >= 0; i--) if (skip.has(norm(pairs[i].mname))) pairs.splice(i, 1);
     for (const e of base) e.studies = e.studies.filter((x) => !skip.has(norm(x)));
     for (let i = base.length - 1; i >= 0; i--) if (s && !base[i].studies.length && !base[i].whole) base.splice(i, 1); }
   const ex = new Set(P.ex.map(norm)), inBase = new Set(base.map((m) => norm(m.linz.name)));
   const matched = base.filter((m) => !ex.has(norm(m.linz.name)));
-  for (const n of P.add) { const x = byNorm.get(norm(n)); if (x && !inBase.has(norm(x.name)) && !ex.has(norm(x.name))) matched.push({ input: x.name, linz: x, added: true, studies: [] }); }
+  for (const n of P.add) { const x = byNorm.get(n); if (x && !inBase.has(norm(x.name)) && !ex.has(norm(x.name))) matched.push({ input: x.name, linz: x, added: true, studies: [] }); }
   return { s, L, base, matched, unmatched, allPairs: pairs, isEx: (n) => ex.has(norm(n)), pairs: pairs.filter((m) => !ex.has(norm(m.linz.name))), excluded: base.filter((m) => ex.has(norm(m.linz.name))),
     scoped: !!s || P.add.length > 0 || P.ex.length > 0 || P.skip.length > 0 || manualFor(c).length > 0 };
 }
 function togglePick(c, name, include) {
-  const P = { add: [...tapicks(c).add], ex: [...tapicks(c).ex], skip: [...tapicks(c).skip] }, sc = scopeOf(c), k = norm(name);
+  const P = { add: [...tapicks(c).add], ex: [...tapicks(c).ex], skip: [...tapicks(c).skip], alias: tapicks(c).alias }, sc = scopeOf(c), k = norm(name);
   const inBase = sc && sc.base.some((m) => norm(m.linz.name) === k);
   P.add = P.add.filter((x) => norm(x) !== k); P.ex = P.ex.filter((x) => norm(x) !== k);
   if (inBase && !include) P.ex.push(name); if (!inBase && include) P.add.push(name);
-  P.add.length || P.ex.length || P.skip.length ? BATCH.picks[c] = P : delete BATCH.picks[c]; BATCH.valid = {}; saveSel();
+  setPicks(c, { ...tapicks(c), ...P });
 }
 // ‹ previous / next › through the selected TAs, labelled with each TA's provider
 function taNav(cur, attr) {
@@ -419,6 +430,24 @@ function codesInFiles() {
   for (const k of Object.keys(BATCH.matches)) if (!m.has(k)) m.set(k, { code: k.toUpperCase(), rows: 0, files: new Set(["saved match"]) });
   return [...m.entries()].map(([k, e]) => ({ key: k, ...e, mine: BATCH.matches[k] || "", saved: prvdrCode(e.code) })).sort((a, b) => (!!(a.mine || a.saved) - !!(b.mine || b.saved)) || a.code.localeCompare(b.code));
 }
+function inGeom(geom, x, y) { let ins = false;
+  for (const poly of geom) for (const r of poly) for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const [xi, yi] = r[i], [xj, yj] = r[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins; }
+  return ins; }
+// look up not-found study names in the NZ Gazetteer (official place names with coordinates) and suggest the LINZ suburb that
+// contains each place; only places inside this TA's suburbs count
+async function gazetteer(c) {
+  const L = BATCH.linz[c]; if (!L) return;
+  const names = unassigned(c).flatMap((r) => [r.mname, r.name]).filter((n, i, a) => n && a.findIndex((x) => norm(x) === norm(n)) === i);
+  if (!names.length) return toastMsg("Nothing to look up: every study suburb has a LINZ suburb");
+  const { data, error } = await sb.functions.invoke("linz-suburbs", { body: { action: "places", ta_code: c, names } });
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (_) { /* keep */ } throw new Error(m); }
+  const G = (BATCH.gaz = BATCH.gaz || {})[c] = {};
+  for (const p of (data && data.places) || []) {
+    const hit = L.list.find((x) => x.geom && inGeom(x.geom.coordinates, p.x, p.y)); if (!hit) continue;
+    for (const n of names) if (mkey(n) === mkey(p.name)) (G[mkey(n)] = G[mkey(n)] || []).push({ place: p.name, type: p.type, status: p.status, linz: hit.name });
+  }
+  const found = Object.keys(G).length; toastMsg(`NZ Gazetteer: ${found} of ${names.length} name(s) located inside ${taOf(c).name}`);
+}
 // rows of a TA's lists that match no LINZ suburb (allocated or not)
 function allocRows(c, all) { return memo(`allocRows|${c}|${all ? 1 : 0}`, () => allocRows_(c, all)); }
 function allocRows_(c, all) {
@@ -427,17 +456,22 @@ function allocRows_(c, all) {
   if (s) { const keep = new Set(s.keep.map(norm)), rows = s.rows.length ? s.rows : s.keep.map((n) => ({ linz_ref: n, m_suburb: n, territory: "", file: "" }));
     for (const r of rows) {
       if (!keep.has(norm(r.linz_ref))) continue;
-      const direct = byNorm.has(norm(r.linz_ref)) || (r.spellings || []).some((x) => byNorm.has(norm(x)));
+      const direct = byNorm.has(r.linz_ref) || (r.spellings || []).some((x) => byNorm.has(x));
       const k = allocKey(r.file, r.linz_ref, r.territory || ""); if (seen.has(k)) continue;
       const alloc = allocFor(r.file, r.linz_ref, r.territory || ""); if (!all && direct && !(alloc && alloc.file === r.file)) continue; seen.add(k);
       const hit = locateRow(r.linz_ref, r, byNorm);
       const tg = hit ? hit.linz.map((x) => x.name) : [];
       out.push({ key: k, file: r.file, name: r.linz_ref, mname: r.m_suburb || r.linz_ref, territory: r.territory || "", alloc, direct, targets: tg, status: !tg.length ? "not found" : hit.allocated ? "mapped" : "matched" }); } }
   for (const a of manualFor(c)) { const k = allocKey("manual", a.name, a.territory);
-    const tg = (a.linzSuburbs || []).map((x) => (byNorm.get(norm(x.name)) || {}).name).filter(Boolean);
+    const tg = (a.linzSuburbs || []).map((x) => (byNorm.get(x.name) || {}).name).filter(Boolean);
     out.push({ key: k, file: "manual", name: a.name, mname: a.name, territory: a.territory, alloc: a, manual: true, targets: tg, status: tg.length ? "mapped" : "not found" }); }
   const skip = new Set(tapicks(c).skip.map(norm)); for (const r of out) if (skip.has(norm(r.mname))) r.skipped = true;
-  return out;
+  const A = tapicks(c).alias, merged = [];
+  for (const r of out) { const to = A[norm(r.mname)] && A[norm(r.mname)].to; if (!to) { merged.push(r); continue; }
+    const host = out.find((x) => norm(x.mname) === norm(to) && !A[norm(x.mname)]); if (!host) { merged.push(r); continue; }
+    host.aliases = [...(host.aliases || []), r.mname]; for (const x of r.targets) if (!host.targets.includes(x)) host.targets.push(x);
+    if (host.status === "not found" && host.targets.length) host.status = "mapped"; }
+  return merged;
 }
 function allocateHTML() {
   const sel = [...BATCH.sel].sort(); if (!sel.length) return `<p class="muted">Select TAs in 2.1 Inputs and TAs first.</p>`;
@@ -472,17 +506,26 @@ function allocateHTML() {
       <div class="card amap"><div class="row" style="justify-content:space-between;align-items:center"><h3 style="margin:0">Study suburbs (${rows.length})</h3>
         <span class="small">${nf ? `<span class="tag warn">${nf} not found</span> ` : ""}<span class="tag info">${nm} mapped</span> <span class="tag ok">${nok} matched</span></span></div>
         <div class="row" style="gap:6px;margin:6px 0"><input type="text" id="afilter" value="${esc(store.get("afilter", ""))}" placeholder="Filter" style="width:120px" aria-label="Filter study suburbs">
-          ${nf ? `<button class="btn" type="button" id="asel-nf" style="padding:1px 8px">Select not found</button>` : ""}</div>
+          <button class="btn" type="button" id="asel-shown" style="padding:1px 8px">Select all shown</button>${nf ? `<button class="btn" type="button" id="asel-nf" style="padding:1px 8px">Select not found</button>` : ""}
+          <button class="btn" type="button" data-aload="1" style="padding:1px 8px">Load all shown</button><button class="btn" type="button" data-aload="0" style="padding:1px 8px">Exclude all shown</button></div>
+        <div class="row small" style="gap:6px;margin:0 0 6px">${nf ? `<button class="btn" type="button" id="agaz" style="padding:1px 8px" title="Look up not-found names in the NZ Gazetteer of official place names and suggest the LINZ suburb that contains each place">📍 Locate not-found names (NZ Gazetteer)</button>` : ""}
+          <button class="btn" type="button" id="arefetch" style="padding:1px 8px" title="Fetch this TA's suburbs from LINZ again (uses one LINZ request)">↻ Re-fetch LINZ suburbs</button>
+          <span class="muted">${fmt(L.list.length)} LINZ suburbs${L.cached ? " (shared cache)" : ""}</span></div>
         <div style="max-height:470px;overflow:auto"><table style="width:100%"><thead><tr><th></th><th class="l">Study suburb</th><th class="l">LINZ suburb(s)</th><th class="l">Load</th></tr></thead><tbody>
-        ${shown.map((r) => { const sug = r.targets.length ? [] : similar(r.name, names), on = selected.has(r.key);
+        ${shown.map((r) => { const sug = r.targets.length ? [] : similar(r.mname, names).concat(similar(r.name, names)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3), on = selected.has(r.key);
+          const gz = r.targets.length ? [] : (((BATCH.gaz || {})[c] || {})[mkey(r.mname)] || ((BATCH.gaz || {})[c] || {})[mkey(r.name)] || []);
           return `<tr style="${on ? "background:var(--accent-soft)" : ""}${r.skipped ? ";opacity:.55" : ""}"><td><input type="checkbox" data-asel="${esc(r.key)}" ${on ? "checked" : ""} aria-label="Select ${esc(r.mname)}"></td>
             <td class="l"><b>${esc(r.mname)}</b> ${tag(r.status)}${norm(r.mname) !== norm(r.name) ? `<br><span class="small muted">ref ${esc(r.name)}</span>` : ""}${r.manual ? ` <button class="btn" type="button" data-mdel="${esc(r.key)}" style="padding:0 4px">remove</button>` : ""}</td>
             <td class="l small">${r.targets.map((x) => `<span class="tag ${r.status === "matched" ? "ok" : "info"}">${esc(x)} <button class="btn" type="button" data-adel="${esc(r.key)}" data-aname="${esc(x)}" style="padding:0 4px" aria-label="Unassign ${esc(x)}">×</button></span>`).join(" ")}
               ${r.alloc && !r.manual && r.direct ? ` <button class="btn" type="button" data-areset="${esc(r.key)}" style="padding:0 4px">use name match</button>` : ""}
-              ${sug.length ? `<span class="muted">did you mean</span> ${sug.map((n) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(n)}" style="padding:1px 6px">${esc(n)}</button>`).join(" ")}` : ""}</td>
-            <td><label class="small"><input type="checkbox" data-askip="${esc(r.mname)}" ${r.skipped ? "" : "checked"} aria-label="Load ${esc(r.mname)}"></label></td></tr>`; }).join("")}</tbody></table></div>
+              ${sug.length ? `<span class="muted">did you mean</span> ${sug.map((n) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(n)}" style="padding:1px 6px">${esc(n)}</button>`).join(" ")}` : ""}
+              ${gz.length ? `<br><span class="muted">NZ Gazetteer:</span> ${[...new Map(gz.map((g) => [g.linz, g])).values()].map((g) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(g.linz)}" title="${esc(g.place)} (${esc(g.type || "place")}, ${esc(g.status || "")}) lies in ${esc(g.linz)}" style="padding:1px 6px">📍 ${esc(g.linz)}</button>`).join(" ")}` : ""}
+              ${(r.aliases || []).length ? `<br><span class="muted">also spelled:</span> ${r.aliases.map((a) => `<span class="tag">${esc(a)} <button class="btn" type="button" data-uncombine="${esc(a)}" style="padding:0 4px" aria-label="Separate ${esc(a)}">×</button></span>`).join(" ")}` : ""}</td>
+            <td><button class="btn" type="button" data-askip="${esc(r.mname)}" data-on="${r.skipped ? "1" : "0"}" style="padding:1px 8px;${r.skipped ? "" : "border-color:var(--ok, #2e7d32);color:var(--ok, #2e7d32)"}" aria-pressed="${!r.skipped}">${r.skipped ? "Excluded" : "Load"}</button></td></tr>`; }).join("")}</tbody></table></div>
         <datalist id="alc-dl">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
         <div class="row small" style="gap:6px;margin:8px 0 0">Add a study suburb <input type="text" id="mnew-study" placeholder="name" style="width:120px" aria-label="New study suburb"> → <input type="text" list="alc-dl" id="mnew-linz" placeholder="LINZ suburb" style="width:120px" aria-label="LINZ suburb"><button class="btn" type="button" id="mnew">Add</button></div>
+        <datalist id="study-dl">${rows.filter((r) => !(r.aliases && false)).map((r) => `<option value="${esc(r.mname)}">`).join("")}</datalist>
+        <div class="row small" style="gap:6px;margin:6px 0 0">Combine: <input type="text" list="study-dl" id="comb-from" placeholder="spelling" style="width:120px" aria-label="Study suburb that is another spelling"> is another spelling of <input type="text" list="study-dl" id="comb-to" placeholder="study suburb" style="width:120px" aria-label="Study suburb to keep"><button class="btn" type="button" id="comb-go">Combine</button></div>
         <p class="small muted" style="margin:6px 0 0">A study suburb can use several LINZ suburbs and a LINZ suburb several study suburbs. Untick <i>Load</i> to leave a study suburb out. Saved with the configuration and in exported builder configs.</p></div></div>`;
   }
   return `<div class="card"><h3>Provider codes in your files</h3>
@@ -648,7 +691,12 @@ function exportBuilder(made) {
 }
 
 // ---------------------------------------------------------------- 4. validate suburbs
-function similar(a, list) { const n = norm(a); return list.filter((x) => { const m = norm(x); return m.startsWith(n.slice(0, 4)) || n.startsWith(m.slice(0, 4)) || m.includes(n) || n.includes(m); }).slice(0, 3); }
+function lev(a, b) { if (a === b) return 0; const m = a.length, n = b.length; if (!m || !n) return m || n; let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[n]; }
+function similar(a, list) { const k = mkey(a); if (!k) return [];
+  return list.map((x) => { const m = mkey(x), d = lev(k, m), r = 1 - d / Math.max(k.length, m.length), c = m.includes(k) || k.includes(m) ? 0.25 : 0, w = k.split(" ").some((t) => t.length > 3 && m.split(" ").includes(t)) ? 0.15 : 0;
+    return [x, r + c + w]; }).filter(([, sc]) => sc >= 0.55).sort((p, q) => q[1] - p[1]).slice(0, 3).map(([x]) => x); }
+function similar_old(a, list) { const n = norm(a); return list.filter((x) => { const m = norm(x); return m.startsWith(n.slice(0, 4)) || n.startsWith(m.slice(0, 4)) || m.includes(n) || n.includes(m); }).slice(0, 3); }
 async function validateAll() {
   const sel = [...BATCH.sel].sort();
   for (const c of sel) {
@@ -753,18 +801,34 @@ async function queueBatch() {
   toastMsg(`Queued ${sel.length} region job(s): the worker runs them one at a time`);
   await loadBatchData(); drawBatch();
 }
-async function saveConfig() {
-  const name = ($("#cfg-name").value || "").trim(); if (!name) return toastMsg("Give the configuration a name");
+// a loaded configuration saves itself shortly after any change (so PRVDRs, mappings, timelines are never lost)
+let AUTOSAVE = null;
+function autosave() { if (!BATCH.config || !can("editor") || BATCH.saving) return; clearTimeout(AUTOSAVE); BATCH.dirty = true; cfgBarStatus();
+  AUTOSAVE = setTimeout(async () => { BATCH.saving = true; try { await q(sb.from("batch_configs").update(configRec(BATCH.config.name)).eq("id", BATCH.config.id)); BATCH.dirty = false; BATCH.savedAt = new Date(); }
+    catch (err) { toastMsg("Not saved: " + err.message); } finally { BATCH.saving = false; cfgBarStatus(); } }, 1200); }
+function cfgBarStatus() { const el = $("#cfg-bar-status"); if (el) el.textContent = !BATCH.config ? "not saved yet: give it a name and Save" : BATCH.saving ? "saving…" : BATCH.dirty ? "unsaved changes…" : BATCH.savedAt ? `saved ${BATCH.savedAt.toLocaleTimeString()}` : "saved"; }
+function configBar() {
+  return can("editor") ? `<div class="row small" style="gap:6px;align-items:center;margin:-4px 0 12px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;flex-wrap:wrap">
+    <b>Configuration</b><input type="text" id="cfg-bar-name" value="${esc(BATCH.config ? BATCH.config.name : "")}" placeholder="name" style="width:170px" aria-label="Configuration name">
+    <button class="btn" type="button" id="cfg-bar-save" style="padding:1px 8px">${BATCH.config ? "Save" : "Save as new"}</button>
+    <button class="btn" type="button" id="bcfg-export" style="padding:1px 8px">Export builder config</button>
+    <span class="muted" id="cfg-bar-status">${!BATCH.config ? "not saved yet: give it a name and Save" : BATCH.dirty ? "unsaved changes…" : "saved, and saves automatically"}</span></div>` : "";
+}
+function configRec(name) {
   const sc = scopeByTA(), sel = [...BATCH.sel].sort();
-  const rec = { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])),
+  return { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])),
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
     prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     suburb_picks: Object.fromEntries(Object.entries(BATCH.picks).filter(([c]) => BATCH.sel.has(c))),
     timelines: Object.fromEntries(Object.entries(BATCH.tl).filter(([c]) => c === "_all" || BATCH.sel.has(c))),
     prvdr_matches: Object.fromEntries(Object.entries(BATCH.matches).map(([k, v]) => [k.toUpperCase(), v])), allocations: Object.values(BATCH.alloc) };
+}
+async function saveConfig(nameIn) {
+  const name = (nameIn || ($("#cfg-name") || {}).value || "").trim(); if (!name) return toastMsg("Give the configuration a name");
+  const rec = configRec(name);
   if (BATCH.config && BATCH.config.name === name) { await q(sb.from("batch_configs").update(rec).eq("id", BATCH.config.id)); }
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
-  toastMsg(`Saved configuration "${name}"`); await loadBatchData(); STUDY.id = String(BATCH.config.id); store.set("study", STUDY.id); loadStudies(); drawBatch();
+  BATCH.dirty = false; BATCH.savedAt = new Date(); toastMsg(`Saved configuration "${name}"`); await loadBatchData(); STUDY.id = String(BATCH.config.id); store.set("study", STUDY.id); loadStudies(); drawBatch();
 }
 function loadConfig(id) {
   const c = BATCH.configs.find((x) => String(x.id) === String(id));
@@ -822,6 +886,21 @@ document.addEventListener("click", async (e) => {
     const hit = ((BATCH.linz[curTA()] || {}).list || []).find((x) => norm(x.name) === norm(t.dataset.aname)); if (!hit) return toastMsg(`"${t.dataset.aname}" is not a LINZ suburb in this TA`);
     if (!r.targets.includes(hit.name)) setAlloc(r, [...r.targets, hit.name]); return drawBatch(); }
   if (t.id === "aclear") { aSel().clear(); return drawBatch(); }
+  const skb = cl("[data-askip]"); if (skb) { const c = curTA(), P = tapicks(c), k = norm(skb.dataset.askip), skip = P.skip.filter((x) => norm(x) !== k);
+    if (skb.dataset.on !== "1") skip.push(skb.dataset.askip); setPicks(c, { ...P, skip }); return drawBatch(); }
+  // bulk actions on the rows shown (after the filter)
+  const shownRows = () => { const f = norm(store.get("afilter", "")); return curAllocRows().filter((r) => !f || norm(r.mname + " " + r.targets.join(" ")).includes(f)); };
+  if (t.id === "asel-shown") { const S = aSel(); for (const r of shownRows()) S.add(r.key); return drawBatch(); }
+  const lb = cl("[data-aload]"); if (lb) { const c = curTA(), P = tapicks(c), names = new Set(shownRows().map((r) => norm(r.mname)));
+    const skip = P.skip.filter((x) => !names.has(norm(x))); if (lb.dataset.aload === "0") skip.push(...shownRows().map((r) => r.mname)); setPicks(c, { ...P, skip }); return drawBatch(); }
+  if (t.id === "agaz") { t.disabled = true; t.textContent = "Looking up…"; try { await gazetteer(curTA()); } catch (err) { toastMsg("Gazetteer: " + err.message); } return drawBatch(); }
+  if (t.id === "arefetch") { if (!confirm("Fetch this TA's suburbs from LINZ again? This uses one LINZ request and updates the shared cache.")) return;
+    t.disabled = true; t.textContent = "Fetching…"; try { await ensureLinz(curTA(), true); toastMsg("LINZ suburbs updated"); } catch (err) { toastMsg("LINZ: " + err.message); } return drawBatch(); }
+  if (t.id === "comb-go") { const c = curTA(), from = (($("#comb-from") || {}).value || "").trim(), to = (($("#comb-to") || {}).value || "").trim(), rows = curAllocRows();
+    const A = rows.find((r) => norm(r.mname) === norm(to)), B = rows.find((r) => norm(r.mname) === norm(from)) || { mname: from };
+    if (!from || !to || norm(from) === norm(to)) return toastMsg("Choose two different study suburbs"); if (!A) return toastMsg(`"${to}" is not a study suburb here`);
+    const P = tapicks(c), alias = { ...P.alias, [norm(B.mname)]: { from: B.mname, to: A.mname } }; setPicks(c, { ...P, alias }); toastMsg(`${B.mname} is now treated as another spelling of ${A.mname}`); return drawBatch(); }
+  const unc = cl("[data-uncombine]"); if (unc) { const c = curTA(), P = tapicks(c), alias = { ...P.alias }; delete alias[norm(unc.dataset.uncombine)]; setPicks(c, { ...P, alias }); return drawBatch(); }
   if (t.id === "asel-nf") { const S = aSel(); for (const r of curAllocRows()) if (!r.targets.length && !r.skipped) S.add(r.key); return drawBatch(); }
   if (t.id === "apicks-clear") { const c = curTA(), P = tapicks(c); P.skip.length ? BATCH.picks[c] = { add: [], ex: [], skip: P.skip } : delete BATCH.picks[c]; BATCH.valid = {}; saveSel(); return drawBatch(); }
   if (t.id === "alloc-next") { const n = +t.dataset.todo || 0;
@@ -844,6 +923,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "bta-all" || t.id === "bta-none") { const f = norm(store.get("bta-filter", "")); for (const x of BATCH.tas) if (!f || norm([x.name, (x.prvdrs || []).join(" "), x.rc].join(" ")).includes(f)) t.id === "bta-all" ? BATCH.sel.add(x.code) : BATCH.sel.delete(x.code); saveSel(); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "validate-go" && can("editor")) { t.disabled = true; try { await validateAll(); } finally { t.disabled = false; } return; }
   if (t.id === "batch-queue" && can("editor")) { t.disabled = true; try { await queueBatch(); } catch (err) { toastMsg("Not queued: " + err.message); t.disabled = false; } return; }
+  if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
   if (t.id === "batch-refresh") { await loadBatchData(); return drawBatch(); }
@@ -853,13 +933,18 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("change", async (e) => {
   const t = e.target;
   if (t.dataset && t.dataset.tsel) { t.checked ? BATCH.sel.add(t.dataset.tsel) : BATCH.sel.delete(t.dataset.tsel); saveSel(); BATCH.valid = {}; return drawBatch(); }
-  if (t.dataset && t.dataset.tprvdr) { const c = t.dataset.tprvdr, auto = (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0];
+  if (t.dataset && t.dataset.tprvdr) { const c = t.dataset.tprvdr, f0 = filePrvdr(c);
+    if (f0) { const codes = [...(f0.acronyms || []), ...(f0.unresolved || [])];
+      for (const code of codes) { const tas = new Set(); for (const r of BATCH.files.provider || []) if (norm(r.PRVDR) === norm(code)) provRowTAs(r).forEach((x) => tas.add(x));
+        for (const r of BATCH.files.map || []) if (norm(r.PROVIDER) === norm(code)) rowTAs(r.M_TERRITORY, r.PROVIDER).forEach((x) => tas.add(x));
+        // only your own acronyms / unmatched codes (not saved PRVDR codes such as "TDC"), and only if no other TA uses them
+        if ([...tas].every((x) => x === c) && norm(code) !== norm(t.value) && prvdrCode(code) !== String(code).trim().toUpperCase()) BATCH.matches[norm(code)] = t.value; } }
+    const auto = (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0];
     t.value === auto ? delete BATCH.prvdr[c] : BATCH.prvdr[c] = t.value; saveSel(); return drawBatch(); }
   if (t.id === "batch-keep") { BATCH.rev++; MEMO.fresh = false; BATCH.keep = t.value; store.set("batch-keep", t.value); BATCH.valid = {}; return drawBatch(); }
   if (t.id === "cfg-pick") return loadConfig(t.value);
   if (t.dataset && t.dataset.asel) { const S = aSel(); t.checked ? S.add(t.dataset.asel) : S.delete(t.dataset.asel); return drawBatch(); }
-  if (t.dataset && t.dataset.askip) { const c = curTA(), P = tapicks(c), k = norm(t.dataset.askip); const skip = P.skip.filter((x) => norm(x) !== k); if (!t.checked) skip.push(t.dataset.askip);
-    const np = { add: P.add, ex: P.ex, skip }; np.add.length || np.ex.length || np.skip.length ? BATCH.picks[c] = np : delete BATCH.picks[c]; BATCH.valid = {}; saveSel(); return drawBatch(); }
+
   if (t.dataset && t.dataset.tl) { const c = t.dataset.tl, o = { ...tlOf(c) }, v = parseDay(t.value);
     if (v === null) { toastMsg(`"${t.value}" isn't a date between 1940-01-01 and ${latestDay()}: use yyyy-mm-dd, e.g. 2012-01-01`); t.value = tlOf(c)[t.dataset.tlk] || ""; return; }
     v ? o[t.dataset.tlk] = v : delete o[t.dataset.tlk];
