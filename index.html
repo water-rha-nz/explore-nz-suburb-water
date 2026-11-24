@@ -1896,7 +1896,8 @@ function progressLive() {
       const per = jobs.map((j) => { const steps = (j.params && j.params.steps) || [], runs = PROG.runs.filter((r) => r.job_id === j.id), last = Object.fromEntries(runs.map((r) => [r.step, r]));
         const done = steps.filter((st) => last[st] && (last[st].status === "done" || last[st].status === "skipped")).length; return { j, steps, last, runs, done }; });
       const tot = per.reduce((t, p) => t + Math.max(1, p.steps.length), 0), dn = per.reduce((t, p) => t + (p.j.status === "done" ? Math.max(1, p.steps.length) : p.done), 0), pct = tot ? Math.round(100 * dn / tot) : 0;
-      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done</span></div>
+      const failed = jobs.filter((j) => j.status === "failed");
+      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}</span></div>
         <div class="bar-out" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch progress" style="height:8px;margin:4px 0"><div class="bar-in" style="width:${pct}%"></div></div>
         <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
           return `<tr><td class="l" style="width:28%">${esc(reg)}</td><td class="l">${tag(j.status)}</td>
@@ -2070,6 +2071,11 @@ document.addEventListener("click", async (e) => {
   if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
+  const rb = t.closest && t.closest("[data-retry-batch]");
+  if (rb && can("editor")) { rb.disabled = true; const ids = PROG.jobs.filter((j) => j.batch_id === +rb.dataset.retryBatch && j.status === "failed").map((j) => j.id);
+    try { if (ids.length) await q(sb.from("jobs").update({ status: "queued", reason: null, not_before: null }).in("id", ids)); toastMsg(`${ids.length} region job(s) queued again`); }
+    catch (err) { toastMsg("Not retried: " + err.message); }
+    PROG.at = null; await refreshProgress(); kickWorker(true); return; }
   if (t.id === "kick-worker") { t.disabled = true; await kickWorker(false); return; }
   if (t.id === "prog-refresh") { PROG.at = null; return refreshProgress(); }
   if (t.id === "batch-refresh") { await loadBatchData(); return drawBatch(); }
