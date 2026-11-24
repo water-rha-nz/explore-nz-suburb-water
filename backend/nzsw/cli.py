@@ -70,7 +70,9 @@ def run_steps(con, region, steps, job_id=None, log=print):
         for name, service in SVC.items():
             r = con.execute("select key, owner from job_api_key(%s, %s)", (job_id, name)).fetchone()
             if r and r[0]:
-                _steps.USER_KEYS[name] = r[0]; owners[service] = str(r[1])
+                # budgets per key, not per person: a replaced key starts with its own daily budget. The ledger holds only a short
+                # one-way fingerprint of the key, never the key
+                _steps.USER_KEYS[name] = r[0]; owners[service] = f"{r[1]}:{hashlib.sha256(r[0].encode()).hexdigest()[:8]}"
     if owners:
         log(f"using the job creator's own keys for: {', '.join(sorted(owners))}")
     client = L.Client(ledger=DbLedger(con, owners), log=log)
