@@ -49,6 +49,20 @@ def _note(msg):
 LAYER_NAMES = {113764: "suburbs", 50772: "parcels", 50804: "titles", 101290: "buildings", 111206: "SA2 boundaries"}
 
 
+def _wfs_hits(client, service, base, layer, bbox):
+    """Number of features in a bbox (WFS resultType=hits): one small request, no features downloaded."""
+    k = key("linz" if service == "linz_wfs" else "statsnz_datafinder")
+    r = client.request(service, "GET", base.format(k=k), params=dict(service="WFS", version="2.0.0", request="GetFeature", typeNames=f"layer-{layer}",
+                                                                      resultType="hits", bbox=bbox), redact=lambda s: s.replace(k, "<key>"), timeout=120)
+    m = re.search(r'numberMatched="(\d+)"', r.text or "")
+    return int(m.group(1)) if m else None
+
+
+def _bbox4326(geoms):
+    minx, miny, maxx, maxy = gpd.GeoSeries([geoms.union_all()], crs=2193).to_crs(4326).total_bounds
+    return f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326"
+
+
 def _wfs(client, service, base, layer, cql=None, bbox=None):
     k = key("linz" if service == "linz_wfs" else "statsnz_datafinder")
     url = base.format(k=k)
@@ -131,13 +145,23 @@ def linz(con, client, region, log):
         anchor = pts.iloc[int(np.lexsort((pts.x.values, pts.y.values))[0])]     # start from the southernmost remaining suburb
         todo = todo.loc[pts.distance(anchor).sort_values().index[:cap]]
         more = len(sub) - len(loaded) - cap
-    log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}{f' ({more} more in later runs)' if more else ''}")
     if hasattr(log, "progress"):
         log.progress(len(loaded) / max(1, len(sub)))
+    # keep the part's download area within the per-run feature limit: count parcels and buildings first (cheap) and
+    # halve the part (nearest suburbs kept) until both fit
+    limit = int(L.SERVICES["linz_wfs"]["max_features_run"] * 0.6)
+    while True:
+        bbox = _bbox4326(todo.geometry)
+        counts = [_wfs_hits(client, "linz_wfs", LINZ, lyr, bbox) for lyr in (50772, 101290)]
+        if all(c is None or c <= limit for c in counts) or len(todo) == 1:
+            break
+        pts = todo.geometry.representative_point(); a0 = pts.iloc[0]
+        keep = max(1, len(todo) // 2); dropped = len(todo) - keep
+        todo = todo.loc[pts.distance(a0).sort_values().index[:keep]]; more += dropped
+        log(f"part too large for one download ({max(c or 0 for c in counts):,} features): trying {len(todo)} suburbs")
+    log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}{f' ({more} more in later runs)' if more else ''}")
     full_sub, sub = sub, gpd.GeoDataFrame(todo, crs=2193)
     area = sub.union_all()
-    minx, miny, maxx, maxy = gpd.GeoSeries([area], crs=2193).to_crs(4326).total_bounds
-    bbox = f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326"
 
     par = _wfs(client, "linz_wfs", LINZ, 50772, bbox=bbox)
     par = par[par.parcel_intent.isin(RES_INTENTS)]
@@ -252,7 +276,7 @@ def imagery_index(con, client, region, log):
             items = [x for x in k if x.endswith(".json") and "collection" not in x]
             if items: cands.append((year, -res, c.rstrip("/"), items))
     if not cands:
-        raise ValueError(f"no RGB+NIR capture at 0.125 m or finer in {folders}")
+        return "no suitable imagery (no RGB+NIR capture at 0.125 m or finer): pools and gardens are not available for this region"
     ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from buildings b where exists (select 1 from sections s where s.region_id=%s and st_intersects(s.geom, b.geom))) t", (region,)).fetchone()
     reg_box = box(*ext) if ext[0] is not None else None
     for year, nres, coll, items in sorted(cands, reverse=True):          # newest, then finest
@@ -301,7 +325,7 @@ def imagery_index(con, client, region, log):
                            on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
         con.execute("update regions set imagery_captures = array[%s] where id=%s", (cap, region))
         return f"capture {cap} ({year}, {-nres} m): {len(hit)} tiles hold the region's buildings"
-    raise ValueError("no capture covers the region's buildings")
+    return "no suitable imagery covers the region's buildings: pools and gardens are not available for this region"
 
 
 # ---------------------------------------------------------------- imagery (pools, vegetation)
@@ -316,7 +340,7 @@ def imagery(con, client, region, log):
     left_after = max(0, len(todo) - L.SERVICES["linz_imagery_s3"]["max_tiles_run"]); todo = todo[:L.SERVICES["linz_imagery_s3"]["max_tiles_run"]]   # large regions: in parts
     if not todo:
         n = con.execute("select count(*) from imagery_tiles where region_id=%s", (region,)).fetchone()[0]
-        if not n: raise ValueError("no imagery tiles indexed (run imagery_index first)")
+        if not n: return "no imagery for this region: pools and gardens skipped"
     else:
         cap = todo[0][0]
         c2 = con.execute("select calibration from imagery_captures where id=%s", (cap,)).fetchone()
