@@ -775,6 +775,7 @@ function validateHTML() {
 
 // ---------------------------------------------------------------- 5. load
 function loadHTML() {
+  if (can("editor")) setTimeout(() => { if (!PROG.at || Date.now() - PROG.at > 5000) refreshProgress(); else scheduleProgress(); }, 0);
   const sel = [...BATCH.sel].sort(), v = BATCH.valid, ix = Object.fromEntries((D.index_regions || []).map((r) => [r.TA_CODE, r]));
   const notReady = sel.filter((c) => !(v[c] && v[c].status === "done"));
   const blocked = sel.filter((c) => v[c] && v[c].status === "done" && ((v[c].scoped && !v[c].matched.length) || (!v[c].scoped && taOf(c).parts > 1)));
@@ -791,7 +792,8 @@ function loadHTML() {
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
     ${can("editor") ? `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" id="batch-queue" type="button" ${ready.length ? "" : "disabled"}>Queue batch (${ready.length} region${ready.length === 1 ? "" : "s"})</button>
       ${notReady.length ? `<button class="btn" type="button" id="load-validate">Validate the rest (${notReady.length})</button>` : ""}
-      ${!ready.length ? `<span class="small muted">${sel.length ? "Nothing is ready yet: validate the TAs (2.3) first." : "Select TAs in 2.1 first."}</span>` : ready.length < sel.length ? `<span class="small muted">${sel.length - ready.length} TA(s) aren't ready and won't be queued.</span>` : ""}</div>` : lock("editor", "Queuing batches")}</div>
+      ${!ready.length ? `<span class="small muted">${sel.length ? "Nothing is ready yet: validate the TAs (2.3) first." : "Select TAs in 2.1 first."}</span>` : ready.length < sel.length ? `<span class="small muted">${sel.length - ready.length} TA(s) aren't ready and won't be queued.</span>` : ""}</div>
+    <div id="batch-progress">${progressLive()}</div>` : lock("editor", "Queuing batches")}</div>
   ${can("editor") ? progressHTML() + regionJobsHTML() : ""}
   <div style="margin-top:20px">${detailedOverviewHTML()}</div>`;
 }
@@ -810,6 +812,51 @@ function regionJobsHTML() {
 }
 document.addEventListener("change", (e) => { if (e.target.id === "rj-region") { region = e.target.value; store.set("region", region); refreshJobs(); const el = $("#rj-tl"); if (el) el.innerHTML = tlEditor("r:" + region); } });
 document.addEventListener("click", (e) => { if (e.target.id === "rj-refresh") refreshJobs(); });
+// ---------------------------------------------------------------- live progress of your batches (under Queue batch)
+// Refreshed every ~15 s while jobs are active and the page is visible; only the panel is redrawn.
+const PROG = { jobs: [], runs: [], batches: [], at: null, timer: null, busy: false };
+const ACTIVE = new Set(["queued", "scheduled", "running", "paused_quota"]);
+async function refreshProgress() {
+  if (!can("editor") || PROG.busy) return; PROG.busy = true;
+  try {
+    PROG.batches = await q(sb.from("batches").select("id,name,ta_codes,status,created_at").order("id", { ascending: false }).limit(5));
+    const ids = PROG.batches.map((b) => b.id);
+    PROG.jobs = ids.length ? await q(sb.from("jobs").select("id,region_id,status,reason,batch_id,params,not_before,created_at,finished_at").in("batch_id", ids).order("id")) : [];
+    const jids = PROG.jobs.map((j) => j.id);
+    PROG.runs = jids.length ? await q(sb.from("job_runs").select("job_id,step,status,log,started_at").in("job_id", jids).order("id")) : [];
+    PROG.at = new Date();
+  } catch (e) { PROG.err = e.message; } finally { PROG.busy = false; }
+  const el = $("#batch-progress"); if (el) el.innerHTML = progressLive();
+  scheduleProgress();
+}
+function scheduleProgress() {
+  clearTimeout(PROG.timer);
+  if (stage !== "load" || !PROG.jobs.some((j) => ACTIVE.has(j.status))) return;
+  PROG.timer = setTimeout(() => { if (stage === "load" && (typeof document.visibilityState === "undefined" || document.visibilityState === "visible")) refreshProgress(); else scheduleProgress(); }, 15000);
+}
+const nextWorkerRun = () => { const d = new Date(), m = d.getUTCMinutes(), add = 15 - (m % 15); return new Date(d.getTime() + add * 60000 - d.getUTCSeconds() * 1000); };
+function progressLive() {
+  if (!PROG.at) return `<p class="small muted" style="margin:8px 0 0">Loading batch progress…</p>`;
+  const shown = PROG.batches.filter((b, i) => i === 0 || PROG.jobs.some((j) => j.batch_id === b.id && ACTIVE.has(j.status)));
+  if (!shown.length) return `<p class="small muted" style="margin:8px 0 0">No batches yet. Queued batches show their progress here.</p>`;
+  const icon = { done: "✓", running: "⏳", failed: "✗", paused_quota: "⏸", skipped: "–" }, col = { done: "var(--ok, #2e7d32)", running: "#b26a00", failed: "var(--bad, #b3261e)", paused_quota: "#7a5195" };
+  const tag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "running" ? "warn" : "info"}">${esc(s === "paused_quota" ? "paused (daily limit)" : s)}</span>`;
+  const anyActive = PROG.jobs.some((j) => ACTIVE.has(j.status));
+  return `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><div class="row small" style="justify-content:space-between"><b>Batch progress</b>
+      <span class="muted">${anyActive ? `updates every 15 s · the worker runs every 15 minutes (next ≈ ${nextWorkerRun().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}) · ` : ""}updated ${PROG.at.toLocaleTimeString()} <button class="btn" type="button" id="prog-refresh" style="padding:0 6px">↻</button></span></div>
+    ${anyActive ? `<p class="small muted" style="margin:2px 0 0">Batches run on the server (GitHub Actions worker), not in this page: refreshing or closing it doesn't interrupt them.</p>` : ""}
+    ${PROG.err ? `<p class="small"><span class="tag bad">${esc(PROG.err)}</span></p>` : ""}
+    ${shown.map((b) => { const jobs = PROG.jobs.filter((j) => j.batch_id === b.id);
+      const per = jobs.map((j) => { const steps = (j.params && j.params.steps) || [], runs = PROG.runs.filter((r) => r.job_id === j.id), last = Object.fromEntries(runs.map((r) => [r.step, r]));
+        const done = steps.filter((st) => last[st] && (last[st].status === "done" || last[st].status === "skipped")).length; return { j, steps, last, runs, done }; });
+      const tot = per.reduce((t, p) => t + Math.max(1, p.steps.length), 0), dn = per.reduce((t, p) => t + (p.j.status === "done" ? Math.max(1, p.steps.length) : p.done), 0), pct = tot ? Math.round(100 * dn / tot) : 0;
+      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done</span></div>
+        <div class="bar-out" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch progress" style="height:8px;margin:4px 0"><div class="bar-in" style="width:${pct}%"></div></div>
+        <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
+          return `<tr><td class="l" style="width:28%">${esc(reg)}</td><td class="l">${tag(j.status)}</td>
+            <td class="l">${steps.map((st) => { const r = last[st], stt = r ? r.status : "pending"; return `<span title="${esc(st)}: ${esc(stt)}${r && r.log ? " · " + esc(String(r.log).slice(0, 160)) : ""}" style="display:inline-block;margin:0 3px 0 0;color:${col[stt] || "var(--muted, #888)"}">${icon[stt] || "○"} ${esc(st.replace("_", " "))}</span>`; }).join("")}</td>
+            <td class="l muted" style="white-space:normal;max-width:300px">${j.status === "paused_quota" && j.not_before ? `resumes after ${esc(new Date(j.not_before).toLocaleString())}. ` : ""}${esc(j.reason || (lr && lr.log ? String(lr.log).split("\n").pop().slice(0, 140) : j.status === "queued" ? "waiting for the worker" : ""))}</td></tr>`; }).join("")}</tbody></table></div>`; }).join("")}</div>`;
+}
 function progressHTML() {
   if (!BATCH.batches.length) return `<h2>Your batches</h2><p class="muted small">No batches yet.</p>`;
   const tag = (s) => `<span class="tag ${s === "done" ? "ok" : s === "failed" ? "bad" : s === "running" ? "warn" : "info"}">${esc(s)}</span>`;
@@ -841,7 +888,7 @@ async function queueBatch() {
     }
     await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps: ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"], timeline: tlFor(c) } }));
   }
-  toastMsg(`Queued ${sel.length} region job(s): the worker runs them one at a time`);
+  toastMsg(`Queued ${sel.length} region job(s): progress shows below; the worker runs them one at a time`); PROG.at = null; setTimeout(refreshProgress, 0);
   await loadBatchData(); drawBatch();
 }
 // a loaded configuration saves itself shortly after any change (so PRVDRs, mappings, timelines are never lost)
@@ -977,6 +1024,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
+  if (t.id === "prog-refresh") { PROG.at = null; return refreshProgress(); }
   if (t.id === "batch-refresh") { await loadBatchData(); return drawBatch(); }
   if (t.dataset && t.dataset.tiles) return tileCSV(+t.dataset.tiles).catch((err) => toastMsg(err.message));
   if (t.dataset && t.dataset.publish && can("editor")) { try { await q(sb.from("regions").update({ status: "published" }).eq("id", t.dataset.publish)); toastMsg("Published: reload to add it to the region list"); await loadBatchData(); drawBatch(); } catch (err) { toastMsg(err.message); } }
