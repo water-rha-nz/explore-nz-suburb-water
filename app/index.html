@@ -3045,25 +3045,28 @@ async function studyWorkbook(say) {
   await ensureRegions(S.ids, (i, n, nm) => say(`Loading region ${i} of ${n}: ${nm}…`));
   const ids = S.ids.filter((k) => D.regions[k]), sheets = [], about = [], ed = can("editor");
   const add = (name, rows, desc, src) => { sheets.push({ name, rows, kind: "table" }); about.push([name, Math.max(0, rows.length - 1), desc, src || ""]); };
-  const per = async (label, fn) => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); all.push(...((await fn(k)) || []).map((r) => ({ region_id: k, ...r }))); } return all; };
+  // a sheet whose data can't be read is listed in About as not included, with the reason, instead of stopping the workbook
+  const soft = async (label, fn) => { try { return (await fn()) || []; } catch (err) { about.push([label, 0, `Not included: ${err.message || err}`, ""]); return []; } };
+  const per = async (label, fn) => soft(label, async () => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); all.push(...((await fn(k)) || []).map((r) => ({ region_id: k, ...r }))); } return all; });
 
   // raw stored tables
-  const regs = await retry(() => q(sb.from("regions").select("*").in("id", ids)));
+  // regions: only the columns users may read (who created a region is not readable)
+  const regs = await soft("Regions", () => retry(() => q(sb.from("regions").select("id,name,territorial_authorities,suburb_names,imagery_captures,status,created_at,ta_code,scope,batch_id,prvdr,timeline").in("id", ids))));
   add("Regions", objRows(regs), "Stored region rows: TAs, suburb names, imagery captures, status, provider, timeline.", "this app");
   const sm = await per("Suburb metrics", (k) => q(sb.from("suburb_metrics").select("*").eq("region_id", k)));
   add("Suburb metrics", objRows(sm), "Published suburb aggregates (one row per LINZ suburb): sections, titles, density, pools, gardens, climate cell.", "LINZ, imagery, Open-Meteo");
   const linz = ids.flatMap((k) => D.regions[k].suburbs.map((s) => s.linz_id));
-  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); sc.push(...await retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100))))); }
+  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); sc.push(...await soft("Suburb census", () => retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100)))))); }
   add("Suburb census", objRows(sc), "Census figures apportioned to LINZ suburbs (one row per suburb).", "Stats NZ");
-  let sa2 = []; for (let i = 0; i < linz.length; i += 200) sa2.push(...((await retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) })))) || []));
+  let sa2 = []; for (let i = 0; i < linz.length; i += 200) sa2.push(...((await soft("SA2 codes", () => retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) }))))) || []));
   sa2 = [...new Set(sa2.map(String))];
-  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); cm.push(...await retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100))))); }
+  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); cm.push(...await soft("SA2 census", () => retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100)))))); }
   add("SA2 census", objRows(cm), "Census metrics per Statistical Area 2 (the source of the suburb census).", "Stats NZ");
   const cells = [...new Set(sm.map((m) => m.climate_cell).filter(Boolean))];
-  const mon = []; for (const c of cells) mon.push(...await retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month"))));
+  const mon = []; for (const c of cells) mon.push(...await soft("Climate monthly", () => retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month")))));
   add("Climate monthly", objRows(mon), "Monthly climate per Open-Meteo grid cell (sums of rain and ET₀, mean temperatures).", "Open-Meteo");
   const day = []; for (const [i, c] of cells.entries()) { say(`Daily climate: cell ${i + 1} of ${cells.length}…`);
-    day.push(...await pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date")); }
+    day.push(...await soft("Climate daily", () => pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date"))); }
   add("Climate daily", objRows(day), "Every stored day per climate cell (rain, ET₀, temperatures) over the configured timelines.", "Open-Meteo");
   const secs = await per("Sections", (k) => pagedAll((last) => { let b = sb.from("sections").select(`parcel_id,appellation,parcel_intent,survey_area,polygon_m2,n_titles,suburb_id${ed ? ",section_imagery(capture_id,valid_m2,open_m2,veg_m2,building_m2,unbuilt_m2),pool_candidates(id,capture_id,area_m2,tool_pool,features)" : ""}`).eq("region_id", k); if (last != null) b = b.gt("parcel_id", last); return b.order("parcel_id"); }, "parcel_id"));
   const sname = {}; for (const k of ids) for (const s of D.regions[k].suburbs) sname[s.linz_id] = s.name;
@@ -3072,7 +3075,7 @@ async function studyWorkbook(say) {
     ed ? "Residential sections (LINZ parcels) with the imagery measurements per section. Property-level: editors only; handle under the project's privacy rules." : "Residential sections (LINZ parcels). Imagery measurements per property are editor-only and not included.", "LINZ, imagery");
   if (ed) add("Pool candidates", objRows(secs.flatMap((s) => (s.pool_candidates || []).map((p) => ({ region_id: s.region_id, section_id: s.parcel_id, ...p })))), "Every water body the tool found (accepted = counted as a pool), with its measured features. Property-level: editors only.", "imagery");
   const caps = [...new Set(regs.flatMap((r) => r.imagery_captures || []))];
-  add("Imagery captures", objRows(caps.length ? await retry(() => q(sb.from("imagery_captures").select("*").in("id", caps))) : []), "Aerial imagery captures used (resolution, year, calibration).", "LINZ");
+  add("Imagery captures", objRows(caps.length ? await soft("Imagery captures", () => retry(() => q(sb.from("imagery_captures").select("*").in("id", caps)))) : []), "Aerial imagery captures used (resolution, year, calibration).", "LINZ");
   add("Imagery tiles", objRows(await per("Imagery tiles", (k) => pagedAll((last) => { let b = sb.from("imagery_tiles").select("capture_id,tile_id,cog_url,stac_url,processed_at").eq("region_id", k); if (last) b = b.gt("tile_id", last); return b.order("tile_id"); }, "tile_id"))), "Public LINZ tiles indexed for each region (Cloud-Optimised GeoTIFF links).", "LINZ");
   const tal = []; for (const k of ids) { const t = await retry(() => q(sb.rpc("validation_tally", { p_region: k }))).catch(() => null);
     for (const [key, n] of Object.entries((t && t.labels) || {})) { const [task, tool, label] = key.split(":"); tal.push({ region_id: k, task, tool_verdict: tool, label, labels: n }); }
