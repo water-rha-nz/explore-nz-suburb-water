@@ -181,7 +181,10 @@ document.addEventListener("change", async (e) => {
 });
 document.addEventListener("click", async (e) => {
   if (e.target.id !== "queue-live" || !can("editor")) return;
-  const steps = [...document.querySelectorAll("[data-step]:checked")].map((x) => x.value);
+  // "imagery" re-runs the imagery search and analysis (finds and combines captures again), before the metrics are recomputed
+  const picked = new Set([...document.querySelectorAll("[data-step]:checked")].map((x) => x.value));
+  const steps = ["imagery_index", "imagery", "climate", "census", "publish"].filter((st) => picked.has(st) || (picked.has("imagery") && st.startsWith("imagery")));
+  if (picked.has("imagery") && !steps.includes("publish")) steps.push("publish");
   if (!steps.length) return toastMsg("Choose at least one step");
   try { await q(sb.from("jobs").insert({ type: "refresh", region_id: region, params: { steps }, status: "queued" })); toastMsg("Job queued: the worker picks it up on its next run"); refreshJobs(); }
   catch (err) { toastMsg("Not queued: " + err.message); }
