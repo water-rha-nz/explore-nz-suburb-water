@@ -4,6 +4,8 @@
   python -m nzsw.cli enqueue <region> [--steps ...]                   queue a job (for cron: climate top-up)
 One region per job; every external call goes through limits.Client; budgets live in api_usage."""
 import time
+import os
+import hashlib
 import argparse, datetime as dt, json, sys, traceback
 from . import limits as L
 from .db import connect, DbLedger, sync_rates
@@ -14,6 +16,26 @@ STEPS = {**STEPS, **prepare.STEPS}
 PREPARE_STEPS = ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"]
 
 DEFAULT_STEPS = ["climate", "census", "publish"]
+
+
+# Public logs: the repository is public, so GitHub Actions logs are readable by anyone. There the worker prints only anonymous
+# lines (a salted job token, step names, statuses and durations); full detail goes to job_runs, which only the job's owner
+# and admins can read (row-level security).
+PUBLIC = os.environ.get("GITHUB_ACTIONS") == "true"
+_SALT = (os.environ.get("NZSW_LOG_SALT") or os.environ.get("SUPABASE_DB_URL") or "local").encode()
+
+
+def token(x):
+    """Anonymous, stable token for a job (salted with a secret, so it can't be matched to a region by guessing)."""
+    return hashlib.sha256(_SALT + str(x).encode()).hexdigest()[:8]
+
+
+def quiet(_msg):
+    pass
+
+
+def public(msg):
+    print(msg, flush=True)
 
 
 class Reporter:
@@ -60,7 +82,7 @@ def run_steps(con, region, steps, job_id=None, log=print):
         done_before = {r[0] for r in con.execute("select step from job_runs where job_id=%s and status='done'", (job_id,)).fetchall()}
     for s in steps:
         if s in done_before:
-            log(f"[{region}] {s}: already done, skipped"); results[s] = dict(status="done", message="already done", seconds=0); continue
+            (public(f"job {token(job_id or region)}: {s}: already done") if PUBLIC else log(f"[{region}] {s}: already done, skipped")); results[s] = dict(status="done", message="already done", seconds=0); continue
         if s not in STEPS:
             raise ValueError(f"unknown step {s!r} (available: {', '.join(STEPS)})")
         t0 = dt.datetime.now(dt.timezone.utc)
@@ -77,7 +99,7 @@ def run_steps(con, region, steps, job_id=None, log=print):
             msg, status = str(e), "failed"
         except Exception as e:  # noqa: BLE001
             msg, status = f"{type(e).__name__}: {e}", "failed"
-            log(traceback.format_exc(limit=3))
+            (public(f"job {token(job_id or region)}: {s}: error {type(e).__name__}") if PUBLIC else log(traceback.format_exc(limit=3)))
         prepare.NOTE = None
         if run_id:
             try:
@@ -85,8 +107,11 @@ def run_steps(con, region, steps, job_id=None, log=print):
                             (status, msg[:4000], "\n".join(rep.lines), 1.0 if status == "done" else rep.frac, run_id))
             except Exception:  # noqa: BLE001  (progress columns not there yet: record the result anyway)
                 con.execute("update job_runs set status=%s, finished_at=now(), log=%s where id=%s", (status, msg[:4000], run_id))
-        log(f"[{region}] {s}: {status}: {msg}")
         results[s] = dict(status=status, message=msg, seconds=round((dt.datetime.now(dt.timezone.utc) - t0).total_seconds(), 1))
+        if PUBLIC:
+            public(f"job {token(job_id or region)}: {s}: {status} ({results[s]['seconds']:.0f} s)")
+        else:
+            log(f"[{region}] {s}: {status}: {msg}")
         if status != "done":
             return status, results   # 'queued' = out of run time: the next run continues from here
     return "done", results
@@ -100,7 +125,7 @@ def worker(con, log=print, max_jobs=20):
             log("no runnable jobs"); break
         jid, jtype, region, params = row
         steps = (params or {}).get("steps") or DEFAULT_STEPS
-        log(f"job {jid} ({jtype}) region={region} steps={steps}")
+        (public(f"job {token(jid)}: started ({len(steps)} steps)") if PUBLIC else log(f"job {jid} ({jtype}) region={region} steps={steps}"))
         status, res = run_steps(con, region, steps, job_id=jid, log=log)
         when = None
         if status == "paused_quota":
@@ -123,20 +148,25 @@ def main(argv=None):
     a = ap.parse_args(argv)
     con = connect()
     if a.cmd == "worker":
-        worker(con)
+        worker(con, log=quiet if PUBLIC else print)
     elif a.cmd == "run":
-        status, _ = run_steps(con, a.region, a.steps.split(","))
+        status, _ = run_steps(con, a.region, a.steps.split(","), log=quiet if PUBLIC else print)
         sys.exit(0 if status == "done" else 2)
     elif a.cmd == "enqueue":
         jid = con.execute("insert into jobs (type, region_id, params, status) values ('refresh', %s, %s, 'queued') returning id",
                           (a.region, json.dumps({"steps": a.steps.split(",")}))).fetchone()[0]
-        print(f"queued job {jid}")
+        print(f"queued job {token(jid) if PUBLIC else jid}")
     elif a.cmd == "enqueue-published":   # daily cron: one small job per published region, run one at a time
+        n = 0
         for (rid,) in con.execute("select id from regions where status='published' order by id").fetchall():
             if not con.execute("select 1 from jobs where region_id=%s and status in ('queued','scheduled','running','paused_quota')", (rid,)).fetchone():
                 con.execute("insert into jobs (type, region_id, params, status) values ('climate-topup', %s, %s, 'queued')",
                             (rid, json.dumps({"steps": a.steps.split(",")})))
-                print(f"queued climate top-up for {rid}")
+                n += 1
+                if not PUBLIC:
+                    print(f"queued climate top-up for {rid}")
+        if PUBLIC:
+            public(f"queued {n} climate top-up job(s)")
 
 
 if __name__ == "__main__":
