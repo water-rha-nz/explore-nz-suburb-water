@@ -154,7 +154,11 @@ async function refreshJobs() {
   LIVE.jobs = await q(sb.from("jobs").select("id,type,status,reason,params,created_at,finished_at,not_before").eq("region_id", region).order("id", { ascending: false }).limit(8));
   const ids = LIVE.jobs.map((j) => j.id);
   LIVE.runs = ids.length ? await q(sb.from("job_runs").select("job_id,step,status,log,started_at").in("job_id", ids).order("id")) : [];
-  LIVE.usage = await q(sb.from("api_usage").select("service,cost,bytes").eq("period", "day").eq("bucket", today()));
+  LIVE.usage = await q(sb.from("api_usage").select("service,cost,bytes,key_owner").eq("period", "day").eq("bucket", today()));
+  // the key in use per service: the user's own key (by fingerprint) where set, else the project key
+  LIVE.keyOwner = {};
+  try { const KS = { linz: "linz_wfs", statsnz_ade: "statsnz_ade", statsnz_datafinder: "statsnz_datafinder", openmeteo: "openmeteo" };
+    for (const r of (await q(sb.rpc("my_key_fingerprints"))) || []) if (KS[r.service]) LIVE.keyOwner[KS[r.service]] = `${SESSION.user.id}:${r.fp}`; } catch (e) {}
   const r = await q(sb.from("app_settings").select("value").eq("key", "rates").maybeSingle()); LIVE.rates = (r && r.value) || {};
   const el = $("#jobs"); if (el) el.innerHTML = jobsHTML();
   const dp = $("#dl-panel"); if (dp) dp.innerHTML = dlHTML();
@@ -172,9 +176,9 @@ dlHTML = function () {
   if (!can("editor")) return `<p class="small muted">Download rates and today's usage are visible to editors.</p>`;
   const L = D.limits || {}, de = L.defaults || {}, ce = L.ceilings || {};
   return LIVE_SVCS.map(([k, name]) => {
-    const used = +((LIVE.usage.find((u) => u.service === k) || {}).cost || 0), rate = Math.min((LIVE.rates[k] || {}).per_min || (de[k] || {}).per_min || 60, (ce[k] || {}).per_min || 60);
+    const ko = (LIVE.keyOwner || {})[k] || "project", used = +((LIVE.usage.find((u) => u.service === k && (u.key_owner || "project") === ko) || {}).cost || 0), rate = Math.min((LIVE.rates[k] || {}).per_min || (de[k] || {}).per_min || 60, (ce[k] || {}).per_min || 60);
     const budget = Math.min((LIVE.rates[k] || {}).budget_day || (de[k] || {}).budget_day || 0, (ce[k] || {}).budget_day || 0), pct = budget ? Math.min(100, 100 * used / budget) : 0;
-    return `<div class="dl-row"><div><b class="small">${name}</b><br><span class="small muted">${fmt(used)} / ${fmt(budget)} today${k === "openmeteo" ? " (weighted)" : ""}</span></div>
+    return `<div class="dl-row"><div><b class="small">${name}</b> <span class="tag info" title="Budgets are counted per key: a new key starts with its own daily budget">${(LIVE.keyOwner || {})[k] ? "your key" : "project key"}</span><br><span class="small muted">${fmt(used)} / ${fmt(budget)} today${k === "openmeteo" ? " (weighted)" : ""}</span></div>
       <div><div class="bar-out" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="${name} usage today"><div class="bar-in" style="width:${pct.toFixed(1)}%;${pct >= 100 ? "background:var(--bad)" : ""}"></div></div>
       <span class="small muted">${pct >= 100 ? "daily budget used: jobs needing it are parked until tomorrow (UTC)" : `${fmt(budget - used)} left today`}</span></div>
       <div><label class="small">${fmt(rate)}/min <span class="muted">(default ${fmt((de[k] || {}).per_min)}, ceiling ${fmt((ce[k] || {}).per_min)})</span>

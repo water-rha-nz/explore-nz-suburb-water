@@ -47,7 +47,9 @@ Deno.serve(async (req) => {
   // key and budget: the caller's own key or the project's, per key owner
   const { data: own } = await admin.rpc("edge_user_key", { p_user: u.user.id, p_service: "linz" });
   const key = own || Deno.env.get("LINZ_API_KEY");
-  const owner = own ? u.user.id : "project";
+  // budgets per key (as the worker counts them): '<user>:<8 hex of the key's SHA-256>'; the key itself is never stored
+  const fp = async (k: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(k)))).slice(0, 4).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const owner = own ? `${u.user.id}:${await fp(own)}` : "project";
   const budgetLeft = async (n: number) => {
     const { data: rates } = await admin.from("app_settings").select("value").eq("key", "rates").maybeSingle();
     const budget = Math.min(Number(rates?.value?.linz_wfs?.budget_day ?? LINZ_BUDGET_DAY), LINZ_CEILING_DAY);
