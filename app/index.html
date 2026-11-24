@@ -1861,7 +1861,7 @@ async function refreshProgress() {
     const ids = PROG.batches.map((b) => b.id);
     PROG.jobs = ids.length ? await q(sb.from("jobs").select("id,region_id,status,reason,batch_id,params,not_before,created_at,finished_at").in("batch_id", ids).order("id")) : [];
     const jids = PROG.jobs.map((j) => j.id);
-    PROG.runs = jids.length ? await q(sb.from("job_runs").select("job_id,step,status,log,started_at").in("job_id", jids).order("id")) : [];
+    PROG.runs = jids.length ? await q(sb.from("job_runs").select("job_id,step,status,log,started_at,progress,detail,updated_at").in("job_id", jids).order("id")) : [];
     PROG.at = new Date();
   } catch (e) { PROG.err = e.message; } finally { PROG.busy = false; }
   const el = $("#batch-progress"); if (el) el.innerHTML = progressLive();
@@ -1870,7 +1870,8 @@ async function refreshProgress() {
 function scheduleProgress() {
   clearTimeout(PROG.timer);
   if (stage !== "load" || !PROG.jobs.some((j) => ACTIVE.has(j.status))) return;
-  PROG.timer = setTimeout(() => { if (stage === "load" && (typeof document.visibilityState === "undefined" || document.visibilityState === "visible")) refreshProgress(); else scheduleProgress(); }, 15000);
+  const fast = PROG.jobs.some((j) => j.status === "running");   // poll faster while a step is running
+  PROG.timer = setTimeout(() => { if (stage === "load" && (typeof document.visibilityState === "undefined" || document.visibilityState === "visible")) refreshProgress(); else scheduleProgress(); }, fast ? 8000 : 15000);
 }
 // ask for a worker run now (GitHub's schedule is best-effort); harmless if one is running or was just requested
 async function kickWorker(quiet) {
@@ -1880,6 +1881,18 @@ async function kickWorker(quiet) {
   const el = $("#batch-progress"); if (el) el.innerHTML = progressLive();
 }
 const nextWorkerRun = () => { const d = new Date(), m = d.getUTCMinutes(), add = 15 - (m % 15); return new Date(d.getTime() + add * 60000 - d.getUTCSeconds() * 1000); };
+// live detail of a job: the running step's progress bar, latest line, heartbeat and recent lines
+const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 1000)); return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`; };
+function runDetail(j, lr) {
+  if (!lr) return esc(j.reason || (j.status === "queued" ? "waiting for the worker" : ""));
+  const lines = String(lr.detail || "").split("\n").filter(Boolean), last = lines[lines.length - 1] || String(lr.log || "").split("\n").pop();
+  const live = lr.status === "running", pct = lr.progress != null ? Math.round(100 * lr.progress) : null;
+  const stale = live && lr.updated_at && Date.now() - new Date(lr.updated_at).getTime() > 10 * 60000;
+  return `${live ? `<b>${esc(lr.step.replace("_", " "))}</b>${pct != null ? ` ${pct}%` : ""}${pct != null ? `<div class="bar-out" style="height:5px;margin:2px 0;max-width:220px"><div class="bar-in" style="width:${pct}%"></div></div>` : " "}` : ""}
+    ${esc(j.reason && !live ? j.reason : String(last || "").replace(/^\d\d:\d\d:\d\d /, "").slice(0, 160))}
+    ${live && lr.updated_at ? `<span class="${stale ? "tag warn" : ""}" style="font-size:11px"> · ${stale ? "no update for " : "updated "}${ago(lr.updated_at)}${stale ? " (may be waiting on a rate limit)" : ""}</span>` : ""}
+    ${lines.length > 1 ? `<details style="margin-top:2px"><summary style="cursor:pointer;font-size:11px">details (${lines.length} lines)</summary><pre style="white-space:pre-wrap;font-size:11px;margin:2px 0;max-height:160px;overflow:auto">${esc(lines.join("\n"))}</pre></details>` : ""}`;
+}
 function progressLive() {
   if (!PROG.at) return `<p class="small muted" style="margin:8px 0 0">Loading batch progress…</p>`;
   const shown = PROG.batches.filter((b, i) => i === 0 || PROG.jobs.some((j) => j.batch_id === b.id && ACTIVE.has(j.status)));
@@ -1902,7 +1915,7 @@ function progressLive() {
         <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
           return `<tr><td class="l" style="width:28%">${esc(reg)}</td><td class="l">${tag(j.status)}</td>
             <td class="l">${steps.map((st) => { const r = last[st], stt = r ? r.status : "pending"; return `<span title="${esc(st)}: ${esc(stt)}${r && r.log ? " · " + esc(String(r.log).slice(0, 160)) : ""}" style="display:inline-block;margin:0 3px 0 0;color:${col[stt] || "var(--muted, #888)"}">${icon[stt] || "○"} ${esc(st.replace("_", " "))}</span>`; }).join("")}</td>
-            <td class="l muted" style="white-space:normal;max-width:300px">${j.status === "paused_quota" && j.not_before ? `resumes after ${esc(new Date(j.not_before).toLocaleString())}. ` : ""}${esc(j.reason || (lr && lr.log ? String(lr.log).split("\n").pop().slice(0, 140) : j.status === "queued" ? "waiting for the worker" : ""))}</td></tr>`; }).join("")}</tbody></table></div>`; }).join("")}</div>`;
+            <td class="l muted" style="white-space:normal;max-width:340px">${j.status === "paused_quota" && j.not_before ? `resumes after ${esc(new Date(j.not_before).toLocaleString())}. ` : ""}${runDetail(j, lr)}</td></tr>`; }).join("")}</tbody></table></div>`; }).join("")}</div>`;
 }
 function progressHTML() {
   if (!BATCH.batches.length) return `<h2>Your batches</h2><p class="muted small">No batches yet.</p>`;
