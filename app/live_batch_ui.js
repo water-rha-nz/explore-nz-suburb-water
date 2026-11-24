@@ -448,6 +448,23 @@ async function gazetteer(c) {
   }
   const found = Object.keys(G).length; toastMsg(`NZ Gazetteer: ${found} of ${names.length} name(s) located inside ${taOf(c).name}`);
 }
+// suburbs just outside the TA: LINZ suburbs with a not-found name that lie within ~8 km of the TA (in a neighbouring TA)
+async function nearbySuburbs(c) {
+  const names = unassigned(c).flatMap((r) => [r.mname, r.name]).filter((n, i, a) => n && a.findIndex((x) => norm(x) === norm(n)) === i); if (!names.length) return 0;
+  const { data, error } = await sb.functions.invoke("linz-suburbs", { body: { action: "nearby", ta_code: c, names } });
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (_) { /* keep */ } throw new Error(m); }
+  const N = (BATCH.near = BATCH.near || {})[c] = {};
+  for (const x of (data && data.nearby) || []) for (const n of names) if (mkey(n) === mkey(x.name)) (N[mkey(n)] = N[mkey(n)] || []).push(x);
+  return Object.keys(N).length;
+}
+// adopt a nearby suburb into the TA's list (shared cache), then reload the list
+async function adoptSuburb(c, id) {
+  const { data, error } = await sb.functions.invoke("linz-suburbs", { body: { action: "adopt", ta_code: c, ids: [id] } });
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch (_) { /* keep */ } throw new Error(m); }
+  const res = await q(sb.rpc("ta_suburbs", { p_ta: c, p_tol: 20 }));
+  BATCH.linz[c] = { ...BATCH.linz[c], list: [...(res.suburbs || [])] }; BATCH.rev++; MEMO.fresh = false;   // a new list, so the name index is rebuilt
+  return data && data.adopted;
+}
 // rows of a TA's lists that match no LINZ suburb (allocated or not)
 function allocRows(c, all) { return memo(`allocRows|${c}|${all ? 1 : 0}`, () => allocRows_(c, all)); }
 function allocRows_(c, all) {
@@ -492,7 +509,7 @@ function allocateHTML() {
     const layers = [{ d: pathD(t.geom.coordinates), fill: "var(--land)", stroke: "var(--ink)", sw: 1.4, title: t.name },
       ...L.list.map((x) => { const k = norm(x.name), st = selTargets.has(k) ? "selected" : exc.has(k) ? "excluded" : used.has(k) || added.has(k) || !sc ? "in use" : "free";
         return { attr: `data-asub="${esc(x.name)}"`, click: true, d: pathD(x.geom.coordinates), fill: st === "selected" ? "#e6550d" : st === "in use" ? "var(--accent)" : st === "excluded" ? "var(--bad, #b3261e)" : "var(--land)",
-          op: st === "selected" ? 0.85 : st === "in use" ? 0.5 : st === "excluded" ? 0.3 : 0.7, sw: 0.8, title: `${x.name}${used.get(k) ? ` (used by ${used.get(k)} study suburb${used.get(k) === 1 ? "" : "s"})` : st === "free" ? " (not assigned)" : ""}` }; })];
+          op: st === "selected" ? 0.85 : st === "in use" ? 0.5 : st === "excluded" ? 0.3 : 0.7, sw: 0.8, title: `${x.name}${x.adopted ? ` [adopted from ${String(x.home_ta || "a neighbouring TA").split(",")[0]}]` : ""}${used.get(k) ? ` (used by ${used.get(k)} study suburb${used.get(k) === 1 ? "" : "s"})` : st === "free" ? " (not assigned)" : ""}` }; })];
     const order = { "not found": 0, mapped: 1, matched: 2 }, filt = norm(store.get("afilter", ""));
     const shown = rows.filter((r) => !filt || norm(r.mname + " " + r.targets.join(" ")).includes(filt)).sort((a, b) => (a.skipped - b.skipped) || (order[a.status] - order[b.status]) || a.mname.localeCompare(b.mname));
     const nf = rows.filter((r) => r.status === "not found" && !r.skipped).length, nm = rows.filter((r) => r.status === "mapped").length, nok = rows.filter((r) => r.status === "matched").length;
@@ -508,17 +525,19 @@ function allocateHTML() {
         <div class="row" style="gap:6px;margin:6px 0"><input type="text" id="afilter" value="${esc(store.get("afilter", ""))}" placeholder="Filter" style="width:120px" aria-label="Filter study suburbs">
           <button class="btn" type="button" id="asel-shown" style="padding:1px 8px">Select all shown</button>${nf ? `<button class="btn" type="button" id="asel-nf" style="padding:1px 8px">Select not found</button>` : ""}
           <button class="btn" type="button" data-aload="1" style="padding:1px 8px">Load all shown</button><button class="btn" type="button" data-aload="0" style="padding:1px 8px">Exclude all shown</button></div>
-        <div class="row small" style="gap:6px;margin:0 0 6px">${nf ? `<button class="btn" type="button" id="agaz" style="padding:1px 8px" title="Look up not-found names in the NZ Gazetteer of official place names and suggest the LINZ suburb that contains each place">📍 Locate not-found names (NZ Gazetteer)</button>` : ""}
+        <div class="row small" style="gap:6px;margin:0 0 6px">${nf ? `<button class="btn" type="button" id="agaz" style="padding:1px 8px" title="Search LINZ for not-found names in neighbouring councils (within ~8 km), and look them up in the NZ Gazetteer of official place names">🔎 Find not-found names (nearby councils + Gazetteer)</button>` : ""}
           <button class="btn" type="button" id="arefetch" style="padding:1px 8px" title="Fetch this TA's suburbs from LINZ again (uses one LINZ request)">↻ Re-fetch LINZ suburbs</button>
           <span class="muted">${fmt(L.list.length)} LINZ suburbs${L.cached ? " (shared cache)" : ""}</span></div>
         <div style="max-height:470px;overflow:auto"><table style="width:100%"><thead><tr><th></th><th class="l">Study suburb</th><th class="l">LINZ suburb(s)</th><th class="l">Load</th></tr></thead><tbody>
         ${shown.map((r) => { const sug = r.targets.length ? [] : similar(r.mname, names).concat(similar(r.name, names)).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3), on = selected.has(r.key);
+          const nb = r.targets.length ? [] : (((BATCH.near || {})[c] || {})[mkey(r.mname)] || ((BATCH.near || {})[c] || {})[mkey(r.name)] || []);
           const gz = r.targets.length ? [] : (((BATCH.gaz || {})[c] || {})[mkey(r.mname)] || ((BATCH.gaz || {})[c] || {})[mkey(r.name)] || []);
           return `<tr style="${on ? "background:var(--accent-soft)" : ""}${r.skipped ? ";opacity:.55" : ""}"><td><input type="checkbox" data-asel="${esc(r.key)}" ${on ? "checked" : ""} aria-label="Select ${esc(r.mname)}"></td>
             <td class="l"><b>${esc(r.mname)}</b> ${tag(r.status)}${norm(r.mname) !== norm(r.name) ? `<br><span class="small muted">ref ${esc(r.name)}</span>` : ""}${r.manual ? ` <button class="btn" type="button" data-mdel="${esc(r.key)}" style="padding:0 4px">remove</button>` : ""}</td>
             <td class="l small">${r.targets.map((x) => `<span class="tag ${r.status === "matched" ? "ok" : "info"}">${esc(x)} <button class="btn" type="button" data-adel="${esc(r.key)}" data-aname="${esc(x)}" style="padding:0 4px" aria-label="Unassign ${esc(x)}">×</button></span>`).join(" ")}
               ${r.alloc && !r.manual && r.direct ? ` <button class="btn" type="button" data-areset="${esc(r.key)}" style="padding:0 4px">use name match</button>` : ""}
               ${sug.length ? `<span class="muted">did you mean</span> ${sug.map((n) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(n)}" style="padding:1px 6px">${esc(n)}</button>`).join(" ")}` : ""}
+              ${nb.length ? `<br><span class="muted">just outside ${esc(t.name)}:</span> ${nb.map((x) => `<button class="btn" type="button" data-aadopt="${esc(r.key)}" data-aid="${x.id}" data-aname="${esc(x.name)}" title="LINZ places ${esc(x.name)} in ${esc(x.ta)}, ${x.km} km from ${esc(t.name)}: adopt it into this TA's suburbs and assign it" style="padding:1px 6px">↗ ${esc(x.name)} <span class="muted">(${esc(String(x.ta).split(",")[0])}, ${x.km} km)</span></button>`).join(" ")}` : ""}
               ${gz.length ? `<br><span class="muted">NZ Gazetteer:</span> ${[...new Map(gz.map((g) => [g.linz, g])).values()].map((g) => `<button class="btn" type="button" data-aadd="${esc(r.key)}" data-aname="${esc(g.linz)}" title="${esc(g.place)} (${esc(g.type || "place")}, ${esc(g.status || "")}) lies in ${esc(g.linz)}" style="padding:1px 6px">📍 ${esc(g.linz)}</button>`).join(" ")}` : ""}
               ${(r.aliases || []).length ? `<br><span class="muted">also spelled:</span> ${r.aliases.map((a) => `<span class="tag">${esc(a)} <button class="btn" type="button" data-uncombine="${esc(a)}" style="padding:0 4px" aria-label="Separate ${esc(a)}">×</button></span>`).join(" ")}` : ""}</td>
             <td><button class="btn" type="button" data-askip="${esc(r.mname)}" data-on="${r.skipped ? "1" : "0"}" style="padding:1px 8px;${r.skipped ? "" : "border-color:var(--ok, #2e7d32);color:var(--ok, #2e7d32)"}" aria-pressed="${!r.skipped}">${r.skipped ? "Excluded" : "Load"}</button></td></tr>`; }).join("")}</tbody></table></div>
@@ -893,7 +912,14 @@ document.addEventListener("click", async (e) => {
   if (t.id === "asel-shown") { const S = aSel(); for (const r of shownRows()) S.add(r.key); return drawBatch(); }
   const lb = cl("[data-aload]"); if (lb) { const c = curTA(), P = tapicks(c), names = new Set(shownRows().map((r) => norm(r.mname)));
     const skip = P.skip.filter((x) => !names.has(norm(x))); if (lb.dataset.aload === "0") skip.push(...shownRows().map((r) => r.mname)); setPicks(c, { ...P, skip }); return drawBatch(); }
-  if (t.id === "agaz") { t.disabled = true; t.textContent = "Looking up…"; try { await gazetteer(curTA()); } catch (err) { toastMsg("Gazetteer: " + err.message); } return drawBatch(); }
+  if (t.id === "agaz") { t.disabled = true; t.textContent = "Searching…"; const c = curTA(); let near = 0;
+    try { near = await nearbySuburbs(c); } catch (err) { toastMsg("Nearby search: " + err.message); }
+    try { await gazetteer(c); } catch (err) { toastMsg("Gazetteer: " + err.message); }
+    if (near) toastMsg(`${near} not-found name(s) match LINZ suburbs just outside ${taOf(c).name}: adopt them with ↗`); return drawBatch(); }
+  const ad = cl("[data-aadopt]"); if (ad) { const c = curTA(), r = rowByKey(ad.dataset.aadopt); if (!r) return; ad.disabled = true;
+    try { await adoptSuburb(c, +ad.dataset.aid); const r2 = rowByKey(ad.dataset.aadopt) || r; setAlloc(r2, [...r2.targets.filter((x) => norm(x) !== norm(ad.dataset.aname)), ad.dataset.aname]);
+      if (BATCH.near && BATCH.near[c]) delete BATCH.near[c][mkey(r.mname)]; toastMsg(`${ad.dataset.aname} adopted into ${taOf(c).name} and assigned to ${r.mname}`); }
+    catch (err) { toastMsg("Not adopted: " + err.message); } return drawBatch(); }
   if (t.id === "arefetch") { if (!confirm("Fetch this TA's suburbs from LINZ again? This uses one LINZ request and updates the shared cache.")) return;
     t.disabled = true; t.textContent = "Fetching…"; try { await ensureLinz(curTA(), true); toastMsg("LINZ suburbs updated"); } catch (err) { toastMsg("LINZ: " + err.message); } return drawBatch(); }
   if (t.id === "comb-go") { const c = curTA(), from = (($("#comb-from") || {}).value || "").trim(), to = (($("#comb-to") || {}).value || "").trim(), rows = curAllocRows();
