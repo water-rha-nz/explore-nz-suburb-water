@@ -11,8 +11,9 @@ on:
     inputs:
       region: { description: "Run steps for one region now (optional)", required: false }
       steps: { description: "Steps", required: false, default: "climate,census,publish" }
+      slot: { description: "Manual slot (1 or 2): a run in another slot runs alongside", required: false, default: "1" }
 # one scheduled run and one manually started run may overlap (at most six workers); claim_job gives each job to one worker
-concurrency: { group: "worker-${{ github.event_name == 'workflow_dispatch' && 'manual' || 'scheduled' }}", cancel-in-progress: false }
+concurrency: { group: "worker-${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', inputs.slot || '1') || 'scheduled' }}", cancel-in-progress: false }
 permissions: { contents: read }
 jobs:
   run:
