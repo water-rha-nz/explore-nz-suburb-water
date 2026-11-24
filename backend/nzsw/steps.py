@@ -109,12 +109,14 @@ def census(con, client, region, log):
     codes = [r[0] for r in con.execute("select distinct sa2_code from sections where region_id=%s and sa2_code is not null order by 1", (region,))]
     if not codes:
         return "no SA2s for region"
-    if len(codes) > L.RUN_CAPS["max_sa2_per_run"]:
-        raise L.RunTooLarge(f"{len(codes)} SA2s exceeds {L.RUN_CAPS['max_sa2_per_run']} per run")
     # reuse: census values already stored for an SA2 (fetched by anyone) are not requested again
     have = {r[0] for r in con.execute("select distinct sa2_code from census_metrics where sa2_code = any(%s)", (codes,))}
     need = [c for c in codes if c not in have]
-    log(f"census: {len(have)} SA2(s) reused, {len(need)} to fetch")
+    # large regions: at most max_sa2_per_run new SA2s per run; the step continues in the next run
+    cap, rest = L.RUN_CAPS["max_sa2_per_run"], 0
+    if len(need) > cap:
+        rest = len(need) - cap; need = need[:cap]
+    log(f"census: {len(have)} SA2(s) reused, {len(need)} to fetch{f' ({rest} more in later runs)' if rest else ''}")
     if not need:
         _apportion(con, region)
         return f"all {len(codes)} SA2s reused from stored census data (0 requests); suburb census rebuilt"
@@ -148,6 +150,9 @@ def census(con, client, region, log):
             cur.execute(f"""insert into census_metrics (sa2_code, year, {','.join(cols)}) values (%s,%s,{','.join(['%s'] * len(cols))})
                             on conflict (sa2_code, year) do update set {','.join(f'{c}=excluded.{c}' for c in cols)}""", (r.sa2, int(r.year), *vals))
     _apportion(con, region)
+    if rest:
+        from .prepare import Continue
+        raise Continue(f"census: {len(have) + len(need)} of {len(codes)} SA2s stored; {rest} left: continues in the next run")
     return f"{len(out)} SA2-year rows; suburb census rebuilt (weighted by sections)"
 
 

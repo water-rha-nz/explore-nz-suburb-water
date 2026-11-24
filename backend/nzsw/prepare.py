@@ -96,8 +96,6 @@ def linz(con, client, region, log):
     if sub.empty:
         raise ValueError("no LINZ suburbs matched the region (check the suburb list against LINZ names)")
     sub = gpd.GeoDataFrame(sub, crs=2193)
-    if len(sub) > L.RUN_CAPS["max_suburbs_per_run"]:
-        raise L.RunTooLarge(f"{len(sub)} suburbs exceeds {L.RUN_CAPS['max_suburbs_per_run']} per run: limit the region with a suburb list or split it")
     for _, s in sub.iterrows():
         con.execute("""insert into suburbs (linz_id, name, type, territorial_authority, population_estimate, geom, region_id, source_version)
                        values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193), %s, %s)
@@ -113,7 +111,15 @@ def linz(con, client, region, log):
         log(f"all {len(sub)} suburbs already stored: no LINZ parcel/building download needed")
         _sa2_and_cells(con, client, region, sub, None)
         return f"{len(sub)} suburbs, all reused from stored data (0 parcel/building requests)"
-    log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}")
+    # large regions load in parts: at most max_suburbs_per_run neighbouring suburbs per run (a compact LINZ download area),
+    # then the step continues in the next run until every suburb is stored
+    cap, more = L.RUN_CAPS["max_suburbs_per_run"], 0
+    if len(todo) > cap:
+        pts = todo.geometry.representative_point()
+        anchor = pts.iloc[int(np.lexsort((pts.x.values, pts.y.values))[0])]     # start from the southernmost remaining suburb
+        todo = todo.loc[pts.distance(anchor).sort_values().index[:cap]]
+        more = len(sub) - len(loaded) - cap
+    log(f"{len(loaded)} suburb(s) reused from stored data; downloading {len(todo)}{f' ({more} more in later runs)' if more else ''}")
     full_sub, sub = sub, gpd.GeoDataFrame(todo, crs=2193)
     area = sub.union_all()
     minx, miny, maxx, maxy = gpd.GeoSeries([area], crs=2193).to_crs(4326).total_bounds
@@ -155,6 +161,8 @@ def linz(con, client, region, log):
     log(f"residential sections: {len(par)}, buildings: {len(seen)}")
 
     n_sa2 = _sa2_and_cells(con, client, region, full_sub, bbox)
+    if more:
+        raise Continue(f"{len(full_sub) - more} of {len(full_sub)} suburbs stored ({len(par)} sections this run); {more} left: continues in the next run")
     return f"{len(full_sub)} suburbs ({len(full_sub) - len(sub)} reused), {len(par)} new residential sections, {len(seen)} buildings, {n_sa2} SA2 boundaries downloaded"
 
 
@@ -249,8 +257,7 @@ def imagery_index(con, client, region, log):
                                where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))""", (region, g.wkb)).fetchone()[0]
             if n: hit.append((tid, g))
         if not hit: continue
-        if len(hit) > L.SERVICES["linz_imagery_s3"]["max_tiles_run"]:
-            raise L.RunTooLarge(f"{len(hit)} imagery tiles exceeds {L.SERVICES['linz_imagery_s3']['max_tiles_run']} per run: limit the region with a suburb list")
+        # every tile is indexed (no download); processing takes at most max_tiles_run per run and continues in later runs
         cap = coll.split("/")[-1]
         con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
                        on conflict (id) do nothing""", (cap, coll, year, -nres))
@@ -272,6 +279,7 @@ def imagery(con, client, region, log):
     cal = dict(ndwi_min=0.15, blue_over_red=12, bright_min=55, ndvi_veg=0.2, nir_veg_min=40, pool_g_min=130, pool_b_min=130, pool_ndwi_min=0.4,
                pool_min_m2=6, pool_max_m2=250, solidity_min=0.8, rectfill_min=0.55)
     todo = con.execute("select capture_id, tile_id, cog_url from imagery_tiles where region_id=%s and processed_at is null order by tile_id", (region,)).fetchall()
+    left_after = max(0, len(todo) - L.SERVICES["linz_imagery_s3"]["max_tiles_run"]); todo = todo[:L.SERVICES["linz_imagery_s3"]["max_tiles_run"]]   # large regions: in parts
     if not todo:
         n = con.execute("select count(*) from imagery_tiles where region_id=%s", (region,)).fetchone()[0]
         if not n: raise ValueError("no imagery tiles indexed (run imagery_index first)")
@@ -350,6 +358,8 @@ def imagery(con, client, region, log):
     con.execute("""update section_imagery si set building_m2 = coalesce(b.a, 0), unbuilt_m2 = greatest(0, s.polygon_m2 - coalesce(b.a, 0))
                    from sections s left join lateral (select sum(st_area(st_intersection(s.geom, bb.geom))) a from buildings bb where st_intersects(s.geom, bb.geom)) b on true
                    where si.section_id = s.parcel_id and s.region_id = %s""", (region,))
+    if left_after:
+        raise Continue(f"{done} tiles processed this run; {left_after} left: continues in the next run")
     return f"{done} tiles processed this run"
 
 
