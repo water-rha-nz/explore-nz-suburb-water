@@ -875,7 +875,8 @@ function progressLive() {
       return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}</span></div>
         <div class="bar-out" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch progress" style="height:8px;margin:4px 0"><div class="bar-in" style="width:${pct}%"></div></div>
         <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
-          return `<tr><td class="l" style="width:28%">${esc(reg)}</td><td class="l">${tag(j.status)}</td>
+          const lastAct = lr ? (lr.updated_at || lr.started_at) : j.created_at, stalled = j.status === "running" && lastAct && Date.now() - new Date(lastAct).getTime() > 20 * 60000;
+          return `<tr><td class="l" style="width:28%">${esc(reg)}</td><td class="l">${tag(j.status)}${j.status === "failed" || stalled ? ` <button class="btn" type="button" data-restart-job="${j.id}" style="padding:0 6px" title="${stalled ? "No activity for over 20 minutes: queue it again" : "Queue it again"} (finished steps are skipped) and start the worker">↻ Restart</button>` : ""}</td>
             <td class="l">${steps.map((st) => { const r = last[st], stt = r ? r.status : "pending"; return `<span title="${esc(st)}: ${esc(stt)}${r && r.log ? " · " + esc(String(r.log).slice(0, 160)) : ""}" style="display:inline-block;margin:0 3px 0 0;color:${col[stt] || "var(--muted, #888)"}">${icon[stt] || "○"} ${esc(st.replace("_", " "))}</span>`; }).join("")}</td>
             <td class="l muted" style="white-space:normal;max-width:340px">${j.status === "paused_quota" && j.not_before ? `resumes after ${esc(new Date(j.not_before).toLocaleString())}. ` : ""}${runDetail(j, lr)}</td></tr>`; }).join("")}</tbody></table></div>`; }).join("")}</div>`;
 }
@@ -1046,6 +1047,11 @@ document.addEventListener("click", async (e) => {
   if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
+  const rj = t.closest && t.closest("[data-restart-job]");
+  if (rj && can("editor")) { rj.disabled = true;
+    try { await q(sb.from("jobs").update({ status: "queued", reason: "restarted", not_before: null }).eq("id", +rj.dataset.restartJob)); toastMsg("Job queued again: the worker picks it up on its next run"); }
+    catch (err) { toastMsg("Not restarted: " + err.message); }
+    PROG.at = null; await refreshProgress(); kickWorker(true); return; }
   const rb = t.closest && t.closest("[data-retry-batch]");
   if (rb && can("editor")) { rb.disabled = true; const ids = PROG.jobs.filter((j) => j.batch_id === +rb.dataset.retryBatch && j.status === "failed").map((j) => j.id);
     try { if (ids.length) await q(sb.from("jobs").update({ status: "queued", reason: null, not_before: null }).in("id", ids)); toastMsg(`${ids.length} region job(s) queued again`); }
