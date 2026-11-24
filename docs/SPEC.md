@@ -661,3 +661,14 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - revoke by deleting the secret.
 - **Validate** shows a "Second reviewer (blind) vs tool" table from aggregate counts (`validation_tally.second`).
 - **Worker:** coverage for capture combining is judged per residential section (section region index, tile GiST index), and the worker session allows 10 min per statement (migration 0032).
+
+## 30. Study sessions and step prerequisites
+
+- **Study menu** (header): *All regions (no study)*, each saved study, and *+ New study*.
+  - New study: clears Configure, opens 2.1, and asks for a name (**Save study** stores the regions, PRVDRs, allocations and timelines; never files).
+  - All regions: Configure starts clean, and a region can be prepared without a study.
+  - Choosing a saved study: loads its configuration and keeps only its regions in memory (others are unloaded; data loads per page).
+- **Stage bar:** ✓ done, • to do, 🔒 needs earlier steps (hover for what's needed).
+  - Data stages (Imagery, Validate, Context, Explore, Export) need a prepared region. Without one they show a *Before this step* checklist: study, 2.1 regions chosen, 2.3 suburbs validated, 3 Load queued (with each region's status), each with a Go button.
+  - A chosen region that isn't prepared yet is named as such, with the prepared regions offered instead (no silent switch).
+- **Configure** starts with the study being edited and an explicit first step: *choose the region(s) for this study*, with the number chosen. Steps 2.2 and 2.3 point back to 2.1 while none is chosen.
