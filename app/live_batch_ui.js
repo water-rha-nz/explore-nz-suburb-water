@@ -803,7 +803,7 @@ function regionJobsHTML() {
   const regs = (D.index || []).map((r) => [r.id, { label: r.name }]);
   return `<h2>Refresh a region in the database</h2><div class="grid g2"><div class="card">
     ${regs.length ? `<p class="small"><label>Region <select id="rj-region">${regs.map(([k, g]) => `<option value="${esc(k)}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</select></label></p>
-    <div class="row small">${[["climate", "Climate top-up"], ["census", "Census"], ["publish", "Recompute metrics"]].map(([v, l]) => `<label><input type="checkbox" data-step value="${v}" checked> ${l}</label>`).join("")}</div>
+    <div class="row small">${[["imagery", "Imagery: pools and gardens (search again)", false], ["climate", "Climate top-up", true], ["census", "Census", true], ["publish", "Recompute metrics", true]].map(([v, l, on]) => `<label><input type="checkbox" data-step value="${v}" ${on ? "checked" : ""}> ${l}</label>`).join("")}</div>
     <p class="small" style="margin:8px 0 4px"><b>Timeline</b> <span class="muted">for this region (saved to the database)</span></p><div id="rj-tl">${tlEditor("r:" + region)}</div>
     <div class="row" style="margin-top:6px"><button class="btn primary" id="queue-live" type="button">Queue job</button><button class="btn" type="button" id="rj-refresh">Refresh</button></div>
     <p class="small muted">One region per job, run by the worker (GitHub Actions) within each service's free-tier budget. Data already stored, by anyone, is reused.</p>
