@@ -159,6 +159,7 @@ def main(argv=None):
     for c in ("run", "enqueue"):
         p = sub.add_parser(c); p.add_argument("region"); p.add_argument("--steps", default=",".join(DEFAULT_STEPS))
     e = sub.add_parser("enqueue-published"); e.add_argument("--steps", default="climate,publish")
+    sub.add_parser("pending")
     a = ap.parse_args(argv)
     con = connect()
     if a.cmd == "worker":
@@ -170,6 +171,14 @@ def main(argv=None):
         jid = con.execute("insert into jobs (type, region_id, params, status) values ('refresh', %s, %s, 'queued') returning id",
                           (a.region, json.dumps({"steps": a.steps.split(",")}))).fetchone()[0]
         print(f"queued job {token(jid) if PUBLIC else jid}")
+    elif a.cmd == "pending":   # runnable jobs left (same rule as claim_job): the workflow then starts the next run itself
+        n = con.execute("""select count(*) from jobs where status in ('queued', 'scheduled', 'paused_quota')
+                           and (not_before is null or not_before <= now())""").fetchone()[0]
+        print(f"runnable jobs left: {n}")
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write(f"more={'true' if n else 'false'}\n")
     elif a.cmd == "enqueue-published":   # daily cron: one small job per published region, run one at a time
         n = 0
         for (rid,) in con.execute("select id from regions where status='published' order by id").fetchall():

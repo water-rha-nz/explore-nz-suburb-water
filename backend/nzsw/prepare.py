@@ -487,7 +487,38 @@ def imagery(con, client, region, log):
                    where si.section_id = s.parcel_id and s.region_id = %s""", (region,))
     if left_after:
         raise Continue(f"{done} tiles processed this run; {left_after} left: continues in the next run")
-    return f"{done} tiles processed this run"
+    return f"{done} tiles processed this run; " + sample_validation(con, region)
+
+
+VAL_SAMPLE = dict(accepted=100, rejected=100, garden=60)
+
+
+def sample_validation(con, region, n=VAL_SAMPLE):
+    """Labelling items for the region, once its imagery is analysed: accepted and rejected pool candidates and garden sections,
+    a fixed pseudo-random spread (md5 order), each with its centre, section outline and public tile."""
+    have = con.execute("select count(*) from validation_items where region_id=%s", (region,)).fetchone()[0]
+    if have:
+        return f"{have} labelling items already sampled"
+    tile = """join lateral (select t.cog_url from imagery_tiles t where t.region_id = %(r)s and t.capture_id = {cap} and st_intersects(t.geom, {pt})
+                            order by t.tile_id limit 1) t on true"""
+    outline = "st_asgeojson(st_simplify(s.geom, 0.5), 1)::jsonb -> 'coordinates'"
+    for grp, flag in (("accepted", True), ("rejected", False)):
+        con.execute(f"""insert into validation_items (task, capture_id, candidate_id, section_id, grp, tool_verdict, region_id, x, y, cog_url, outline)
+                        select 'pool', p.capture_id, p.id, p.section_id, %(g)s, %(v)s, %(r)s, st_x(p.geom), st_y(p.geom), t.cog_url, {outline}
+                        from pool_candidates p join sections s on s.parcel_id = p.section_id and s.region_id = %(r)s
+                        {tile.format(cap="p.capture_id", pt="p.geom")}
+                        where p.tool_pool = %(f)s order by md5(p.id::text) limit %(n)s""",
+                    dict(g=grp, v="pool" if flag else "not_pool", r=region, f=flag, n=n[grp]))
+    con.execute(f"""insert into validation_items (task, capture_id, section_id, grp, tool_verdict, region_id, x, y, cog_url, outline)
+                    select 'garden', si.capture_id, s.parcel_id, 'sample', 'measured', %(r)s, st_x(c.p), st_y(c.p), t.cog_url, {outline}
+                    from section_imagery si join sections s on s.parcel_id = si.section_id and s.region_id = %(r)s
+                    cross join lateral (select st_pointonsurface(s.geom) p) c
+                    {tile.format(cap="si.capture_id", pt="c.p")}
+                    where si.valid_m2 > 0 and s.polygon_m2 between 200 and 3000 order by md5(s.parcel_id::text) limit %(n)s""",
+                dict(r=region, n=n["garden"]))
+    k = con.execute("select task, count(*) from validation_items where region_id=%s group by task", (region,)).fetchall()
+    d = dict(k)
+    return f"labelling items sampled: {d.get('pool', 0)} pool candidates, {d.get('garden', 0)} gardens"
 
 
 # ---------------------------------------------------------------- publish (new region): suburb_metrics rows, then the shared update
