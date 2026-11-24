@@ -130,8 +130,12 @@ def linz(con, client, region, log):
                     (int(s["id"]), s["name"], s.get("type"), s.get("territorial_authority"), s.get("population_estimate"), _multi(s.geometry).wkb,
                      region, dt.date.today().isoformat()))
     log(f"suburbs: {len(sub)}")
-    # reuse: suburbs whose sections are already stored (by any user's earlier job) are not downloaded again
-    loaded = {r[0] for r in con.execute("select distinct suburb_id from sections where suburb_id = any(%s)", (list(sub["id"].astype(int)),))}
+    # reuse: suburbs already downloaded (by any user's earlier job) are not downloaded again: those with stored sections, and those
+    # marked as downloaded even though they hold no residential sections (industrial, rural, parkland), which otherwise came back
+    # in every part and kept the step from finishing
+    loaded = {r[0] for r in con.execute("""select su.linz_id from suburbs su where su.linz_id = any(%s)
+                                           and (su.sections_fetched_at is not null or exists (select 1 from sections s where s.suburb_id = su.linz_id))""",
+                                        (list(sub["id"].astype(int)),))}
     todo = sub[~sub["id"].astype(int).isin(loaded)]
     if todo.empty:
         log(f"all {len(sub)} suburbs already stored: no LINZ parcel/building download needed")
@@ -196,6 +200,7 @@ def linz(con, client, region, log):
                 seen.add(int(r.building_id))
                 cp.write_row((int(r.building_id), round(r.geometry.area, 1), r.get("capture_source_id"), "SRID=2193;" + r.geometry.wkt, dt.date.today().isoformat()))
         cur.execute("insert into buildings select * from _bld on conflict (building_id) do update set geom=excluded.geom, area_m2=excluded.area_m2")
+    con.execute("update suburbs set sections_fetched_at = now() where linz_id = any(%s)", (list(sub["id"].astype(int)),))
     log(f"residential sections: {len(par)}, buildings: {len(seen)}")
     if hasattr(log, "progress"):
         log.progress((len(loaded) + len(sub)) / max(1, len(full_sub)))
