@@ -655,7 +655,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 
 - **Chips:** after sampling labelling items, the worker renders each one as a plain JPEG (no georeferencing or metadata) under a random token. Pools show the candidate circled in red within its section (yellow). Gardens show the section beside a copy with vegetation tinted green. Stored in `review_chips` (migration 0033); not readable by app users.
 - **Function `review-chips`:**
-  - opened only by a single-purpose review key: the `REVIEW_TOKEN` secret, set from the GitHub production secret by the deploy workflow;
+  - opened only by a single-purpose review key, checked against its SHA-256 in `review_keys` (migration 0034; only the hash is stored, so it can sit in the public repo). Revoke with `revoked = true`;
   - serves token, task and image only (no coordinates, tile, parcel, suburb, region or tool verdict) and records the reviewer's labels in `review_labels`;
   - JWT gateway check off (`.no-verify-jwt`), because the function checks its own key;
   - revoke by deleting the secret.
