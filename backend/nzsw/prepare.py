@@ -301,14 +301,59 @@ def _catalogue(client, log):
     return out
 
 
+Q_BLD_UNCOVERED = """select count(distinct b.building_id) from buildings b join sections s on st_intersects(s.geom, b.geom)
+                      where s.region_id=%s and not exists (select 1 from imagery_tiles t where t.region_id=%s and st_intersects(t.geom, b.geom))"""
+
+
+def _index_ranked(con, region, log, ranked):
+    """ranked: (capture id, s3 prefix, year, resolution, tile names) best first. Adds, capture by capture, the tiles that hold
+    buildings not yet covered, until every building is covered. Returns a summary."""
+    total = con.execute("""select count(distinct b.building_id) from buildings b join sections s on st_intersects(s.geom, b.geom)
+                           where s.region_id=%s""", (region,)).fetchone()[0]
+    left = con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]
+    reg = con.execute("select st_asbinary(st_extent(b.geom)::geometry) from buildings b join sections s on st_intersects(s.geom, b.geom) where s.region_id=%s", (region,)).fetchone()[0]
+    reg_box = wkb.loads(bytes(reg)) if reg else None
+    used = []
+    for cap, coll, year, res, names in ranked:
+        if not left or reg_box is None:
+            break
+        hit = []
+        for tid in names:
+            g = tile_box(tid)
+            if g is None or not g.intersects(reg_box): continue
+            n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
+                               where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))
+                               and not exists (select 1 from imagery_tiles t where t.region_id=%s and st_intersects(t.geom, b.geom))""", (region, g.wkb, region)).fetchone()[0]
+            if n: hit.append((tid, g))
+        if not hit:
+            continue
+        con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
+                       on conflict (id) do nothing""", (cap, coll, year, res))
+        for tid, g in hit:
+            base = f"{S3}{coll}/rgbnir/2193/{tid}"
+            con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
+                           on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
+        left = con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]
+        used.append((cap, year, res, len(hit)))
+        log(f"capture {cap} ({year}, {res} m): {len(hit)} tiles added; {left:,} building(s) still without imagery")
+    con.execute("update regions set imagery_captures = (select array_agg(distinct capture_id) from imagery_tiles where region_id=%s) where id=%s", (region, region))
+    if not used:
+        return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
+    pct = 100.0 * (total - left) / max(1, total)
+    coarse = [u for u in used if u[2] > 0.125]
+    return (f"{len(used)} capture(s) ({', '.join(f'{u[0]} {u[2]} m, {u[3]} tiles' for u in used)}): {pct:.0f}% of buildings covered"
+            + (f"; {len(coarse)} coarser than 12.5 cm, so small pools may be missed there" if coarse else "")
+            + (f"; {left:,} building(s) have no RGB+NIR imagery" if left else ""))
+
+
 def imagery_index(con, client, region, log):
     R = _region(con, region)
     # reuse: tiles already indexed for this region (by any user's job) cover sections that have none of their own
     have = con.execute("select count(*), min(capture_id) from imagery_tiles where region_id=%s", (region,)).fetchone()
     uncovered = con.execute("""select count(*) from sections s where s.region_id=%s and not exists
                                (select 1 from imagery_tiles t where t.region_id=s.region_id and st_intersects(t.geom, s.geom))""", (region,)).fetchone()[0]
-    if have[0] and not uncovered:
-        return f"reused: {have[0]} tiles of {have[1]} already indexed; no imagery listing needed"
+    if have[0] and not uncovered and not con.execute(Q_BLD_UNCOVERED, (region, region)).fetchone()[0]:
+        return f"reused: {have[0]} tiles already indexed; no imagery listing needed"
     ext = con.execute("select st_xmin(e), st_ymin(e), st_xmax(e), st_ymax(e) from (select st_extent(geom) e from buildings b where exists (select 1 from sections s where s.region_id=%s and st_intersects(s.geom, b.geom))) t", (region,)).fetchone()
     if ext[0] is None:
         return "no buildings stored for the region yet: imagery not indexed"
@@ -322,26 +367,7 @@ def imagery_index(con, client, region, log):
     near = [c for c in cat if c["bbox"] and not (c["bbox"][2] < lo[0] or c["bbox"][0] > lo[2] or c["bbox"][3] < lo[1] or c["bbox"][1] > lo[3])]
     near.sort(key=lambda c: (c["res"] > 0.125, c["res"] if c["res"] > 0.125 else 0, -c["year"], c["res"]))
     log(f"{len(near)} RGB+NIR capture(s) overlap the region")
-    for c in near:
-        cand = [(t, g) for t in c["tiles"] for g in [tile_box(t)] if g is not None and g.intersects(reg_box)]
-        hit = []
-        for tid, g in cand:
-            n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
-                               where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))""", (region, g.wkb)).fetchone()[0]
-            if n: hit.append((tid, g))
-        if not hit:
-            continue
-        cap, coll = c["prefix"].split("/")[-1], c["prefix"]
-        con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
-                       on conflict (id) do nothing""", (cap, coll, c["year"], c["res"]))
-        for tid, g in hit:
-            base = f"{S3}{coll}/rgbnir/2193/{tid}"
-            con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
-                           on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
-        con.execute("update regions set imagery_captures = array[%s] where id=%s", (cap, region))
-        coarse = f"; coarser than 12.5 cm, so small pools may be missed" if c["res"] > 0.125 else ""
-        return f"capture {cap} ({c['year']}, {c['res']} m): {len(hit)} tiles hold the region's buildings{coarse}"
-    return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
+    return _index_ranked(con, region, log, [(c["prefix"].split("/")[-1], c["prefix"], c["year"], c["res"], c["tiles"]) for c in near])
 
 
 def _imagery_index_folders(con, client, region, log, R, reg_box):
@@ -360,25 +386,7 @@ def _imagery_index_folders(con, client, region, log, R, reg_box):
             items = [os.path.basename(x)[:-5] for x in k if x.endswith(".json") and "collection" not in x]
             if items: cands.append((year, res, c.rstrip("/"), items))
     cands.sort(key=lambda x: (x[1] > 0.125, x[1] if x[1] > 0.125 else 0, -x[0], x[1]))
-    for year, res, coll, items in cands:
-        hit = []
-        for tid in items:
-            g = tile_box(tid)
-            if g is None or not g.intersects(reg_box): continue
-            n = con.execute("""select count(*) from buildings b join sections s on st_intersects(s.geom, b.geom)
-                               where s.region_id=%s and st_intersects(b.geom, st_geomfromwkb(%s,2193))""", (region, g.wkb)).fetchone()[0]
-            if n: hit.append((tid, g))
-        if not hit: continue
-        cap = coll.split("/")[-1]
-        con.execute("""insert into imagery_captures (id, s3_prefix, year, resolution_m, bands) values (%s,%s,%s,%s,'RGB+NIR')
-                       on conflict (id) do nothing""", (cap, coll, year, res))
-        for tid, g in hit:
-            base = f"{S3}{coll}/rgbnir/2193/{tid}"
-            con.execute("""insert into imagery_tiles (capture_id, tile_id, region_id, cog_url, stac_url, geom) values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193))
-                           on conflict do nothing""", (cap, tid, region, base + ".tiff", base + ".json", g.wkb))
-        con.execute("update regions set imagery_captures = array[%s] where id=%s", (cap, region))
-        return f"capture {cap} ({year}, {res} m): {len(hit)} tiles hold the region's buildings" + ("; coarser than 12.5 cm, so small pools may be missed" if res > 0.125 else "")
-    return "no RGB+NIR imagery covers the region's buildings: pools and gardens are not available for this region"
+    return _index_ranked(con, region, log, [(coll.split("/")[-1], coll, year, res, items) for year, res, coll, items in cands])
 
 # ---------------------------------------------------------------- imagery (pools, vegetation)
 def imagery(con, client, region, log):
@@ -388,25 +396,32 @@ def imagery(con, client, region, log):
     os.environ.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tiff")
     cal = dict(ndwi_min=0.15, blue_over_red=12, bright_min=55, ndvi_veg=0.2, nir_veg_min=40, pool_g_min=130, pool_b_min=130, pool_ndwi_min=0.4,
                pool_min_m2=6, pool_max_m2=250, solidity_min=0.8, rectfill_min=0.55)
-    todo = con.execute("select capture_id, tile_id, cog_url from imagery_tiles where region_id=%s and processed_at is null order by tile_id", (region,)).fetchall()
+    # best capture first (12.5 cm or finer, newest, finest; then coarser), so where captures overlap a section is analysed once,
+    # from its best capture
+    todo = con.execute("""select t.capture_id, t.tile_id, t.cog_url from imagery_tiles t left join imagery_captures c on c.id = t.capture_id
+                          where t.region_id=%s and t.processed_at is null
+                          order by (coalesce(c.resolution_m, 0.1) > 0.125), case when coalesce(c.resolution_m, 0.1) > 0.125 then c.resolution_m else 0 end,
+                                   c.year desc nulls last, c.resolution_m, t.tile_id""", (region,)).fetchall()
     left_after = max(0, len(todo) - L.SERVICES["linz_imagery_s3"]["max_tiles_run"]); todo = todo[:L.SERVICES["linz_imagery_s3"]["max_tiles_run"]]   # large regions: in parts
     if not todo:
         n = con.execute("select count(*) from imagery_tiles where region_id=%s", (region,)).fetchone()[0]
         if not n: return "no imagery for this region: pools and gardens skipped"
     else:
-        cap = todo[0][0]
-        c2 = con.execute("select calibration from imagery_captures where id=%s", (cap,)).fetchone()
-        if c2 and c2[0]: cal.update(c2[0])
         est = sum(int(client.request("linz_imagery_s3", "HEAD", u).headers.get("Content-Length", 0)) // 4 for _, _, u in todo[:3])
         client.imagery_allowance(len(todo), est * len(todo) // max(1, min(3, len(todo))))
-    done = 0
+    done, base_cal, cals = 0, dict(cal), {}
     for cap, tid, url in todo:
+        if cap not in cals:   # each capture may have its own calibration
+            c2 = con.execute("select calibration from imagery_captures where id=%s", (cap,)).fetchone()
+            cals[cap] = {**base_cal, **((c2 and c2[0]) or {})}
+        cal = cals[cap]
         if time.monotonic() > DEADLINE:
             raise Continue(f"time limit: {done} tiles done this run, {len(todo) - done} left")
         with rasterio.open("/vsicurl/" + url, OVERVIEW_LEVEL=0) as src:
             l, b, r_, t = src.bounds
             env = box(l, b, r_, t).wkb
-            secs = con.execute("select parcel_id, st_asbinary(geom) from sections where region_id=%s and st_intersects(geom, st_geomfromwkb(%s,2193))", (region, env)).fetchall()
+            secs = con.execute("""select parcel_id, st_asbinary(geom) from sections where region_id=%s and st_intersects(geom, st_geomfromwkb(%s,2193))
+                                  and not exists (select 1 from section_imagery si where si.section_id = sections.parcel_id and si.capture_id <> %s)""", (region, env, cap)).fetchall()
             blds = con.execute("select st_asbinary(geom) from buildings where st_intersects(geom, st_geomfromwkb(%s,2193))", (env,)).fetchall()
             if not secs:
                 con.execute("update imagery_tiles set processed_at=now() where capture_id=%s and tile_id=%s and region_id=%s", (cap, tid, region)); continue
