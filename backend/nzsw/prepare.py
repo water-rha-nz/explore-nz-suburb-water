@@ -258,12 +258,30 @@ def imagery_index(con, client, region, log):
     for year, nres, coll, items in sorted(cands, reverse=True):          # newest, then finest
         from shapely.geometry import shape
         tiles = []
-        for k in items:
-            j = client.request("linz_imagery_s3", "GET", S3 + k, timeout=60).json()
-            if j.get("type") != "Feature": continue
-            g = gpd.GeoSeries([shape(j["geometry"])], crs=4326).to_crs(2193).iloc[0]
-            if reg_box is not None and g.intersects(reg_box):
-                tiles.append((os.path.basename(k)[:-5], g))
+        # each tile's footprint is in a small public STAC file; a large capture has thousands, so fetch 16 at a time and
+        # hand back to the queue before the run's time limit (the next run starts the listing again)
+        sess = requests.Session()
+        def item(k):
+            for attempt in range(3):
+                try:
+                    r = sess.get(S3 + k, timeout=30)
+                    if r.status_code == 200: return k, r.json()
+                except requests.RequestException:
+                    pass
+                time.sleep(1 + attempt)
+            return k, None
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for i, (k, j) in enumerate(ex.map(item, items)):
+                if time.monotonic() > DEADLINE:
+                    ex.shutdown(wait=False, cancel_futures=True)   # don't wait for the remaining downloads
+                    raise Continue(f"time limit while listing imagery tiles ({i} of {len(items)} checked)")
+                if i % 200 == 0 and hasattr(log, "progress"):
+                    log.progress(i / max(1, len(items)), f"imagery tiles checked: {i:,} of {len(items):,}")
+                if not j or j.get("type") != "Feature": continue
+                g = gpd.GeoSeries([shape(j["geometry"])], crs=4326).to_crs(2193).iloc[0]
+                if reg_box is not None and g.intersects(reg_box):
+                    tiles.append((os.path.basename(k)[:-5], g))
         if not tiles:
             continue
         # keep tiles that actually contain the region's buildings

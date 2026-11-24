@@ -117,8 +117,21 @@ def run_steps(con, region, steps, job_id=None, log=print):
     return "done", results
 
 
+def requeue_stale(con, hours=3):
+    """Jobs left 'running' by a run that was stopped (e.g. a timed-out GitHub job) with no activity for `hours` (longer than
+    any run) are queued again; finished steps are skipped when they resume."""
+    rows = con.execute("""update jobs j set status = 'queued', reason = 'queued again: the previous run stopped before finishing'
+                          where j.status = 'running' and coalesce((select max(coalesce(r.updated_at, r.finished_at, r.started_at)) from job_runs r where r.job_id = j.id),
+                                                                  j.created_at) < now() - make_interval(hours => %s)
+                          returning j.id""", (hours,)).fetchall()
+    return len(rows)
+
+
 def worker(con, log=print, max_jobs=20):
     n = 0
+    k = requeue_stale(con)
+    if k:
+        (public(f"{k} stalled job(s) queued again") if PUBLIC else log(f"{k} stalled job(s) queued again"))
     while n < max_jobs:
         row = con.execute("select id, type, region_id, params from claim_job()").fetchone()
         if not row or row[0] is None:

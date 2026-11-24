@@ -670,7 +670,7 @@ sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") location.reload(); 
 // ---------------------------------------------------------------- data (DB -> the structure the stages already use)
 async function loadRegion(r) {
   const mets = await q(sb.from("suburb_metrics").select("*").eq("region_id", r.id));
-  const outl = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs" }));
+  const outl = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs", p_tol: 20 }));   // 20 m: light enough for large regions
   const sa2o = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "sa2", p_tol: 15 }));
   const ids = mets.map((m) => m.linz_id);
   const cens = ids.length ? await q(sb.from("suburb_census").select("*").in("linz_id", ids)) : [];
@@ -827,7 +827,8 @@ const studyIndex = () => { const st = typeof studyOf === "function" ? studyOf() 
 for (const id of ["imagery", "validate", "context", "explore", "export"]) { const f = V[id]; if (!f) continue;
   V[id] = (...a) => { if (D.regions[region]) return f(...a);
     if (!region || D.empty[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${region && D.empty[region] ? `${esc(indexOf(region).name || region)} has no prepared data yet.` : "No region chosen."} Choose a region with data in the header, or load one on <b>1 · Overview</b>.</p>`;
-    ensureRegion(region).then(() => render()).catch((e) => toastMsg("Region not loaded: " + e.message));
+    if (D.failed && D.failed[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${esc(indexOf(region).name || region)} couldn't be loaded: ${esc(D.failed[region])}</p><p><button class="btn primary" type="button" id="region-retry">Try again</button></p>`;
+    ensureRegion(region).then(() => render()).catch((e) => { D.failed = D.failed || {}; D.failed[region] = e.message; render(); });
     return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted">Suburbs, census, climate and imagery results</p></section>`; }; }
 { const fx = V.explore; if (fx) V.explore = (...a) => { const inner = fx(...a); return D.regions[region] ? detailedOverviewHTML() + '<hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">' + inner : inner; }; }
 // landing map: TA outlines (cached) and each region's suburb outlines, simplified and without data; click a region to load it
@@ -871,6 +872,7 @@ V.region = () => {
       <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
       <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
 };
+document.addEventListener("click", (e) => { if (e.target.id === "region-retry") { if (D.failed) delete D.failed[region]; render(); } });
 document.addEventListener("click", async (e) => {
   const t = e.target, b = t.closest && t.closest("[data-ov-load],#ov-load-all,#ov-load-last,[data-goto-stage]"); if (!b) return;
   if (b.dataset.gotoStage) { stage = b.dataset.gotoStage; store.set("stage", stage); render(); return scrollTo(0, 0); }
