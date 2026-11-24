@@ -114,3 +114,40 @@ document.addEventListener("click", async (e) => {
   if (!BATCH.sel.size) return toastMsg("Choose at least one region (TA) first");
   try { await saveConfig(name); BATCH.isNew = false; scopeSession(); render(); } catch (err) { toastMsg("Not saved: " + err.message); }
 });
+
+// ---------------------------------------------------------------- admin: database size and review keys
+const FREE_DB_BYTES = 500e6;   // Supabase free plan database size
+const _vAdminFlow = V.admin;
+V.admin = (...a) => {
+  const h = _vAdminFlow(...a); if (!can("admin")) return h;
+  setTimeout(loadAdminExtras, 0);
+  return h + `<h2>Database size</h2><div class="card" id="adm-sizes"><p class="small muted">Loading…</p></div>
+    <h2>Review keys</h2><div class="card" id="adm-keys"><p class="small muted">Loading…</p></div>`;
+};
+async function loadAdminExtras() {
+  const zs = $("#adm-sizes"), ks = $("#adm-keys");
+  if (zs) try { const z = await q(sb.rpc("db_sizes")) || {}, used = +z.database_bytes || 0, pct = Math.min(100, 100 * used / FREE_DB_BYTES);
+    zs.innerHTML = `<p><b>${fmt(used / 1e6)} MB</b> of the free plan's ${fmt(FREE_DB_BYTES / 1e6)} MB (${fmt(100 * used / FREE_DB_BYTES)}%)</p>
+      <div class="bar-out" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="Database size"><div class="bar-in" style="width:${pct.toFixed(1)}%;${pct >= 90 ? "background:var(--bad)" : ""}"></div></div>
+      <p class="small muted">By schema: ${Object.entries(z.schemas || {}).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => `${esc(k)} ${fmt(v / 1e6)} MB`).join(" · ")}</p>
+      <div class="scroll"><table><thead><tr><th class="l">Table</th><th>Total MB</th><th>Data MB</th><th>Indexes MB</th><th>Rows</th><th>Dead rows</th></tr></thead><tbody>${(z.tables || []).slice(0, 20).map((t) => `<tr><td class="l"><code>${esc(t.name)}</code></td><td>${fmt(t.total / 1e6, 1)}</td><td>${fmt(t.heap / 1e6, 1)}</td><td>${fmt(t.idx / 1e6, 1)}</td><td>${fmt(t.live_rows)}</td><td>${fmt(t.dead_rows)}</td></tr>`).join("")}</tbody></table></div>`; }
+    catch (e) { zs.innerHTML = `<p class="small">Size report unavailable: ${esc(e.message)}</p>`; }
+  if (ks) try { const rows = await q(sb.rpc("admin_review_keys")) || [];
+    ks.innerHTML = `<p class="small">Review keys open only the blind image review (anonymous chips, no location) and record second-review labels. The database keeps only each key's SHA-256; a new key is shown once, here.</p>
+      <table><thead><tr><th class="l">Key</th><th class="l">Label</th><th>Created</th><th>Status</th><th></th></tr></thead><tbody>${rows.map((r) => `<tr><td class="l"><code>${esc(r.hash_prefix)}…</code></td><td class="l">${esc(r.label || "")}</td><td>${esc(new Date(r.created_at).toLocaleDateString("en-NZ"))}</td><td><span class="tag ${r.revoked ? "bad" : "ok"}">${r.revoked ? "revoked" : "active"}</span></td><td><button class="btn" type="button" data-rkey="${esc(r.hash_prefix)}" data-rkey-on="${r.revoked ? "0" : "1"}">${r.revoked ? "Restore" : "Revoke"}</button></td></tr>`).join("") || `<tr><td colspan="5" class="muted">No keys.</td></tr>`}</tbody></table>
+      <div class="row" style="margin-top:8px"><input type="text" id="rkey-label" placeholder="Label (who or what uses it)" style="width:240px"><button class="btn primary" type="button" id="rkey-new">Create key</button></div><div id="rkey-out"></div>`; }
+    catch (e) { ks.innerHTML = `<p class="small">Review keys unavailable: ${esc(e.message)}</p>`; }
+}
+document.addEventListener("click", async (e) => {
+  const t = e.target; if (!t || !can("admin")) return;
+  if (t.id === "rkey-new") {
+    const raw = crypto.getRandomValues(new Uint8Array(32)), key = [...raw].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    try { await q(sb.rpc("admin_add_review_key", { p_sha256: hash, p_label: (($("#rkey-label") || {}).value || "").trim() })); await loadAdminExtras();
+      const out = $("#rkey-out"); if (out) out.innerHTML = `<div class="note" style="margin-top:8px"><b>Copy this key now: it isn't shown again or stored anywhere.</b><br><input type="text" readonly value="${key}" style="width:100%;font-family:monospace" onclick="this.select()"><br><span class="small">Send it as the <code>x-review-token</code> header to <code>/functions/v1/review-chips</code>. Revoke it here if it's lost or shared.</span></div>`; }
+    catch (err) { toastMsg("Key not created: " + err.message); }
+    return;
+  }
+  const r = t.closest && t.closest("[data-rkey]");
+  if (r) { try { await q(sb.rpc("admin_revoke_review_key", { p_prefix: r.dataset.rkey, p_revoked: r.dataset.rkeyOn === "1" })); await loadAdminExtras(); } catch (err) { toastMsg(err.message); } }
+});
