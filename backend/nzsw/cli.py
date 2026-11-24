@@ -97,6 +97,7 @@ def run_steps(con, region, steps, job_id=None, log=print):
             msg, status = str(e), "queued"
         except L.RunTooLarge as e:
             msg, status = str(e), "failed"
+            if PUBLIC: public(f"job {token(job_id or region)}: {s}: error RunTooLarge")
         except Exception as e:  # noqa: BLE001
             msg, status = f"{type(e).__name__}: {e}", "failed"
             (public(f"job {token(job_id or region)}: {s}: error {type(e).__name__}") if PUBLIC else log(traceback.format_exc(limit=3)))
