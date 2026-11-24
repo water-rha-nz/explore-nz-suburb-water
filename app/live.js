@@ -39,22 +39,32 @@ $("#signin").addEventListener("click", async () => { if (SESSION) { await sb.aut
 sb.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") location.reload(); });
 
 // ---------------------------------------------------------------- data (DB -> the structure the stages already use)
-async function loadRegion(r) {
-  const mets = await q(sb.from("suburb_metrics").select("*").eq("region_id", r.id));
-  const outl = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs", p_tol: 20 }));   // 20 m: light enough for large regions
-  const sa2o = await q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "sa2", p_tol: 15 }));
+// a region loads in small chunks (each retried), so no single request is large enough to time out on big regions
+const chunks = (a, n) => { const out = []; for (let i = 0; i < a.length; i += n) out.push(a.slice(i, i + n)); return out; };
+async function retry(fn, tries = 3) { for (let i = 0; ; i++) { try { return await fn(); } catch (e) { if (i >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 800 * (i + 1))); } } }
+async function inChunks(list, n, fn, note) { const out = []; const cs = chunks(list, n); for (let i = 0; i < cs.length; i++) { if (note) note(i + 1, cs.length); out.push(...((await retry(() => fn(cs[i]))) || [])); } return out; }
+async function loadRegion(r, progress) {
+  const say = (what, i, n) => { if (progress) progress(n > 1 ? `${what} (${i} of ${n})` : what); };
+  say("suburb figures");
+  const mets = await retry(() => q(sb.from("suburb_metrics").select("*").eq("region_id", r.id)));
+  const subs = await retry(() => q(sb.from("suburbs").select("linz_id").eq("region_id", r.id)));
+  const sid = [...new Set([...subs.map((x) => +x.linz_id), ...mets.map((m) => +m.linz_id)])];
+  const outl = await inChunks(sid, 25, (c) => q(sb.rpc("suburb_outlines", { p_ids: c, p_tol: 20 })), (i, n) => say("suburb outlines", i, n));
+  const codes = [...new Set(await inChunks(sid, 20, (c) => q(sb.rpc("sa2_codes_for", { p_ids: c })), (i, n) => say("census areas", i, n)))];
+  const sa2o = await inChunks(codes, 25, (c) => q(sb.rpc("sa2_outlines", { p_codes: c, p_tol: 15 })), (i, n) => say("census area outlines", i, n));
   const ids = mets.map((m) => m.linz_id);
-  const cens = ids.length ? await q(sb.from("suburb_census").select("*").in("linz_id", ids)) : [];
-  const cm = sa2o.length ? await q(sb.from("census_metrics").select("*").in("sa2_code", sa2o.map((x) => x.id))) : [];
+  const cens = await inChunks(ids, 100, (c) => q(sb.from("suburb_census").select("*").in("linz_id", c)), (i, n) => say("suburb census", i, n));
+  const cm = await inChunks(sa2o.map((x) => x.id), 100, (c) => q(sb.from("census_metrics").select("*").in("sa2_code", c)), (i, n) => say("census figures", i, n));
   const cells = [...new Set(mets.map((m) => m.climate_cell).filter(Boolean))];
-  const monthly = cells.length ? await q(sb.from("v_climate_monthly").select("*").in("cell_id", cells).order("month")) : [];
-  const vs = await q(sb.from("validation_summary").select("*").eq("region_id", r.id));
+  const monthly = (await inChunks(cells, 1, (c) => q(sb.from("v_climate_monthly").select("*").in("cell_id", c).order("month")), (i, n) => say("climate", i, n))).sort((a, b) => a.month < b.month ? -1 : 1);
+  say("validation and imagery");
+  const vs = await retry(() => q(sb.from("validation_summary").select("*").eq("region_id", r.id)));
   const caps = await q(sb.from("imagery_captures").select("*").in("id", r.imagery_captures || []));
   const st = (STATIC.regions || {})[r.id] || {};
   const climate_cells = {};
   for (const c of cells) {
     const rows = monthly.filter((m) => m.cell_id === c);
-    const daily = await q(sb.from("climate_daily").select("date,rain_mm,et0_mm,tmax_c").eq("cell_id", c).gte("date", "2024-07-01").order("date"));
+    const daily = await retry(() => q(sb.from("climate_daily").select("date,rain_mm,et0_mm,tmax_c").eq("cell_id", c).gte("date", "2024-07-01").order("date")));
     climate_cells[c] = { months: rows.map((m) => m.month.slice(0, 7)), rain: rows.map((m) => +m.rain_mm), et0: rows.map((m) => +m.et0_mm), tmean: rows.map((m) => +m.tmean_c), tmax: rows.map((m) => +m.tmax_c),
       daily: { start: daily.length ? daily[0].date : today(), rain: daily.map((d) => +d.rain_mm), et0: daily.map((d) => +d.et0_mm), tmax: daily.map((d) => +d.tmax_c) } };
   }
@@ -179,14 +189,14 @@ document.addEventListener("click", async (e) => {
 const _vRegion = V.region;
 // 1 Region: an overview of the data already in the database (loaded once at sign-in; no queries, no jobs here).
 // Queuing jobs, job progress and download rates are on 3 Load.
-const LOADING = {};
+const LOADING = {}, LOADMSG = {};
 // load one region's detail (once); regions without prepared data are remembered as empty
 async function ensureRegion(id, progress) {
   if (!id || D.regions[id] || D.empty[id]) return D.regions[id];
   if (LOADING[id]) return LOADING[id];
   const r = (D.index || []).find((x) => x.id === id); if (!r) return null;
   return (LOADING[id] = (async () => { if (progress) progress(r);
-    try { const g = await loadRegion(r); if (g.suburbs.length) { g.lonlat = (D.cen || {})[r.id] || g.lonlat; D.regions[id] = g; rememberLoaded(); } else D.empty[id] = true; }
+    try { const g = await loadRegion(r, (what) => { LOADMSG[id] = what; const el = $("#region-load-step"); if (el && region === id) el.textContent = what; }); if (g.suburbs.length) { g.lonlat = (D.cen || {})[r.id] || g.lonlat; D.regions[id] = g; rememberLoaded(); } else D.empty[id] = true; }
     finally { delete LOADING[id]; } return D.regions[id]; })());
 }
 async function ensureRegions(ids, progress) { let i = 0; for (const id of ids) { if (progress) progress(++i, ids.length, ((D.index || []).find((x) => x.id === id) || {}).name || id); await ensureRegion(id); } }
@@ -200,7 +210,7 @@ for (const id of ["imagery", "validate", "context", "explore", "export"]) { cons
     if (!region || D.empty[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${region && D.empty[region] ? `${esc(indexOf(region).name || region)} has no prepared data yet.` : "No region chosen."} Choose a region with data in the header, or load one on <b>1 · Overview</b>.</p>`;
     if (D.failed && D.failed[region]) return `<h1>0 · ${esc((STAGES.find((x) => x[0] === id) || [])[1] || id)}</h1><p class="lead">${esc(indexOf(region).name || region)} couldn't be loaded: ${esc(D.failed[region])}</p><p><button class="btn primary" type="button" id="region-retry">Try again</button></p>`;
     ensureRegion(region).then(() => render()).catch((e) => { D.failed = D.failed || {}; D.failed[region] = e.message; render(); });
-    return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted">Suburbs, census, climate and imagery results</p></section>`; }; }
+    return `<section role="status" style="max-width:520px;margin:48px auto;text-align:center"><div style="width:32px;height:32px;margin:0 auto 12px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);animation:nzsw-spin .9s linear infinite"></div><style>@keyframes nzsw-spin{to{transform:rotate(360deg)}}</style><p class="lead">Loading ${esc(indexOf(region).name || region)}…</p><p class="small muted" id="region-load-step">${esc(LOADMSG[region] || "starting")}</p></section>`; }; }
 { const fx = V.explore; if (fx) V.explore = (...a) => { const inner = fx(...a); return D.regions[region] ? detailedOverviewHTML() + '<hr style="margin:24px 0;border:0;border-top:1px solid var(--line)">' + inner : inner; }; }
 // landing map: TA outlines (cached) and each region's suburb outlines, simplified and without data; click a region to load it
 const LAND = { outl: {}, busy: false };
@@ -209,7 +219,9 @@ async function drawLanding() {
   try { if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 })); } catch (e) { BATCH.tas = BATCH.tas || []; }
   const rows = studyIndex(), need = rows.filter((r) => !LAND.outl[r.id]);
   if (need.length && !LAND.busy) { LAND.busy = true;
-    Promise.all(need.map((r) => q(sb.rpc("region_outlines", { p_region: r.id, p_kind: "suburbs", p_tol: 60 })).then((o) => { LAND.outl[r.id] = o.map((x) => ({ name: x.name, geom: multi(x.geom) })); }).catch(() => { LAND.outl[r.id] = []; })))
+    Promise.all(need.map((r) => retry(() => q(sb.from("suburbs").select("linz_id").eq("region_id", r.id)))
+      .then((ids) => inChunks(ids.map((x) => +x.linz_id), 40, (c) => q(sb.rpc("suburb_outlines", { p_ids: c, p_tol: 60 }))))
+      .then((o) => { LAND.outl[r.id] = o.map((x) => ({ name: x.name, geom: multi(x.geom) })); }).catch(() => { LAND.outl[r.id] = []; })))
       .then(() => { LAND.busy = false; if (stage === "region") drawLanding(); }); }
   const byTa = new Map(rows.map((r) => [r.ta_code, r]));
   const base = (BATCH.tas || []).filter((t) => t.geom && t.geom.coordinates).map((t) => { const r = byTa.get(t.code);
