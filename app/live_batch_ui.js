@@ -834,6 +834,13 @@ function scheduleProgress() {
   if (stage !== "load" || !PROG.jobs.some((j) => ACTIVE.has(j.status))) return;
   PROG.timer = setTimeout(() => { if (stage === "load" && (typeof document.visibilityState === "undefined" || document.visibilityState === "visible")) refreshProgress(); else scheduleProgress(); }, 15000);
 }
+// ask for a worker run now (GitHub's schedule is best-effort); harmless if one is running or was just requested
+async function kickWorker(quiet) {
+  try { const { data, error } = await sb.functions.invoke("kick-worker", { body: {} }); if (error) throw error;
+    PROG.kick = data || {}; if (!quiet || (data && data.started)) toastMsg((data && data.message) || "Worker requested"); }
+  catch (e) { PROG.kick = { error: e.message }; if (!quiet) toastMsg("Couldn't start the worker: " + e.message); }
+  const el = $("#batch-progress"); if (el) el.innerHTML = progressLive();
+}
 const nextWorkerRun = () => { const d = new Date(), m = d.getUTCMinutes(), add = 15 - (m % 15); return new Date(d.getTime() + add * 60000 - d.getUTCSeconds() * 1000); };
 function progressLive() {
   if (!PROG.at) return `<p class="small muted" style="margin:8px 0 0">Loading batch progress…</p>`;
@@ -844,7 +851,8 @@ function progressLive() {
   const anyActive = PROG.jobs.some((j) => ACTIVE.has(j.status));
   return `<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px"><div class="row small" style="justify-content:space-between"><b>Batch progress</b>
       <span class="muted">${anyActive ? `updates every 15 s · the worker runs every 15 minutes (next ≈ ${nextWorkerRun().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}) · ` : ""}updated ${PROG.at.toLocaleTimeString()} <button class="btn" type="button" id="prog-refresh" style="padding:0 6px">↻</button></span></div>
-    ${anyActive ? `<p class="small muted" style="margin:2px 0 0">Batches run on the server (GitHub Actions worker), not in this page: refreshing or closing it doesn't interrupt them.</p>` : ""}
+    ${anyActive ? `<p class="small muted" style="margin:2px 0 0">Batches run on the server (GitHub Actions worker), not in this page: refreshing or closing it doesn't interrupt them.
+      <button class="btn" type="button" id="kick-worker" style="padding:0 8px">▶ Run worker now</button> ${PROG.kick ? esc(PROG.kick.message || PROG.kick.error || "") : ""}</p>` : ""}
     ${PROG.err ? `<p class="small"><span class="tag bad">${esc(PROG.err)}</span></p>` : ""}
     ${shown.map((b) => { const jobs = PROG.jobs.filter((j) => j.batch_id === b.id);
       const per = jobs.map((j) => { const steps = (j.params && j.params.steps) || [], runs = PROG.runs.filter((r) => r.job_id === j.id), last = Object.fromEntries(runs.map((r) => [r.step, r]));
@@ -888,7 +896,7 @@ async function queueBatch() {
     }
     await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps: ["linz", "imagery_index", "imagery", "census", "publish_new", "climate"], timeline: tlFor(c) } }));
   }
-  toastMsg(`Queued ${sel.length} region job(s): progress shows below; the worker runs them one at a time`); PROG.at = null; setTimeout(refreshProgress, 0);
+  toastMsg(`Queued ${sel.length} region job(s): progress shows below; the worker runs them one at a time`); PROG.at = null; setTimeout(refreshProgress, 0); kickWorker(true);
   await loadBatchData(); drawBatch();
 }
 // a loaded configuration saves itself shortly after any change (so PRVDRs, mappings, timelines are never lost)
@@ -1024,6 +1032,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "cfg-bar-save" && can("editor")) { const n = (($("#cfg-bar-name") || {}).value || "").trim(); try { await saveConfig(n); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-save" && can("editor")) { try { await saveConfig(); } catch (err) { toastMsg("Not saved: " + err.message); } return; }
   if (t.id === "cfg-del" && BATCH.config && confirm(`Delete configuration "${BATCH.config.name}"?`)) { try { await q(sb.from("batch_configs").delete().eq("id", BATCH.config.id)); if (String(STUDY.id) === String(BATCH.config.id)) { STUDY.id = ""; store.set("study", ""); } BATCH.config = null; await loadBatchData(); loadStudies(); drawBatch(); } catch (err) { toastMsg(err.message); } return; }
+  if (t.id === "kick-worker") { t.disabled = true; await kickWorker(false); return; }
   if (t.id === "prog-refresh") { PROG.at = null; return refreshProgress(); }
   if (t.id === "batch-refresh") { await loadBatchData(); return drawBatch(); }
   if (t.dataset && t.dataset.tiles) return tileCSV(+t.dataset.tiles).catch((err) => toastMsg(err.message));
