@@ -179,6 +179,13 @@ def main(argv=None):
         n = con.execute("""select count(*) from jobs where status in ('queued', 'scheduled', 'paused_quota')
                            and (not_before is null or not_before <= now())""").fetchone()[0]
         print(f"runnable jobs left: {n}")
+        try:   # database size: table names, sizes and row counts only (free plan: 0.5 GB)
+            z = con.execute("select db_sizes()").fetchone()[0] or {}
+            print(f"database size: {z.get('database_bytes', 0) / 1e6:.0f} MB; by schema: " + ", ".join(f"{k} {v / 1e6:.0f} MB" for k, v in sorted((z.get('schemas') or {}).items(), key=lambda x: -x[1])[:6]))
+            for t in (z.get("tables") or [])[:15]:
+                print(f"  table {t['name']}: {t['total'] / 1e6:.1f} MB (heap {t['heap'] / 1e6:.1f}, indexes {t['idx'] / 1e6:.1f}); rows {t['live_rows']:,}, dead {t['dead_rows']:,}")
+        except Exception as e:
+            print(f"database size unavailable: {type(e).__name__}")
         out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as f:
