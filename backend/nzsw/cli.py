@@ -180,7 +180,7 @@ def main(argv=None):
                            and (not_before is null or not_before <= now())""").fetchone()[0]
         print(f"runnable jobs left: {n}")
         try:   # database size: table names, sizes and row counts only (free plan: 0.5 GB)
-            z = con.execute("select db_sizes()").fetchone()[0] or {}
+            z = con.execute("select db_sizes_worker()").fetchone()[0] or {}
             print(f"database size: {z.get('database_bytes', 0) / 1e6:.0f} MB; by schema: " + ", ".join(f"{k} {v / 1e6:.0f} MB" for k, v in sorted((z.get('schemas') or {}).items(), key=lambda x: -x[1])[:6]))
             for t in (z.get("tables") or [])[:15]:
                 print(f"  table {t['name']}: {t['total'] / 1e6:.1f} MB (heap {t['heap'] / 1e6:.1f}, indexes {t['idx'] / 1e6:.1f}); rows {t['live_rows']:,}, dead {t['dead_rows']:,}")
