@@ -419,7 +419,16 @@ def imagery(con, client, region, log):
         if not n: return "no imagery for this region: pools and gardens skipped"
     else:
         est = sum(int(client.request("linz_imagery_s3", "HEAD", u).headers.get("Content-Length", 0)) // 4 for _, _, u in todo[:3])
-        client.imagery_allowance(len(todo), est * len(todo) // max(1, min(3, len(todo))))
+        per_tile = max(1, est // max(1, min(3, len(todo))))
+        # fit the part to the bytes left in today's imagery budget (a smaller part, not a paused job); pause only if not one tile fits
+        room = L.effective("linz_imagery_s3")["bytes_day"] - client.ledger.bytes_today("linz_imagery_s3")
+        fit = max(0, int(room // per_tile))
+        if fit < len(todo):
+            if fit < 1:
+                client.imagery_allowance(1, per_tile)   # raises QuotaExceeded: the job resumes after the daily reset
+            left_after += len(todo) - fit; todo = todo[:fit]
+            log(f"part limited to {fit} tiles by today's imagery budget")
+        client.imagery_allowance(len(todo), per_tile * len(todo))
     dropped = con.execute("select buildings_dropped_at is not null from regions where id=%s", (region,)).fetchone()[0]
     done, base_cal, cals = 0, dict(cal), {}
     for cap, tid, url in todo:
@@ -492,7 +501,7 @@ def imagery(con, client, region, log):
                 cur.execute("""insert into pool_candidates (capture_id, section_id, geom, area_m2, features, tool_pool)
                                values (%s,%s, st_setsrid(st_makepoint(%s,%s),2193), %s,%s,%s)""", r)
             cur.execute("update imagery_tiles set processed_at=now() where capture_id=%s and tile_id=%s and region_id=%s", (cap, tid, region))
-        client.ledger.add("linz_imagery_s3", 0, nbytes=0)
+        client.ledger.add("linz_imagery_s3", 0, nbytes=per_tile)   # estimated bytes read for this tile, so the daily budget adds up
         done += 1
         log(f"tile {tid} ({done} of {len(todo)}): {len(tallies)} sections, {sum(1 for r in rows if r[-1])} pools / {len(rows)} candidates")
         if hasattr(log, "progress"):
