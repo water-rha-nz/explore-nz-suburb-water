@@ -411,7 +411,9 @@ def imagery(con, client, region, log):
                           where t.region_id=%s and t.processed_at is null
                           order by (coalesce(c.resolution_m, 0.1) > 0.125), case when coalesce(c.resolution_m, 0.1) > 0.125 then c.resolution_m else 0 end,
                                    c.year desc nulls last, c.resolution_m, t.tile_id""", (region,)).fetchall()
-    left_after = max(0, len(todo) - L.SERVICES["linz_imagery_s3"]["max_tiles_run"]); todo = todo[:L.SERVICES["linz_imagery_s3"]["max_tiles_run"]]   # large regions: in parts
+    # progress is shown for the whole region (tiles analysed of all its tiles), not for this run's part
+    n_all = con.execute("select count(*) from imagery_tiles where region_id=%s", (region,)).fetchone()[0]; before = n_all - len(todo)
+    left_after = max(0, len(todo) - L.SERVICES["linz_imagery_s3"]["max_tiles_run"]); todo = todo[:L.SERVICES["linz_imagery_s3"]["max_tiles_run"]]   # large regions: in parts (the run's time limit also ends a part)
     if not todo:
         n = con.execute("select count(*) from imagery_tiles where region_id=%s", (region,)).fetchone()[0]
         if not n: return "no imagery for this region: pools and gardens skipped"
@@ -426,7 +428,7 @@ def imagery(con, client, region, log):
             cals[cap] = {**base_cal, **((c2 and c2[0]) or {})}
         cal = cals[cap]
         if time.monotonic() > DEADLINE:
-            raise Continue(f"time limit: {done} tiles done this run, {len(todo) - done} left")
+            raise Continue(f"time limit: {before + done:,} of {n_all:,} tiles analysed ({done} this run); continues in the next run")
         with rasterio.open("/vsicurl/" + url, OVERVIEW_LEVEL=0) as src:
             l, b, r_, t = src.bounds
             env = box(l, b, r_, t).wkb
@@ -494,13 +496,13 @@ def imagery(con, client, region, log):
         done += 1
         log(f"tile {tid} ({done} of {len(todo)}): {len(tallies)} sections, {sum(1 for r in rows if r[-1])} pools / {len(rows)} candidates")
         if hasattr(log, "progress"):
-            log.progress(done / max(1, len(todo)))
+            log.progress((before + done) / max(1, n_all), f"tiles analysed: {before + done:,} of {n_all:,} for the region")
     # roofs and unbuilt area per section (LINZ geometry, SQL); kept as stored once the region's outlines have been dropped
     if not dropped: con.execute("""update section_imagery si set building_m2 = coalesce(b.a, 0), unbuilt_m2 = greatest(0, s.polygon_m2 - coalesce(b.a, 0))
                    from sections s left join lateral (select sum(st_area(st_intersection(s.geom, bb.geom))) a from buildings bb where st_intersects(s.geom, bb.geom)) b on true
                    where si.section_id = s.parcel_id and s.region_id = %s""", (region,))
     if left_after:
-        raise Continue(f"{done} tiles processed this run; {left_after} left: continues in the next run")
+        raise Continue(f"{before + done:,} of {n_all:,} tiles analysed ({done} this run); continues in the next run")
     msg = f"{done} tiles processed this run; " + sample_validation(con, region)
     # every tile analysed and the blind review complete: outlines are no longer needed (roof areas kept per section); the
     # function checks both and returns 0 otherwise (a nightly job retries)
