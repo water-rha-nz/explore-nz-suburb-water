@@ -188,8 +188,8 @@ def publish(con, client, region, log):
     con.execute("""
       with sec as (
         select s.suburb_id, s.parcel_id, s.polygon_m2, coalesce(s.n_titles, 1) n_titles, si.capture_id, si.building_m2, si.unbuilt_m2, si.veg_m2, si.valid_m2,
-               exists (select 1 from pool_candidates p where p.section_id = s.parcel_id and p.capture_id = si.capture_id and p.tool_pool) has_pool,
-               (select sum(p.area_m2) from pool_candidates p where p.section_id = s.parcel_id and p.capture_id = si.capture_id and p.tool_pool) pool_m2
+               exists (select 1 from pool_candidates p where p.section_id = s.parcel_id and p.capture_id = si.capture_id and coalesce(p.model_pool, p.tool_pool)) has_pool,
+               (select sum(p.area_m2) from pool_candidates p where p.section_id = s.parcel_id and p.capture_id = si.capture_id and coalesce(p.model_pool, p.tool_pool)) pool_m2
         from sections s join section_imagery si on si.section_id = s.parcel_id where s.region_id = %(r)s)
       update suburb_metrics m set
         sections = a.n, pools = a.pools, perc_pool = round(100.0 * a.pools / nullif(a.n, 0), 1), pool_area = a.pool_area,

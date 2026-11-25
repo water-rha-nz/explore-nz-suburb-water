@@ -5,7 +5,7 @@
   imagery       pools and vegetation per section, read window by window from the COG tiles (resumable)
   publish_new   suburb_metrics rows for a new region (counts, medians, histograms, urban/rural)
 All external requests go through limits.Client; all writes are idempotent upserts."""
-import json, math, os, re, time, datetime as dt
+import hashlib, json, math, os, re, time, datetime as dt
 import numpy as np, pandas as pd, geopandas as gpd, requests
 from shapely import wkb
 from shapely.geometry import MultiPolygon, Polygon, box
@@ -626,4 +626,95 @@ def publish_new(con, client, region, log):
     return publish(con, client, region, log) + f"; {len(rows)} suburb rows"
 
 
-STEPS = {"linz": linz, "imagery_index": imagery_index, "imagery": imagery, "publish_new": publish_new}
+# ---------------------------------------------------------------- learned pool check (labels -> per-capture classifier)
+POOL_LABEL = {"pool": 1, "not_pool": 0, "water": 0}   # "unknown" is left out
+
+
+def _pool_x(feats, area):
+    """Model inputs from a candidate's measured features: water index, colour (0-1), colour contrasts, shape, log area."""
+    f = feats if isinstance(feats, dict) else json.loads(feats or "{}")
+    r, g, b, n = (float(f.get(k, 0)) / 255 for k in ("r", "g", "b", "n"))
+    return [float(f.get("ndwi", 0)), r, g, b, n, b - r, g - r, float(f.get("solidity", 0)), float(f.get("rectfill", 0)), math.log1p(float(area or 0))]
+
+
+def _fit_logistic(X, y, lam=1.0, iters=60):
+    """L2-regularised logistic regression by Newton steps (numpy only). Returns (mean, std, weights incl. bias)."""
+    mu, sd = X.mean(0), X.std(0) + 1e-9
+    Z = np.hstack([np.ones((len(X), 1)), (X - mu) / sd]); w = np.zeros(Z.shape[1]); R = lam * np.eye(Z.shape[1]); R[0, 0] = 0
+    for _ in range(iters):
+        p = 1 / (1 + np.exp(-Z @ w)); W = p * (1 - p) + 1e-9
+        step = np.linalg.solve(Z.T @ (Z * W[:, None]) + R, Z.T @ (y - p) - R @ w); w += step
+        if np.abs(step).max() < 1e-6: break
+    return mu, sd, w
+
+
+def _predict(model, X):
+    mu, sd, w = model
+    return 1 / (1 + np.exp(-(np.hstack([np.ones((len(X), 1)), (X - mu) / sd]) @ w)))
+
+
+def _pr(pred, y):
+    tp = int(((pred == 1) & (y == 1)).sum()); fp = int(((pred == 1) & (y == 0)).sum()); fn = int(((pred == 0) & (y == 1)).sum())
+    return (tp / (tp + fp) if tp + fp else None), (tp / (tp + fn) if tp + fn else None)
+
+
+def model(con, client, region, log, n_uncertain=60):
+    """Train the learned pool check per capture from review labels (labellers and the blind second reviewer), score every
+    candidate of the region, apply it when it beats the fixed rules on held-back labels (a quarter, by item), and add the
+    candidates it is least sure about as the next review round."""
+    caps = [r[0] for r in con.execute("""select distinct p.capture_id from pool_candidates p join sections s on s.parcel_id = p.section_id
+                                         where s.region_id = %s""", (region,)).fetchall()]
+    out = []
+    for cap in caps:
+        rows = con.execute("""select v.id, p.features, p.area_m2, p.tool_pool, l.label from validation_items v join pool_candidates p on p.id = v.candidate_id
+                              join (select item_id, label from validation_labels
+                                    union all select c.item_id, r.label from review_chips c join review_labels r on r.token = c.token) l on l.item_id = v.id
+                              where v.task = 'pool' and p.capture_id = %s""", (cap,)).fetchall()
+        rows = [r for r in rows if r[4] in POOL_LABEL]
+        test = np.array([int(hashlib.md5(str(r[0]).encode()).hexdigest(), 16) % 4 == 0 for r in rows], bool)
+        y = np.array([POOL_LABEL[r[4]] for r in rows]); X = np.array([_pool_x(r[1], r[2]) for r in rows]) if rows else np.zeros((0, 10))
+        tool = np.array([1 if r[3] else 0 for r in rows])
+        tr = ~test
+        if tr.sum() < 30 or y[tr].sum() < 5 or (1 - y[tr]).sum() < 5:
+            out.append(f"{cap}: {len(rows)} usable labels so far; at least 30 (5 pools, 5 not) needed to train")
+            continue
+        mdl = _fit_logistic(X[tr], y[tr].astype(float))
+        tp_, tr_ = _pr(tool[test], y[test]); mp_, mr_ = _pr((_predict(mdl, X[test]) >= 0.5).astype(int), y[test]) if test.any() else (None, None)
+        f1 = lambda p, r: 0 if not p or not r else 2 * p * r / (p + r)
+        applied = bool(test.sum() >= 8 and f1(mp_, mr_) >= f1(tp_, tr_))
+        # score every candidate of this capture in the region
+        cand = con.execute("""select p.id, p.features, p.area_m2 from pool_candidates p join sections s on s.parcel_id = p.section_id
+                              where s.region_id = %s and p.capture_id = %s""", (region, cap)).fetchall()
+        if cand:
+            pr = _predict(mdl, np.array([_pool_x(c[1], c[2]) for c in cand]))
+            with con.cursor() as cur:
+                cur.execute("create temp table if not exists _pm (id bigint, p real)"); cur.execute("truncate _pm")
+                with cur.copy("copy _pm (id, p) from stdin") as cp:
+                    for c, pv in zip(cand, pr): cp.write_row((int(c[0]), float(pv)))
+                cur.execute("update pool_candidates p set p_model = m.p, model_pool = case when %s then m.p >= 0.5 end from _pm m where m.id = p.id", (applied,))
+        metrics = dict(train=int(tr.sum()), test=int(test.sum()), tool_precision=tp_, tool_recall=tr_, model_precision=mp_, model_recall=mr_,
+                       scored=len(cand), model_pools=int((pr >= 0.5).sum()) if cand else 0, tool_pools=None)
+        con.execute("""insert into pool_models (capture_id, trained_at, n_train, n_test, applied, coef, metrics) values (%s, now(), %s, %s, %s, %s, %s)
+                       on conflict (capture_id) do update set trained_at = now(), n_train = excluded.n_train, n_test = excluded.n_test, applied = excluded.applied,
+                       coef = excluded.coef, metrics = excluded.metrics""",
+                    (cap, int(tr.sum()), int(test.sum()), applied, json.dumps(dict(mean=mdl[0].tolist(), std=mdl[1].tolist(), w=mdl[2].tolist())), json.dumps(metrics)))
+        fmtp = lambda v: "–" if v is None else f"{100 * v:.0f}%"
+        out.append(f"{cap}: trained on {int(tr.sum())} labels, {int(test.sum())} held back; held-back precision/recall fixed rules {fmtp(tp_)}/{fmtp(tr_)}, "
+                   f"model {fmtp(mp_)}/{fmtp(mr_)}: {'applied' if applied else 'not applied (fixed rules kept)'}")
+    # next review round: the candidates the model is least sure about (only when none from the last round are still unlabelled)
+    pending = con.execute("""select count(*) from validation_items v join review_chips c on c.item_id = v.id where v.region_id = %s and v.grp = 'uncertain'
+                             and not exists (select 1 from review_labels l where l.token = c.token)""", (region,)).fetchone()[0]
+    if not pending and con.execute("select 1 from pool_candidates p join sections s on s.parcel_id = p.section_id where s.region_id=%s and p.p_model is not null limit 1", (region,)).fetchone():
+        con.execute("""insert into validation_items (task, capture_id, candidate_id, section_id, grp, tool_verdict, region_id, x, y, cog_url, outline)
+                       select 'pool', p.capture_id, p.id, p.section_id, 'uncertain', 'uncertain', %(r)s, st_x(p.geom), st_y(p.geom), t.cog_url,
+                              st_asgeojson(st_simplify(s.geom, 0.5), 1)::jsonb -> 'coordinates'
+                       from pool_candidates p join sections s on s.parcel_id = p.section_id and s.region_id = %(r)s
+                       join lateral (select t.cog_url from imagery_tiles t where t.region_id = %(r)s and t.capture_id = p.capture_id and st_intersects(t.geom, p.geom)
+                                     order by t.tile_id limit 1) t on true
+                       where p.p_model is not null and not exists (select 1 from validation_items v where v.candidate_id = p.id)
+                       order by abs(p.p_model - 0.5) limit %(n)s""", dict(r=region, n=n_uncertain))
+        out.append(render_review_chips(con, region) + " for the next review round (least certain candidates)")
+    return "; ".join(out) or "no pool candidates in the region"
+
+
+STEPS = {"linz": linz, "imagery_index": imagery_index, "imagery": imagery, "model": model, "publish_new": publish_new}

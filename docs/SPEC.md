@@ -682,3 +682,18 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 - **Admin page:**
   - database size against the 500 MB free plan, per table (`db_sizes`; the worker prints the same report, names and sizes only, through `db_sizes_worker`);
   - review keys: create (made in the browser, shown once, only the SHA-256 stored), revoke, restore.
+
+## 32. Learned pool check (free: review labels train a classifier in the worker)
+
+- **Inputs:** each pool candidate's measured features: water index (NDWI), mean R, G, B and NIR, blue−red and green−red contrasts, solidity, rectangularity and log area.
+- **Training:** worker step `model`, per capture. It uses labels from labellers and the blind second reviewer (pool = 1; not pool or water = 0; unknown left out) to fit L2-regularised logistic regression with numpy, by Newton steps.
+  - A quarter of the labelled items, chosen by item hash, are held back.
+  - It trains once at least 30 labels (5 of each class) are available.
+- **Use:**
+  - every candidate of the region gets `p_model`;
+  - when the model's held-back F1 is at least the fixed rules', its verdict (`model_pool`) replaces `tool_pool` in publishing and on the map; otherwise the fixed rules stay;
+  - results are kept in `pool_models` (aggregates only; shown on Validate).
+- **Next round:**
+  - up to 60 candidates closest to p = 0.5 become new review items (`grp`/`tool_verdict` 'uncertain', left out of the precision and recall figures), and their chips are rendered;
+  - when every chip of a region is labelled, `review_label` queues a retrain job (model, publish).
+- **When it runs:** new batches run `model` after imagery (it waits for labels on the first pass); *Refresh a region* has a "Learned pool check" option; the worker reads labels as item and label only (migration 0039).
