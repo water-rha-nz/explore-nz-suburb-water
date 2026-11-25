@@ -676,7 +676,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 ## 31. Database size (free plan) and admin tools
 
 - **Building outlines dropped after use:** they're needed only while a region's imagery is analysed (roof masks); roof areas stay per section in `section_imagery`.
-  - When every imagery tile of a region is processed, `drop_region_buildings` deletes its outlines, keeping any that also touch a region still in progress, and stamps `regions.buildings_dropped_at` (migration 0037; run once for regions already finished).
+  - When every imagery tile of a region is processed **and the blind review of all its chips is complete** (migration 0038; checked after imagery and nightly), `drop_region_buildings` deletes its outlines, keeping any that also touch a region still in progress, and stamps `regions.buildings_dropped_at`. Migration 0037's one-off run, before the review rule existed, dropped the outlines of regions already finished.
   - Re-running imagery on such a region fetches each tile's outlines from LINZ in memory, and keeps the stored roof areas.
 - **Compaction:** pg_cron runs `VACUUM FULL` on buildings (03:30 NZDT) and sections (03:45 NZDT), because deleted rows otherwise stay counted in the database size.
 - **Admin page:**

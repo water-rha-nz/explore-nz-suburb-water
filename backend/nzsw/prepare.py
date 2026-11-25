@@ -502,7 +502,8 @@ def imagery(con, client, region, log):
     if left_after:
         raise Continue(f"{done} tiles processed this run; {left_after} left: continues in the next run")
     msg = f"{done} tiles processed this run; " + sample_validation(con, region)
-    # every tile analysed: building outlines are no longer needed (roof areas are kept per section); frees most of the space
+    # every tile analysed and the blind review complete: outlines are no longer needed (roof areas kept per section); the
+    # function checks both and returns 0 otherwise (a nightly job retries)
     n = con.execute("select drop_region_buildings(%s)", (region,)).fetchone()[0]
     return msg + (f"; {n:,} building outlines dropped (roof areas kept)" if n else "")
 
