@@ -197,7 +197,8 @@ document.addEventListener("click", async (e) => {
   if (e.target.id !== "queue-live" || !can("editor")) return;
   // "imagery" re-runs the imagery search and analysis (finds and combines captures again), before the metrics are recomputed
   const picked = new Set([...document.querySelectorAll("[data-step]:checked")].map((x) => x.value));
-  const steps = ["imagery_index", "imagery", "climate", "census", "publish"].filter((st) => picked.has(st) || (picked.has("imagery") && st.startsWith("imagery")));
+  const steps = ["imagery_index", "imagery", "model", "climate", "census", "publish"].filter((st) => picked.has(st) || (picked.has("imagery") && (st.startsWith("imagery") || st === "model")));
+  if (picked.has("model") && !steps.includes("publish")) steps.push("publish");
   if (picked.has("imagery") && !steps.includes("publish")) steps.push("publish");
   if (!steps.length) return toastMsg("Choose at least one step");
   try { await q(sb.from("jobs").insert({ type: "refresh", region_id: region, params: { steps }, status: "queued" })); toastMsg("Job queued: the worker picks it up on its next run"); refreshJobs(); }
@@ -484,6 +485,13 @@ async function loadTally() {
     <tr><td>Pool labels (excluding unknown)</td><td>${fmt(lab)}</td></tr><tr><td>Precision</td><td>${pct(prec)}</td></tr><tr><td>Miss rate among rejects</td><td>${pct(miss)}</td></tr>
     <tr><td>Estimated recall (in the sample)</td><td>${pct(rec, 0)}</td></tr>
     <tr><td>Gardens</td><td>${fmt(gd("about_right"))} about right · ${fmt(gd("over"))} too much · ${fmt(gd("under"))} too little · ${fmt(gd("unknown"))} unknown</td></tr></tbody></table>`;
+  // learned pool check: per capture, trained from these labels in the worker
+  try { const caps = (indexOf(region).imagery_captures || []); const pm = caps.length ? await q(sb.from("pool_models").select("capture_id,trained_at,n_train,n_test,applied,metrics").in("capture_id", caps)) : [];
+    const pc = (v) => v == null ? "–" : fmt(100 * v, 0) + "%";
+    el.innerHTML += `<h3 style="margin-top:14px">Learned pool check</h3>` + (pm.length ? pm.map((m) => { const x = m.metrics || {};
+      return `<p class="small"><b>${esc(m.capture_id)}</b>: trained ${esc(new Date(m.trained_at).toLocaleDateString("en-NZ"))} on ${fmt(m.n_train)} labels, ${fmt(m.n_test)} held back. Held-back precision / recall: fixed rules ${pc(x.tool_precision)} / ${pc(x.tool_recall)}, learned ${pc(x.model_precision)} / ${pc(x.model_recall)}. <span class="tag ${m.applied ? "ok" : "info"}">${m.applied ? "applied to the published counts" : "not applied: fixed rules kept"}</span>${x.scored ? ` ${fmt(x.model_pools)} of ${fmt(x.scored)} candidates judged pools.` : ""}</p>`; }).join("")
+      : `<p class="small muted">Not trained yet: it trains in the worker once at least 30 pool labels exist for a capture (after each completed review round, or <i>Refresh a region → Learned pool check</i> on 3 · Load). Each round then adds the candidates it is least sure about for review.</p>`); }
+  catch (e) { /* table not deployed yet */ }
   if (mx) mx.innerHTML = `<table><thead><tr><th></th><th>Pool</th><th>Water, not pool</th><th>Not pool</th><th>Unknown</th></tr></thead><tbody>${[["pool", "Tool: pool", acc], ["not_pool", "Tool: not pool", rej]].map(([, l, f]) => `<tr><td>${l}</td>${["pool", "water", "not_pool", "unknown"].map((c) => `<td>${fmt(f(c))}</td>`).join("")}</tr>`).join("")}</tbody></table><p class="small muted">Counts across all labellers (each labeller's own labels stay private to them).</p>`
     + (() => { const S2 = (t && t.second) || {}, m = (k) => +(S2[k] || 0), n2 = Object.values(S2).reduce((a, v) => a + +v, 0);
       if (!n2) return t && t.chips ? `<h3 style="margin-top:14px">Second reviewer (blind)</h3><p class="small muted">${fmt(t.chips)} anonymous chips are ready for the blind second review; none reviewed yet.</p>` : "";
