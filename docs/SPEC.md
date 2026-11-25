@@ -672,3 +672,13 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - Data stages (Imagery, Validate, Context, Explore, Export) need a prepared region. Without one they show a *Before this step* checklist: study, 2.1 regions chosen, 2.3 suburbs validated, 3 Load queued (with each region's status), each with a Go button.
   - A chosen region that isn't prepared yet is named as such, with the prepared regions offered instead (no silent switch).
 - **Configure** starts with the study being edited and an explicit first step: *choose the region(s) for this study*, with the number chosen. Steps 2.2 and 2.3 point back to 2.1 while none is chosen.
+
+## 31. Database size (free plan) and admin tools
+
+- **Building outlines dropped after use:** they're needed only while a region's imagery is analysed (roof masks); roof areas stay per section in `section_imagery`.
+  - When every imagery tile of a region is processed, `drop_region_buildings` deletes its outlines, keeping any that also touch a region still in progress, and stamps `regions.buildings_dropped_at` (migration 0037; run once for regions already finished).
+  - Re-running imagery on such a region fetches each tile's outlines from LINZ in memory, and keeps the stored roof areas.
+- **Compaction:** pg_cron runs `VACUUM FULL` on buildings (03:30 NZDT) and sections (03:45 NZDT), because deleted rows otherwise stay counted in the database size.
+- **Admin page:**
+  - database size against the 500 MB free plan, per table (`db_sizes`; the worker prints the same report, names and sizes only, through `db_sizes_worker`);
+  - review keys: create (made in the browser, shown once, only the SHA-256 stored), revoke, restore.

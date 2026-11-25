@@ -418,6 +418,7 @@ def imagery(con, client, region, log):
     else:
         est = sum(int(client.request("linz_imagery_s3", "HEAD", u).headers.get("Content-Length", 0)) // 4 for _, _, u in todo[:3])
         client.imagery_allowance(len(todo), est * len(todo) // max(1, min(3, len(todo))))
+    dropped = con.execute("select buildings_dropped_at is not null from regions where id=%s", (region,)).fetchone()[0]
     done, base_cal, cals = 0, dict(cal), {}
     for cap, tid, url in todo:
         if cap not in cals:   # each capture may have its own calibration
@@ -432,6 +433,10 @@ def imagery(con, client, region, log):
             secs = con.execute("""select parcel_id, st_asbinary(geom) from sections where region_id=%s and st_intersects(geom, st_geomfromwkb(%s,2193))
                                   and not exists (select 1 from section_imagery si where si.section_id = sections.parcel_id and si.capture_id <> %s)""", (region, env, cap)).fetchall()
             blds = con.execute("select st_asbinary(geom) from buildings where st_intersects(geom, st_geomfromwkb(%s,2193))", (env,)).fetchall()
+            if not blds and dropped:   # outlines were dropped after an earlier imagery run: fetch this tile's from LINZ, in memory only
+                lo = gpd.GeoSeries([box(l, b, r_, t)], crs=2193).to_crs(4326).total_bounds
+                fb = _wfs(client, "linz_wfs", LINZ, 101290, bbox=f"{lo[1]},{lo[0]},{lo[3]},{lo[2]},urn:ogc:def:crs:EPSG::4326")
+                blds = [(g.wkb,) for g in fb.geometry if g is not None]
             if not secs:
                 con.execute("update imagery_tiles set processed_at=now() where capture_id=%s and tile_id=%s and region_id=%s", (cap, tid, region)); continue
             sg = [(wkb.loads(bytes(g)), int(pid)) for pid, g in secs]; bg = [wkb.loads(bytes(g[0])).buffer(0.3) for g in blds]
@@ -490,13 +495,16 @@ def imagery(con, client, region, log):
         log(f"tile {tid} ({done} of {len(todo)}): {len(tallies)} sections, {sum(1 for r in rows if r[-1])} pools / {len(rows)} candidates")
         if hasattr(log, "progress"):
             log.progress(done / max(1, len(todo)))
-    # roofs and unbuilt area per section (LINZ geometry, SQL)
-    con.execute("""update section_imagery si set building_m2 = coalesce(b.a, 0), unbuilt_m2 = greatest(0, s.polygon_m2 - coalesce(b.a, 0))
+    # roofs and unbuilt area per section (LINZ geometry, SQL); kept as stored once the region's outlines have been dropped
+    if not dropped: con.execute("""update section_imagery si set building_m2 = coalesce(b.a, 0), unbuilt_m2 = greatest(0, s.polygon_m2 - coalesce(b.a, 0))
                    from sections s left join lateral (select sum(st_area(st_intersection(s.geom, bb.geom))) a from buildings bb where st_intersects(s.geom, bb.geom)) b on true
                    where si.section_id = s.parcel_id and s.region_id = %s""", (region,))
     if left_after:
         raise Continue(f"{done} tiles processed this run; {left_after} left: continues in the next run")
-    return f"{done} tiles processed this run; " + sample_validation(con, region)
+    msg = f"{done} tiles processed this run; " + sample_validation(con, region)
+    # every tile analysed: building outlines are no longer needed (roof areas are kept per section); frees most of the space
+    n = con.execute("select drop_region_buildings(%s)", (region,)).fetchone()[0]
+    return msg + (f"; {n:,} building outlines dropped (roof areas kept)" if n else "")
 
 
 VAL_SAMPLE = dict(accepted=100, rejected=100, garden=60)
