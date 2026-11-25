@@ -29,7 +29,7 @@ SERVICES = {
     "statsnz_datafinder": dict(published="none published (same platform as LINZ)", budget_day=300, budget_hour=None, min_interval_s=1.0, page_size=10000),
     "statsnz_ade": dict(published="none published; fair use, shared keys may be throttled", budget_day=400, budget_hour=None, min_interval_s=2.0),
     "linz_imagery_s3": dict(published="public AWS Open Data bucket, no key", budget_day=None, budget_hour=None, min_interval_s=0.0,
-                            max_tiles_run=250, max_bytes_day=25 * 1024**3, max_parallel=4),
+                            max_tiles_run=700, max_bytes_day=25 * 1024**3, max_parallel=4),
 }
 
 # ------------------------------------------------------------------ adjustable rates (download progress panel)
