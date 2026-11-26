@@ -173,7 +173,7 @@ loadSections = async function () {
     const rows = [];
     for (let last = null; ;) {
       const page = await retry(() => q(sb.rpc("household_rows", { p_region: k, p_after: last, p_limit: 1000 })));
-      rows.push(...page);
+      for (const x of page) rows.push(x);
       const msg = `Loading households: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ks.length}): ${rows.length.toLocaleString("en-NZ")}…`;
       if (p && !p.hidden) p.textContent = msg; const xs = $("#xb-status"); if (xs && XB.running) xs.textContent = msg;
       if (page.length < 1000) break; last = page[page.length - 1].parcel_id;

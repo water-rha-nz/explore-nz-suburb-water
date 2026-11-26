@@ -17,6 +17,9 @@ const XLSX_SOURCES = [
   ["Open-Meteo historical weather (ERA5 / ERA5-Land)", "https://open-meteo.com/en/docs/historical-weather-api", "CC BY 4.0"],
 ];
 
+// append without spreading into a call: push(...rows) and Math.max(...rows) overflow the stack for very large arrays
+const pushAll = (arr, items) => { for (const x of items || []) arr.push(x); return arr; };
+const maxLen = (rows) => { let n = 1; for (const r of rows) if (r.length > n) n = r.length; return n; };
 // ---- zip (store or deflate) and SpreadsheetML
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
@@ -55,7 +58,7 @@ function xcell(v, r, c, style) {
 }
 // kind "table": bold frozen header row with filter; kind "text": first column bold (label / value pages)
 function sheetXML(rows, kind) {
-  const n = Math.max(1, ...rows.map((r) => r.length)), w = Array(n).fill(8);
+  const n = maxLen(rows), w = Array(n).fill(8);
   for (const r of rows.slice(0, 200)) r.forEach((v, i) => { w[i] = Math.min(kind === "text" && i > 0 ? 110 : 50, Math.max(w[i], String(v == null ? "" : typeof v === "object" ? JSON.stringify(v) : v).length + 2)); });
   const body = rows.map((r, i) => `<row r="${i + 1}">${r.map((v, j) => xcell(v, i + 1, j, kind === "table" ? (i === 0 ? 1 : 0) : (j === 0 && v ? 1 : 0))).join("")}</row>`).join("");
   const pane = kind === "table" && rows.length > 1 ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : "";
@@ -66,7 +69,7 @@ async function buildXlsx(sheets) {   // [{name, rows, kind}]
   const files = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
     ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
-    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xesc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${sheets.map((s, i) => s.kind === "table" && s.rows.length > 1 ? `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(names[i]).replace(/'/g, "''")}'!$A$1:$${xcol(Math.max(1, ...s.rows.map((r) => r.length)) - 1)}$${s.rows.length}</definedName></definedNames>` : "").find(Boolean) || ""}</workbook>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xesc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${sheets.map((s, i) => s.kind === "table" && s.rows.length > 1 ? `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(names[i]).replace(/'/g, "''")}'!$A$1:$${xcol(maxLen(s.rows) - 1)}$${s.rows.length}</definedName></definedNames>` : "").find(Boolean) || ""}</workbook>`],
     ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
     ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs></styleSheet>`],
     ...sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXML(s.rows, s.kind)]),
@@ -84,7 +87,7 @@ function objRows(list, lead = {}) {
 }
 async function pagedAll(make, key) {   // keyset paging: make(last) returns a query ordered by key
   const out = []; let last = null;
-  for (;;) { const p = await retry(() => q(make(last).limit(1000))); out.push(...p); if (p.length < 1000) break; last = p[p.length - 1][key]; }
+  for (;;) { const p = await retry(() => q(make(last).limit(1000))); pushAll(out, p); if (p.length < 1000) break; last = p[p.length - 1][key]; }
   return out;
 }
 function parseDelimited(t) {
@@ -110,7 +113,7 @@ async function studyWorkbook(say) {
   const add = (name, rows, desc, src) => { sheets.push({ name, rows, kind: "table" }); about.push([name, Math.max(0, rows.length - 1), desc, src || ""]); };
   // a sheet whose data can't be read is listed in About as not included, with the reason, instead of stopping the workbook
   const soft = async (label, fn) => { try { return (await fn()) || []; } catch (err) { about.push([label, 0, `Not included: ${err.message || err}`, ""]); return []; } };
-  const per = async (label, fn) => soft(label, async () => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); all.push(...((await fn(k)) || []).map((r) => ({ region_id: k, ...r }))); } return all; });
+  const per = async (label, fn) => soft(label, async () => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); for (const r of (await fn(k)) || []) all.push({ region_id: k, ...r }); } return all; });
 
   // raw stored tables
   // regions: only the columns users may read (who created a region is not readable)
@@ -119,17 +122,17 @@ async function studyWorkbook(say) {
   const sm = await per("Suburb metrics", (k) => q(sb.from("suburb_metrics").select("*").eq("region_id", k)));
   add("Suburb metrics", objRows(sm), "Published suburb aggregates (one row per LINZ suburb): sections, titles, density, pools, gardens, climate cell.", "LINZ, imagery, Open-Meteo");
   const linz = ids.flatMap((k) => D.regions[k].suburbs.map((s) => s.linz_id));
-  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); sc.push(...await soft("Suburb census", () => retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100)))))); }
+  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); pushAll(sc, await soft("Suburb census", () => retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100)))))); }
   add("Suburb census", objRows(sc), "Census figures apportioned to LINZ suburbs (one row per suburb).", "Stats NZ");
-  let sa2 = []; for (let i = 0; i < linz.length; i += 200) sa2.push(...((await soft("SA2 codes", () => retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) }))))) || []));
+  let sa2 = []; for (let i = 0; i < linz.length; i += 200) pushAll(sa2, (await soft("SA2 codes", () => retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) }))))) || []);
   sa2 = [...new Set(sa2.map(String))];
-  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); cm.push(...await soft("SA2 census", () => retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100)))))); }
+  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); pushAll(cm, await soft("SA2 census", () => retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100)))))); }
   add("SA2 census", objRows(cm), "Census metrics per Statistical Area 2 (the source of the suburb census).", "Stats NZ");
   const cells = [...new Set(sm.map((m) => m.climate_cell).filter(Boolean))];
-  const mon = []; for (const c of cells) mon.push(...await soft("Climate monthly", () => retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month")))));
+  const mon = []; for (const c of cells) pushAll(mon, await soft("Climate monthly", () => retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month")))));
   add("Climate monthly", objRows(mon), "Monthly climate per Open-Meteo grid cell (sums of rain and ET₀, mean temperatures).", "Open-Meteo");
   const day = []; for (const [i, c] of cells.entries()) { say(`Daily climate: cell ${i + 1} of ${cells.length}…`);
-    day.push(...await soft("Climate daily", () => pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date"))); }
+    pushAll(day, await soft("Climate daily", () => pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date"))); }
   add("Climate daily", objRows(day), "Every stored day per climate cell (rain, ET₀, temperatures) over the configured timelines.", "Open-Meteo");
   const secs = await per("Sections", (k) => pagedAll((last) => { let b = sb.from("sections").select(`parcel_id,appellation,parcel_intent,survey_area,polygon_m2,n_titles,suburb_id${ed ? ",section_imagery(capture_id,valid_m2,open_m2,veg_m2,building_m2,unbuilt_m2),pool_candidates(id,capture_id,area_m2,tool_pool,features)" : ""}`).eq("region_id", k); if (last != null) b = b.gt("parcel_id", last); return b.order("parcel_id"); }, "parcel_id"));
   const sname = {}; for (const k of ids) for (const s of D.regions[k].suburbs) sname[s.linz_id] = s.name;
