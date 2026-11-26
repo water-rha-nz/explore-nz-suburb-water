@@ -12,6 +12,17 @@ const XB_FORMATS = () => [
 ];
 const xbStore = (k, d) => { try { return JSON.parse(store.get("xb-" + k, "null")) ?? d; } catch (e) { return d; } };
 const xbSave = (k, v) => store.set("xb-" + k, JSON.stringify(v));
+// a region's period: its own timeline (set per region on 3 · Load), else the study's timeline for its TA (Configure), else all
+// stored data; a date typed in the export builder overrides it for every region
+function xbPeriod(k, kind) {
+  const r = indexOf(k), own = r.timeline || {}, has = (t) => t && (t.climate_start || t.climate_end || (t.census_years || []).length);
+  const t = has(own) ? own : (BATCH.tl || {})[r.ta_code] || {}, o = xbStore(kind, {});
+  return { from: o.from || t.climate_start || "", to: o.to || t.climate_end || "", census: t.census_years || [],
+           src: o.from || o.to ? "override" : has(own) ? "region timeline" : has((BATCH.tl || {})[r.ta_code]) ? "study timeline" : "all stored" };
+}
+// union of several regions' periods (blank = open)
+const xbUnion = (ps) => ({ from: ps.some((p) => !p.from) ? "" : ps.map((p) => p.from).sort()[0], to: ps.some((p) => !p.to) ? "" : ps.map((p) => p.to).sort().slice(-1)[0] });
+const xbIn = (d, p) => (!p.from || d >= p.from) && (!p.to || d <= p.to);
 function xbDefaults() {
   const st = studyScope();
   if (!XB.regions) XB.regions = new Set(xbStore("regions", null) || st.ids);
@@ -33,9 +44,11 @@ function exportBuilderHTML() {
     <h4 style="margin:8px 0 2px">Formats</h4>
     <div>${XB_FORMATS().map(([f, d]) => cb("data-xb-format", f, XB.formats.has(f), `<code>${esc(f)}</code>`, d)).join("")}</div>
     <div class="grid g2" style="margin-top:6px">
-      <div class="small"><b>Water charges by period</b><br>Periods overlapping <input type="date" id="xb-r-from" value="${esc(rt.from)}"> to <input type="date" id="xb-r-to" value="${esc(rt.to)}"> <span class="muted">(blank = all)</span><br>
+      <div class="small" style="grid-column:1/-1"><b>Periods</b> come from each region's timeline (3 · Load), else the study's timeline for its TA (2 · Configure), else all stored data:
+        ${[...XB.regions].filter((k) => indexOf(k).id).map((k) => { const p = xbPeriod(k, "climate"); return `${esc(indexOf(k).name || k)} <span class="muted">${p.from || "start"} to ${p.to || "latest"} (${p.src}${p.census.length ? "; census " + p.census.join(", ") : ""})</span>`; }).join(" · ") || '<span class="muted">choose regions</span>'}</div>
+      <div class="small"><b>Water charges by period</b><br>Periods overlapping each region's timeline; override: <input type="date" id="xb-r-from" value="${esc(rt.from)}"> to <input type="date" id="xb-r-to" value="${esc(rt.to)}"><br>
         <label><input type="radio" name="xb-r-shape" value="long" ${rt.shape !== "wide" ? "checked" : ""}> one row per component</label> <label><input type="radio" name="xb-r-shape" value="wide" ${rt.shape === "wide" ? "checked" : ""}> one row per period</label><br><span class="muted">Providers of the chosen regions.</span></div>
-      <div class="small"><b>Climate time series</b><br><input type="date" id="xb-c-from" value="${esc(cl.from)}"> to <input type="date" id="xb-c-to" value="${esc(cl.to)}"> <span class="muted">(blank = all stored days)</span><br>
+      <div class="small"><b>Climate time series</b><br>Each region's timeline; override: <input type="date" id="xb-c-from" value="${esc(cl.from)}"> to <input type="date" id="xb-c-to" value="${esc(cl.to)}"><br>
         <select id="xb-c-agg"><option value="daily" ${cl.agg === "daily" ? "selected" : ""}>Daily</option><option value="monthly" ${cl.agg === "monthly" ? "selected" : ""}>Monthly</option><option value="annual" ${cl.agg === "annual" ? "selected" : ""}>Annual</option></select>
         <select id="xb-c-per"><option value="cell" ${cl.per !== "suburb" ? "selected" : ""}>per climate cell</option><option value="suburb" ${cl.per === "suburb" ? "selected" : ""}>per suburb</option></select><br><span class="muted">Sums for rain and ET₀, means for temperatures. Partial months or years are flagged with their day count.</span></div>
     </div>
@@ -94,10 +107,11 @@ async function xbBuild(say) {
       try { files.push({ name: f, text: await EXPORTS[f].make() }); } catch (err) { files.push({ name: f.replace(/\.\w+$/, "") + "_ERROR.txt", text: String(err.message || err) }); }
     }
   } finally { METRICS.splice(0, METRICS.length, ...keepMetrics); D.regions = keepRegs; store.set("scope", keepScope); SECT = keepSect; }
-  if (picked.has("water_charges_by_period.csv")) { say("Water charges by period…"); files.push({ name: "water_charges_by_period.csv", text: await xbRates(Object.values(tmp)) }); }
+  if (picked.has("water_charges_by_period.csv")) { say("Water charges by period…"); files.push({ name: "water_charges_by_period.csv", text: await xbRates(Object.entries(tmp)) }); }
   if (picked.has("climate_timeseries.csv")) files.push({ name: "climate_timeseries.csv", text: await xbClimate(tmp, say) });
   const regs = ids.filter((k) => tmp[k]).map((k) => tmp[k].label);
   files.push({ name: "MANIFEST.txt", text: [`NZ Suburb Water Profiles export (${new Date().toLocaleString("en-NZ")})`, `Study: ${studyScope().name}`, `Regions (${regs.length}): ${regs.join(", ")}`,
+    ...ids.filter((k) => tmp[k]).map((k) => { const p = xbPeriod(k, "climate"); return `  ${tmp[k].label}: climate ${p.from || "start"} to ${p.to || "latest"} (${p.src})${p.census.length ? "; census " + p.census.join(", ") : ""}`; }),
     `Statistics (${XB.metrics.size}): ${[...XB.metrics].join(", ")}`, `Files: ${files.map((f) => f.name).join(", ")}`, "Fetched from the database at export time.",
     "Sources: LINZ (CC BY 4.0), Stats NZ (CC BY 4.0), Open-Meteo (CC BY 4.0), water providers' published charges."].join("\n") });
   return files;
@@ -105,37 +119,40 @@ async function xbBuild(say) {
 
 // charges: each provider's periods start at valid_from and end the day before its next period (blank = current)
 async function xbRates(regs) {
-  const provs = [...new Set(regs.map((g) => g.provider).filter(Boolean))];
+  const byProv = {}; for (const [k, g] of regs) if (g.provider) (byProv[g.provider] = byProv[g.provider] || []).push([k, g]);
+  const provs = Object.keys(byProv);
   if (!provs.length) return csv([["PROVIDER", "NOTE"], ["", "no provider set for the chosen regions"]]);
   const rows = await q(sb.from("water_rates").select("prvdr,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from"));
   const R = xbStore("rates", { from: "", to: "", shape: "long" }), dayBefore = (d) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
   const per = rows.map((r, i) => { const nx = rows[i + 1] && rows[i + 1].prvdr === r.prvdr ? rows[i + 1].valid_from : null; return { ...r, start: r.valid_from, end: nx ? dayBefore(nx) : "" }; })
-    .filter((r) => (!R.to || r.start <= R.to) && (!R.from || !r.end || r.end >= R.from));
+    .filter((r) => { const w = xbUnion(byProv[r.prvdr].map(([k]) => xbPeriod(k, "rates"))); return (!w.to || r.start <= w.to) && (!w.from || !r.end || r.end >= w.from); });
+  const regsOf = (r) => byProv[r.prvdr].map(([, g]) => g.label).join("; ");
   const name = (r) => (r.providers || {}).name || r.prvdr;
-  if (R.shape === "wide") return csv([["PROVIDER", "NAME", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "VERIFIED", "SOURCE", "NOTE"],
-    ...per.map((r) => [r.prvdr, name(r), r.start, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.date_est || "", r.verified ? "yes" : "no", r.source_url || "", r.note || ""])]);
+  if (R.shape === "wide") return csv([["PROVIDER", "NAME", "REGIONS", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "VERIFIED", "SOURCE", "NOTE"],
+    ...per.map((r) => [r.prvdr, name(r), regsOf(r), r.start, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.date_est || "", r.verified ? "yes" : "no", r.source_url || "", r.note || ""])]);
   const comps = [["FIXED", "fixed_pa", "NZD/yr"], ["VOLUMETRIC", "volumetric_pa", "NZD/m³"], ["THRESHOLD", "threshold_lpd", "L/day"]];
-  return csv([["PROVIDER", "NAME", "COMPONENT", "VALUE", "UNIT", "START", "END", "CHARGING_TYPE", "VERIFIED", "SOURCE"],
-    ...per.flatMap((r) => comps.filter(([, k]) => r[k] != null).map(([c, k, u]) => [r.prvdr, name(r), c, r[k], u, r.start, r.end, r.charging_type || "", r.verified ? "yes" : "no", r.source_url || ""]))]);
+  return csv([["PROVIDER", "NAME", "REGIONS", "COMPONENT", "VALUE", "UNIT", "START", "END", "CHARGING_TYPE", "VERIFIED", "SOURCE"],
+    ...per.flatMap((r) => comps.filter(([, k]) => r[k] != null).map(([c, k, u]) => [r.prvdr, name(r), regsOf(r), c, r[k], u, r.start, r.end, r.charging_type || "", r.verified ? "yes" : "no", r.source_url || ""]))]);
 }
 
-// climate: stored days per cell (keyset paged), aggregated; per suburb repeats each cell's series for its suburbs
+// climate: stored days per cell (keyset paged) over its regions' periods; per suburb, each region's own period
 async function xbClimate(regs, say) {
   const C = xbStore("climate", { from: "", to: "", agg: "monthly", per: "cell" }), subsOf = {};
-  for (const g of Object.values(regs)) for (const s of g.suburbs) { const cc = s.grid || s.climate_cell; if (cc) (subsOf[cc] = subsOf[cc] || []).push([mName(s), s.ta || g.label]); }
+  for (const [k, g] of Object.entries(regs)) for (const s of g.suburbs) { const cc = s.grid || s.climate_cell; if (cc) (subsOf[cc] = subsOf[cc] || []).push([mName(s), s.ta || g.label, k]); }
   const cells = Object.keys(subsOf); if (!cells.length) return csv([["NOTE"], ["no climate cells for the chosen regions"]]);
-  const out = [];
+  const out = [], key = (d) => C.agg === "daily" ? d.date : C.agg === "monthly" ? d.date.slice(0, 7) : d.date.slice(0, 4);
+  const full = (k) => C.agg === "daily" ? 1 : C.agg === "monthly" ? new Date(Date.UTC(+k.slice(0, 4), +k.slice(5, 7), 0)).getUTCDate() : (+k % 4 === 0 && (+k % 100 !== 0 || +k % 400 === 0) ? 366 : 365);
+  const series = (days, p) => { const agg = new Map();
+    for (const d of days) { if (!xbIn(d.date, p)) continue; const k = key(d), a = agg.get(k) || { n: 0, rain: 0, et0: 0, tm: 0, tmn: 0, tx: 0, txn: 0 }; a.n++;
+      a.rain += +d.rain_mm || 0; a.et0 += +d.et0_mm || 0; if (d.tmean_c != null) { a.tm += +d.tmean_c; a.tmn++; } if (d.tmax_c != null) { a.tx += +d.tmax_c; a.txn++; } agg.set(k, a); }
+    return [...agg].map(([k, a]) => [k, a.n, a.n < full(k) ? "partial" : "", +a.rain.toFixed(1), +a.et0.toFixed(1), a.tmn ? +(a.tm / a.tmn).toFixed(2) : "", a.txn ? +(a.tx / a.txn).toFixed(2) : ""]); };
   for (const [i, c] of cells.entries()) {
     say(`Climate: cell ${i + 1} of ${cells.length}…`);
-    let days = await pagedAll((last) => { let b = sb.from("climate_daily").select("date,rain_mm,et0_mm,tmean_c,tmax_c").eq("cell_id", c); if (last) b = b.gt("date", last); else if (C.from) b = b.gte("date", C.from); return b.order("date"); }, "date");
-    if (C.to) days = days.filter((d) => d.date <= C.to);
-    const key = (d) => C.agg === "daily" ? d.date : C.agg === "monthly" ? d.date.slice(0, 7) : d.date.slice(0, 4), agg = new Map();
-    for (const d of days) { const k = key(d), a = agg.get(k) || { n: 0, rain: 0, et0: 0, tm: 0, tmn: 0, tx: 0, txn: 0 }; a.n++;
-      a.rain += +d.rain_mm || 0; a.et0 += +d.et0_mm || 0; if (d.tmean_c != null) { a.tm += +d.tmean_c; a.tmn++; } if (d.tmax_c != null) { a.tx += +d.tmax_c; a.txn++; } agg.set(k, a); }
-    const full = (k, n) => C.agg === "daily" ? 1 : C.agg === "monthly" ? new Date(Date.UTC(+k.slice(0, 4), +k.slice(5, 7), 0)).getUTCDate() : (+k % 4 === 0 && (+k % 100 !== 0 || +k % 400 === 0) ? 366 : 365);
-    for (const [k, a] of agg) { const row = [k, a.n, a.n < full(k) ? "partial" : "", +a.rain.toFixed(1), +a.et0.toFixed(1), a.tmn ? +(a.tm / a.tmn).toFixed(2) : "", a.txn ? +(a.tx / a.txn).toFixed(2) : ""];
-      if (C.per === "suburb") for (const [sn, ta] of subsOf[c]) out.push([sn, ta, c, ...row]); else out.push([c, subsOf[c].length, ...row]); }
+    const rk = [...new Set(subsOf[c].map((x) => x[2]))], w = xbUnion(rk.map((k) => xbPeriod(k, "climate")));
+    const days = await pagedAll((last) => { let b = sb.from("climate_daily").select("date,rain_mm,et0_mm,tmean_c,tmax_c").eq("cell_id", c); if (last) b = b.gt("date", last); else if (w.from) b = b.gte("date", w.from); return b.order("date"); }, "date");
+    if (C.per === "suburb") { for (const k of rk) { const rows = series(days, xbPeriod(k, "climate")); for (const [sn, ta, kk] of subsOf[c]) if (kk === k) for (const row of rows) out.push([sn, ta, c, ...row]); } }
+    else for (const row of series(days, w)) out.push([c, subsOf[c].length, rk.map((k) => regs[k].label).join("; "), ...row]);
   }
   const head = ["PERIOD", "DAYS", "COMPLETE", "RAIN_MM", "ET0_MM", "TMEAN_C", "TMAX_C"];
-  return csv([C.per === "suburb" ? ["M_SUBURB", "M_TERRITORY", "CLIMATE_CELL", ...head] : ["CLIMATE_CELL", "SUBURBS", ...head], ...out]);
+  return csv([C.per === "suburb" ? ["M_SUBURB", "M_TERRITORY", "CLIMATE_CELL", ...head] : ["CLIMATE_CELL", "SUBURBS", "REGIONS", ...head], ...out]);
 }
