@@ -2977,6 +2977,9 @@ const XLSX_SOURCES = [
   ["Open-Meteo historical weather (ERA5 / ERA5-Land)", "https://open-meteo.com/en/docs/historical-weather-api", "CC BY 4.0"],
 ];
 
+// append without spreading into a call: push(...rows) and Math.max(...rows) overflow the stack for very large arrays
+const pushAll = (arr, items) => { for (const x of items || []) arr.push(x); return arr; };
+const maxLen = (rows) => { let n = 1; for (const r of rows) if (r.length > n) n = r.length; return n; };
 // ---- zip (store or deflate) and SpreadsheetML
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
@@ -3015,7 +3018,7 @@ function xcell(v, r, c, style) {
 }
 // kind "table": bold frozen header row with filter; kind "text": first column bold (label / value pages)
 function sheetXML(rows, kind) {
-  const n = Math.max(1, ...rows.map((r) => r.length)), w = Array(n).fill(8);
+  const n = maxLen(rows), w = Array(n).fill(8);
   for (const r of rows.slice(0, 200)) r.forEach((v, i) => { w[i] = Math.min(kind === "text" && i > 0 ? 110 : 50, Math.max(w[i], String(v == null ? "" : typeof v === "object" ? JSON.stringify(v) : v).length + 2)); });
   const body = rows.map((r, i) => `<row r="${i + 1}">${r.map((v, j) => xcell(v, i + 1, j, kind === "table" ? (i === 0 ? 1 : 0) : (j === 0 && v ? 1 : 0))).join("")}</row>`).join("");
   const pane = kind === "table" && rows.length > 1 ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : "";
@@ -3026,7 +3029,7 @@ async function buildXlsx(sheets) {   // [{name, rows, kind}]
   const files = [
     ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}</Types>`],
     ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
-    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xesc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${sheets.map((s, i) => s.kind === "table" && s.rows.length > 1 ? `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(names[i]).replace(/'/g, "''")}'!$A$1:$${xcol(Math.max(1, ...s.rows.map((r) => r.length)) - 1)}$${s.rows.length}</definedName></definedNames>` : "").find(Boolean) || ""}</workbook>`],
+    ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xesc(n)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("")}</sheets>${sheets.map((s, i) => s.kind === "table" && s.rows.length > 1 ? `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(names[i]).replace(/'/g, "''")}'!$A$1:$${xcol(maxLen(s.rows) - 1)}$${s.rows.length}</definedName></definedNames>` : "").find(Boolean) || ""}</workbook>`],
     ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
     ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf/><xf fontId="1" applyFont="1"/></cellXfs></styleSheet>`],
     ...sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXML(s.rows, s.kind)]),
@@ -3044,7 +3047,7 @@ function objRows(list, lead = {}) {
 }
 async function pagedAll(make, key) {   // keyset paging: make(last) returns a query ordered by key
   const out = []; let last = null;
-  for (;;) { const p = await retry(() => q(make(last).limit(1000))); out.push(...p); if (p.length < 1000) break; last = p[p.length - 1][key]; }
+  for (;;) { const p = await retry(() => q(make(last).limit(1000))); pushAll(out, p); if (p.length < 1000) break; last = p[p.length - 1][key]; }
   return out;
 }
 function parseDelimited(t) {
@@ -3070,7 +3073,7 @@ async function studyWorkbook(say) {
   const add = (name, rows, desc, src) => { sheets.push({ name, rows, kind: "table" }); about.push([name, Math.max(0, rows.length - 1), desc, src || ""]); };
   // a sheet whose data can't be read is listed in About as not included, with the reason, instead of stopping the workbook
   const soft = async (label, fn) => { try { return (await fn()) || []; } catch (err) { about.push([label, 0, `Not included: ${err.message || err}`, ""]); return []; } };
-  const per = async (label, fn) => soft(label, async () => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); all.push(...((await fn(k)) || []).map((r) => ({ region_id: k, ...r }))); } return all; });
+  const per = async (label, fn) => soft(label, async () => { const all = []; for (const [i, k] of ids.entries()) { say(`${label}: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ids.length})…`); for (const r of (await fn(k)) || []) all.push({ region_id: k, ...r }); } return all; });
 
   // raw stored tables
   // regions: only the columns users may read (who created a region is not readable)
@@ -3079,17 +3082,17 @@ async function studyWorkbook(say) {
   const sm = await per("Suburb metrics", (k) => q(sb.from("suburb_metrics").select("*").eq("region_id", k)));
   add("Suburb metrics", objRows(sm), "Published suburb aggregates (one row per LINZ suburb): sections, titles, density, pools, gardens, climate cell.", "LINZ, imagery, Open-Meteo");
   const linz = ids.flatMap((k) => D.regions[k].suburbs.map((s) => s.linz_id));
-  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); sc.push(...await soft("Suburb census", () => retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100)))))); }
+  const sc = []; for (let i = 0; i < linz.length; i += 100) { say(`Suburb census (${Math.min(i + 100, linz.length)} of ${linz.length})…`); pushAll(sc, await soft("Suburb census", () => retry(() => q(sb.from("suburb_census").select("*").in("linz_id", linz.slice(i, i + 100)))))); }
   add("Suburb census", objRows(sc), "Census figures apportioned to LINZ suburbs (one row per suburb).", "Stats NZ");
-  let sa2 = []; for (let i = 0; i < linz.length; i += 200) sa2.push(...((await soft("SA2 codes", () => retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) }))))) || []));
+  let sa2 = []; for (let i = 0; i < linz.length; i += 200) pushAll(sa2, (await soft("SA2 codes", () => retry(() => q(sb.rpc("sa2_codes_for", { p_ids: linz.slice(i, i + 200) }))))) || []);
   sa2 = [...new Set(sa2.map(String))];
-  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); cm.push(...await soft("SA2 census", () => retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100)))))); }
+  const cm = []; for (let i = 0; i < sa2.length; i += 100) { say(`SA2 census (${Math.min(i + 100, sa2.length)} of ${sa2.length})…`); pushAll(cm, await soft("SA2 census", () => retry(() => q(sb.from("census_metrics").select("*").in("sa2_code", sa2.slice(i, i + 100)))))); }
   add("SA2 census", objRows(cm), "Census metrics per Statistical Area 2 (the source of the suburb census).", "Stats NZ");
   const cells = [...new Set(sm.map((m) => m.climate_cell).filter(Boolean))];
-  const mon = []; for (const c of cells) mon.push(...await soft("Climate monthly", () => retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month")))));
+  const mon = []; for (const c of cells) pushAll(mon, await soft("Climate monthly", () => retry(() => q(sb.from("v_climate_monthly").select("*").eq("cell_id", c).order("month")))));
   add("Climate monthly", objRows(mon), "Monthly climate per Open-Meteo grid cell (sums of rain and ET₀, mean temperatures).", "Open-Meteo");
   const day = []; for (const [i, c] of cells.entries()) { say(`Daily climate: cell ${i + 1} of ${cells.length}…`);
-    day.push(...await soft("Climate daily", () => pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date"))); }
+    pushAll(day, await soft("Climate daily", () => pagedAll((last) => { let b = sb.from("climate_daily").select("*").eq("cell_id", c); if (last) b = b.gt("date", last); return b.order("date"); }, "date"))); }
   add("Climate daily", objRows(day), "Every stored day per climate cell (rain, ET₀, temperatures) over the configured timelines.", "Open-Meteo");
   const secs = await per("Sections", (k) => pagedAll((last) => { let b = sb.from("sections").select(`parcel_id,appellation,parcel_intent,survey_area,polygon_m2,n_titles,suburb_id${ed ? ",section_imagery(capture_id,valid_m2,open_m2,veg_m2,building_m2,unbuilt_m2),pool_candidates(id,capture_id,area_m2,tool_pool,features)" : ""}`).eq("region_id", k); if (last != null) b = b.gt("parcel_id", last); return b.order("parcel_id"); }, "parcel_id"));
   const sname = {}; for (const k of ids) for (const s of D.regions[k].suburbs) sname[s.linz_id] = s.name;
@@ -3492,7 +3495,7 @@ loadSections = async function () {
     const rows = [];
     for (let last = null; ;) {
       const page = await retry(() => q(sb.rpc("household_rows", { p_region: k, p_after: last, p_limit: 1000 })));
-      rows.push(...page);
+      for (const x of page) rows.push(x);
       const msg = `Loading households: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ks.length}): ${rows.length.toLocaleString("en-NZ")}…`;
       if (p && !p.hidden) p.textContent = msg; const xs = $("#xb-status"); if (xs && XB.running) xs.textContent = msg;
       if (page.length < 1000) break; last = page[page.length - 1].parcel_id;
@@ -3548,7 +3551,15 @@ const unitHeaders = (text) => { if (store.get("rates-legacy", "0") === "1") retu
 // suburb. The data type (statistic source group) is selectable; both tables download as CSV.
 const TBL = { type: store.get("tbl-type", "all"), sort: store.get("tbl-sort", "name"), dir: +store.get("tbl-dir", "1") };
 const tblGroups = () => [...new Set(METRICS.map((m) => m.src || "Other"))];
-const tblMetrics = () => METRICS.filter((m) => TBL.type === "all" || (m.src || "Other") === TBL.type);
+// the statistics chosen for export (Export builder) also choose the table columns; the data type narrows them further
+const tblMetrics = () => { xbDefaults(); return METRICS.filter((m) => XB.metrics.has(m.id) && (TBL.type === "all" || (m.src || "Other") === TBL.type)); };
+function tblPickerHTML() {
+  xbDefaults();
+  const groups = {}; for (const m of METRICS) (groups[m.src || "Other"] = groups[m.src || "Other"] || []).push(m);
+  return `<details style="margin:0 0 8px"><summary class="small">Statistics: ${XB.metrics.size} of ${METRICS.length} chosen (shared with the Export builder)</summary>
+    <div class="small" style="max-height:150px;overflow:auto;margin-top:4px">${Object.entries(groups).map(([g, ms]) => `<div><b>${esc(g)}</b> ${ms.map((m) => `<label style="display:inline-flex;gap:4px;margin:2px 10px 2px 0"><input type="checkbox" data-xb-metric="${esc(m.id)}" ${XB.metrics.has(m.id) ? "checked" : ""}> ${esc(m.label)}</label>`).join("")}</div>`).join("")}
+    <button class="btn" type="button" data-xb-metrics="all" style="padding:0 6px">All</button> <button class="btn" type="button" data-xb-metrics="none" style="padding:0 6px">None</button></div></details>`;
+}
 const tblSubs = () => studyRegions().flatMap(([k, g]) => g.suburbs.filter(resident).map((s) => ({ s, k, g })));
 const provName = (code) => ((D.water_rates || []).find((w) => w.PROVIDER === code) || {}).name || code || "–";
 function tblAggregate(rows, m) {
@@ -3579,6 +3590,7 @@ function tablesHTML() {
     <div class="row" style="margin-bottom:8px"><label class="small">Data type <select id="tbl-type"><option value="all" ${TBL.type === "all" ? "selected" : ""}>All statistics</option>${tblGroups().map((g) => `<option value="${esc(g)}" ${TBL.type === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></label>
       <span class="small muted">${st ? `Study: ${esc(st.name)}` : "All loaded regions"} · ${fmt(subs.length)} suburbs with residential sections</span>
       ${missing.length ? `<button class="btn" type="button" id="tbl-load">Load ${missing.length} more region${missing.length === 1 ? "" : "s"} of the study</button>` : ""}</div>
+    ${tblPickerHTML()}
     <h3>Per provider</h3><p class="small muted">Each figure is the mean over the provider's suburbs, weighted by residential sections. Hover for the median, the range and the number of suburbs.</p>
     <div class="card scroll">${pTable}</div><p><button class="btn" type="button" data-tbl-dl="provider">Download per-provider CSV</button></p>
     <h3>Per suburb</h3><p class="small muted">Click a column heading to sort.</p>
@@ -3586,6 +3598,8 @@ function tablesHTML() {
 }
 const _vExploreTbl = V.explore;
 V.explore = (...a) => { const html = _vExploreTbl(...a); return D && D.regions && Object.keys(D.regions).length && !/Before this step|isn't prepared yet/.test(html) ? html + tablesHTML() : html; };
+// a statistic ticked here (or in the Export builder) redraws the tables; the builder's own handler saves the choice
+document.addEventListener("change", (e) => { if (e.target && e.target.dataset && e.target.dataset.xbMetric && stage === "explore") setTimeout(() => { render(); const x = $("#tbl-top"); if (x && x.scrollIntoView) x.scrollIntoView(); }, 0); });
 document.addEventListener("change", (e) => { if (e.target && e.target.id === "tbl-type") { TBL.type = e.target.value; store.set("tbl-type", TBL.type); render(); setTimeout(() => { const t = $("#tbl-top"); if (t && t.scrollIntoView) t.scrollIntoView(); }, 0); } });
 document.addEventListener("click", async (e) => {
   const t = e.target; if (!t || !t.closest) return;
@@ -3600,6 +3614,46 @@ document.addEventListener("click", async (e) => {
   else download(`suburb_summary_${tag}_${stamp}.csv`, csv([["M_SUBURB", "M_TERRITORY", "PRVDR", "SECTIONS", ...ms.map((m) => m.id)],
     ...tblSubs().map(({ s, g }) => [mName(s), s.ta || g.label, g.provider || "", s.sections ?? "", ...ms.map((m) => { const v = m.get(s); return v == null || !isFinite(v) ? "" : +(+v).toFixed(m.d); })])]));
 });
+
+// ---------------------------------------------------------------- Explore: billing beneath "Regions in this study"
+// Each in-scope provider's charging periods (water_rates: one row per provider and start date; a period ends the day before the
+// provider's next one), read from the database when shown: type, fixed NZD/yr, volumetric NZD per m³, threshold, verified, source.
+const BILL = { rows: null, key: "" };
+function billProviders() {
+  const st = studyOf_ && studyOf_(), idx = (D.index || []).filter((r) => !st || (st.ta_codes || []).includes(r.ta_code)), out = new Map();
+  for (const r of idx) { const p = ((D.regions || {})[r.id] || {}).provider || r.prvdr || ((BATCH.tas || []).find((t) => t.code === r.ta_code) || { prvdrs: [] }).prvdrs[0];
+    if (p) { if (!out.has(p)) out.set(p, []); out.get(p).push(r.name || r.id); } }
+  return out;
+}
+async function loadBilling(provs) {
+  const key = [...provs].sort().join(","); if (BILL.key === key && BILL.rows && BILL.rows.length) return;   // empty results are re-read next time
+  BILL.key = key; BILL.rows = null;
+  try { BILL.rows = provs.length ? await q(sb.from("water_rates").select("prvdr,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from")) : []; }
+  catch (e) { BILL.rows = []; BILL.err = e.message; }
+  const el = $("#bill-body"); if (el) el.innerHTML = billingTable(billProviders());
+}
+function billingTable(pm) {
+  if (!BILL.rows) return `<p class="small muted">Loading charges…</p>`;
+  if (!BILL.rows.length) return `<p class="small muted">${BILL.err ? "Charges unavailable: " + esc(BILL.err) : "No charges recorded for these providers yet."}</p>`;
+  const today = new Date().toISOString().slice(0, 10), dayBefore = (d) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+  const rows = BILL.rows.map((r, i) => { const nx = BILL.rows[i + 1] && BILL.rows[i + 1].prvdr === r.prvdr ? BILL.rows[i + 1].valid_from : null; return { ...r, end: nx ? dayBefore(nx) : "" }; });
+  return `<table><thead><tr><th class="l">Provider</th><th class="l">Regions</th><th class="l">Period</th><th class="l">Charging</th><th>Fixed NZD/yr</th><th>Volumetric NZD/m³</th><th>Threshold L/day</th><th class="l">Checked</th><th class="l">Source</th></tr></thead><tbody>
+    ${rows.map((r) => { const cur = r.valid_from <= today && (!r.end || r.end >= today);
+      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.prvdr)}</b> <span class="small muted">${esc((r.providers || {}).name || "")}</span></td><td class="l small">${esc((pm.get(r.prvdr) || []).join(", "))}</td>
+        <td class="l small">${esc(r.valid_from)} to ${r.end ? esc(r.end) : "now"}${cur ? ' <span class="tag ok">current</span>' : ""}</td><td class="l small">${esc(r.charging_type || "–")}</td>
+        <td>${r.fixed_pa == null ? "–" : "$" + fmt(r.fixed_pa, 2)}</td><td>${r.volumetric_pa == null ? "–" : "$" + fmt(r.volumetric_pa, 2)}</td><td>${r.threshold_lpd == null ? "–" : fmt(r.threshold_lpd)}</td>
+        <td class="l small">${r.verified ? '<span class="tag ok">verified</span>' : '<span class="tag warn">not verified</span>'}${r.date_est ? ` ${esc(r.date_est)}` : ""}</td>
+        <td class="l small">${r.source_url ? `<a href="${esc(r.source_url)}" target="_blank" rel="noopener">source</a>` : "–"}${r.note ? ` <span class="muted" title="${esc(r.note)}">note</span>` : ""}</td></tr>`; }).join("")}</tbody></table>
+    <p class="small muted">Each period runs from its start date to the day before the provider's next period; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used.</p>`;
+}
+{ const _dov = detailedOverviewHTML;
+  detailedOverviewHTML = (...a) => {
+    const html = _dov(...a), i = html.search(/<h2>(Regions in this study|All regions in the database)<\/h2>/); if (i < 0) return html;
+    const j = html.indexOf("</table></div>", i); if (j < 0) return html;
+    const pm = billProviders(); setTimeout(() => loadBilling([...pm.keys()]), 0);
+    const at = j + "</table></div>".length;
+    return html.slice(0, at) + `<h2>Billing</h2><div class="card scroll" id="bill-body">${billingTable(pm)}</div>` + html.slice(at);
+  }; }
 
 </script>
 </body>
