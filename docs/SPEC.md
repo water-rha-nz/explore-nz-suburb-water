@@ -742,3 +742,14 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - the charging type, fixed NZD/yr (water + wastewater), volumetric NZD per m³, threshold L/day, verified flag and date, and source link;
   - the row that applies today is highlighted;
   - read from the database when shown.
+
+## 36. Water charges research
+
+- **`data/water_rates_research.csv`:** one row per provider and start date, researched from each provider's official 2026/27 documents (rates resolution, annual plan funding impact statement, or fees schedule). Columns: PRVDR, VALID_FROM, CHARGING_TYPE, FIXED_NZD_PA (water + wastewater for a typical connected household), VOLUMETRIC_NZD_PER_M3, THRESHOLD_L_PER_DAY, VERIFIED (yes / partly), SOURCE_URL, CHECKED, NOTE.
+- **Rules:**
+  - the charging type is always recorded;
+  - a figure only where the source states it;
+  - charges based on property value are recorded as such, without a rate;
+  - per-scheme charges and other details go in NOTE;
+  - verified only where read from the official document.
+- **`tools/water_rates_migration.py NNNN`** writes a migration that upserts these rows into `water_rates` (0042 is the first batch).
