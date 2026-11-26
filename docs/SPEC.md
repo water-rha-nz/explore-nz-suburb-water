@@ -671,6 +671,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 - **Stage bar:** ✓ done, • to do, 🔒 needs earlier steps (hover for what's needed).
   - Data stages (Imagery, Validate, Context, Explore, Export) need a prepared region. Without one they show a *Before this step* checklist: study, 2.1 regions chosen, 2.3 suburbs validated, 3 Load queued (with each region's status), each with a Go button.
   - A chosen region that isn't prepared yet is named as such, with the prepared regions offered instead (no silent switch).
+  - A region counts as prepared when its status is `published`, which the worker sets when it publishes the region's metrics (migration 0041 marked the regions already published), or when its loaded data has analysed sections. While a stage waits, the app re-checks the waiting regions' statuses every 30 s, so a region that finishes opens without a reload.
 - **Configure** starts with the study being edited and an explicit first step: *choose the region(s) for this study*, with the number chosen. Steps 2.2 and 2.3 point back to 2.1 while none is chosen.
 
 ## 31. Database size (free plan) and admin tools

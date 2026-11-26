@@ -206,6 +206,8 @@ def publish(con, client, region, log):
             from sec group by suburb_id) a
       where m.linz_id = a.suburb_id""", {"r": region})
     n = con.execute("select count(*) from suburb_metrics where region_id=%s", (region,)).fetchone()[0]
+    # the region's metrics are published: stages after Load open for it (the app reads regions.status)
+    if n: con.execute("update regions set status = 'published' where id = %s and status is distinct from 'published'", (region,))
     return f"suburb metrics recomputed for {n} suburbs"
 
 
