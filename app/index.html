@@ -3361,6 +3361,7 @@ function exportBuilderHTML() {
         <select id="xb-c-agg"><option value="daily" ${cl.agg === "daily" ? "selected" : ""}>Daily</option><option value="monthly" ${cl.agg === "monthly" ? "selected" : ""}>Monthly</option><option value="annual" ${cl.agg === "annual" ? "selected" : ""}>Annual</option></select>
         <select id="xb-c-per"><option value="cell" ${cl.per !== "suburb" ? "selected" : ""}>per climate cell</option><option value="suburb" ${cl.per === "suburb" ? "selected" : ""}>per suburb</option></select><br><span class="muted">Sums for rain and ET₀, means for temperatures. Partial months or years are flagged with their day count.</span></div>
     </div>
+    <p class="small" style="margin:6px 0 0"><label><input type="checkbox" id="xb-hh-std" ${store.get("hh-standard", "0") === "1" ? "checked" : ""}> <code>nz_household_ref.csv</code>: standard six columns only (leave off the per-household spatial and imagery columns)</label></p>
     <div class="row" style="margin-top:10px"><button class="btn primary" type="button" id="xb-zip" ${user ? "" : "disabled"}>Export .zip of CSVs</button> <button class="btn" type="button" id="xb-xlsx" ${user ? "" : "disabled"}>Export .xlsx</button> <span class="small muted" id="xb-status"></span></div></div>`;
 }
 const _vExportXB = V.export;
@@ -3372,6 +3373,7 @@ document.addEventListener("change", (e) => {
   if (t.dataset.xbRegion) tog(XB.regions, "regions", t.dataset.xbRegion);
   else if (t.dataset.xbMetric) tog(XB.metrics, "metrics", t.dataset.xbMetric);
   else if (t.dataset.xbFormat) tog(XB.formats, "formats", t.dataset.xbFormat);
+  else if (t.id === "xb-hh-std") store.set("hh-standard", t.checked ? "1" : "0");
   else if (/^xb-c-/.test(t.id)) xbSave("climate", { from: $("#xb-c-from").value, to: $("#xb-c-to").value, agg: $("#xb-c-agg").value, per: $("#xb-c-per").value });
   else if (/^xb-r-/.test(t.id) || t.name === "xb-r-shape") xbSave("rates", { from: $("#xb-r-from").value, to: $("#xb-r-to").value, shape: (document.querySelector('input[name="xb-r-shape"]:checked') || {}).value || "long" });
 });
@@ -3409,7 +3411,7 @@ async function xbBuild(say) {
   }
   const files = [], picked = XB.formats;
   try {
-    D.regions = tmp; store.set("scope", "all"); SECT = null;
+    D.regions = tmp; store.set("scope", "all"); SECT = null;   // households load per region (cached in HHR) for the chosen regions
     METRICS.splice(0, METRICS.length, ...keepMetrics.filter((m) => XB.metrics.has(m.id)));
     for (const f of [...picked]) {
       if (!EXPORTS[f]) continue; say(`Building ${f}…`);
@@ -3465,6 +3467,57 @@ async function xbClimate(regs, say) {
   const head = ["PERIOD", "DAYS", "COMPLETE", "RAIN_MM", "ET0_MM", "TMEAN_C", "TMAX_C"];
   return csv([C.per === "suburb" ? ["M_SUBURB", "M_TERRITORY", "CLIMATE_CELL", ...head] : ["CLIMATE_CELL", "SUBURBS", "REGIONS", ...head], ...out]);
 }
+
+// ---------------------------------------------------------------- households: per-household rows and area per title holder
+// nz_household_ref keeps its six standard columns first (suburb_lookup.html format) and adds each household's spatial measures and,
+// for editors, its imagery measures. nz_suburb_hh_area_stats gives, per suburb, the centre and spread of area per title holder:
+// LINZ land area, and the imagery-derived roof, unbuilt and garden areas.
+const HHR = {};
+loadSections = async function () {
+  const ks = scopeRegions(), p = $("#preview");
+  for (const [i, k] of ks.entries()) {
+    if (HHR[k]) continue;
+    const rows = [];
+    for (let last = null; ;) {
+      const page = await retry(() => q(sb.rpc("household_rows", { p_region: k, p_after: last, p_limit: 1000 })));
+      rows.push(...page);
+      const msg = `Loading households: ${(D.regions[k] || {}).label || k} (${i + 1} of ${ks.length}): ${rows.length.toLocaleString("en-NZ")}…`;
+      if (p && !p.hidden) p.textContent = msg; const xs = $("#xb-status"); if (xs && XB.running) xs.textContent = msg;
+      if (page.length < 1000) break; last = page[page.length - 1].parcel_id;
+    }
+    HHR[k] = rows;
+  }
+  const names = {}; for (const k of ks) for (const s of (D.regions[k] || { suburbs: [] }).suburbs) names[s.linz_id] = [k, s.name, s];
+  SECT = { rows: ks.flatMap((k) => (HHR[k] || []).map((r) => { const n = Math.max(1, r.n_titles || 1), nm = names[r.suburb_id] || [k, ""];
+    return [nm[0], nm[1], r.parcel_id, n > 1 ? "Shared" : "Freehold", +r.polygon_m2, n, Math.round(10 * r.polygon_m2 / n) / 10, r, nm[2]]; })) };
+};
+const HH_EXTRA = [["SUBURB_LINZ_ID", (r) => r.suburb_id], ["SA2_CODE", (r) => r.sa2_code], ["PARCEL_INTENT", (r) => r.parcel_intent],
+  ["NZTM_X", (r) => r.x], ["NZTM_Y", (r) => r.y], ["LON", (r) => r.lon], ["LAT", (r) => r.lat], ["PERIMETER_M", (r) => r.perimeter_m], ["COMPACTNESS", (r) => r.compactness],
+  ["ROOF_M2", (r) => r.roof_m2], ["UNBUILT_M2", (r) => r.unbuilt_m2], ["GARDEN_M2", (r) => r.garden_m2], ["POOLS", (r) => r.pools], ["POOL_M2", (r) => r.pool_m2], ["IMAGERY_CAPTURE", (r) => r.capture_id]];
+EXPORTS["nz_household_ref.csv"] = { desc: "M_SUBURB, M_DWELLING_ID, SECTION_TYPE, SECTION_SIZE_M2, NUM_SECTIONS, SECTION_AVG_M2 (LINZ parcels), then per household: LINZ suburb and SA2, centre (NZTM and lon/lat), perimeter, compactness, and for editors roof, unbuilt and garden m², pools and pool m² from imagery",
+  lazy: true, make: async () => { await loadSections(); const ks = scopeRegions(), std = store.get("hh-standard", "0") === "1", nm = {};
+    for (const k of ks) for (const s of (D.regions[k] || { suburbs: [] }).suburbs) nm[k + ":" + s.name] = mName(s);
+    return csv([["M_SUBURB", "M_DWELLING_ID", "SECTION_TYPE", "SECTION_SIZE_M2", "NUM_SECTIONS", "SECTION_AVG_M2", ...(std ? [] : HH_EXTRA.map((c) => c[0]))],
+      ...SECT.rows.filter((r) => ks.includes(r[0])).map((r) => [nm[r[0] + ":" + r[1]] || r[1], r[2], r[3], r[4], r[5], r[6], ...(std ? [] : HH_EXTRA.map(([, f]) => { const v = f(r[7] || {}); return v == null ? "" : v; }))])]); } };
+// centre and spread per suburb
+function hhStats(vals) {
+  const v = vals.filter((x) => x != null && isFinite(x)).sort((a, b) => a - b), n = v.length; if (!n) return null;
+  const q = (p) => { const i = (n - 1) * p, lo = Math.floor(i); return v[lo] + (v[Math.min(n - 1, lo + 1)] - v[lo]) * (i - lo); };
+  const mean = v.reduce((a, b) => a + b, 0) / n, sd = n > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+  return { n, mean, median: q(0.5), sd, p10: q(0.1), p25: q(0.25), p75: q(0.75), p90: q(0.9), iqr: q(0.75) - q(0.25) };
+}
+const HH_MEASURES = [["LAND_M2_PER_TITLE", "LINZ parcels and titles", (r) => +r.polygon_m2 / Math.max(1, r.n_titles || 1)],
+  ["ROOF_M2_PER_TITLE", "LINZ building outlines (roof)", (r) => r.roof_m2 == null ? null : +r.roof_m2 / Math.max(1, r.n_titles || 1)],
+  ["UNBUILT_M2_PER_TITLE", "LINZ parcels minus roofs", (r) => r.unbuilt_m2 == null ? null : +r.unbuilt_m2 / Math.max(1, r.n_titles || 1)],
+  ["GARDEN_M2_PER_TITLE", "Aerial imagery (vegetation, NDVI)", (r) => r.garden_m2 == null ? null : +r.garden_m2 / Math.max(1, r.n_titles || 1)],
+  ["TITLES_PER_SECTION", "LINZ titles", (r) => Math.max(1, r.n_titles || 1)]];
+EXPORTS["nz_suburb_hh_area_stats.csv"] = { desc: "Per suburb and measure: centre and spread of household area per title holder (N, MEAN, MEDIAN, SD, P10, P25, P75, P90, IQR): LINZ land area, and roof, unbuilt and garden area (imagery measures for editors)",
+  lazy: true, make: async () => { await loadSections(); const ks = scopeRegions(), by = new Map();
+    for (const r of SECT.rows) { if (!ks.includes(r[0]) || !r[8]) continue; const key = r[0] + ":" + r[8].linz_id; if (!by.has(key)) by.set(key, { s: r[8], rows: [] }); by.get(key).rows.push(r[7]); }
+    const out = [];
+    for (const { s, rows } of by.values()) for (const [m, src, f] of HH_MEASURES) { const st = hhStats(rows.map(f)); if (!st) continue;
+      out.push([mName(s), s.ta || "", s.linz_id, m, src, st.n, +st.mean.toFixed(1), +st.median.toFixed(1), +st.sd.toFixed(1), +st.p10.toFixed(1), +st.p25.toFixed(1), +st.p75.toFixed(1), +st.p90.toFixed(1), +st.iqr.toFixed(1)]); }
+    return csv([["M_SUBURB", "M_TERRITORY", "SUBURB_LINZ_ID", "MEASURE", "SOURCE", "N", "MEAN", "MEDIAN", "SD", "P10", "P25", "P75", "P90", "IQR"], ...out]); } };
 
 </script>
 </body>

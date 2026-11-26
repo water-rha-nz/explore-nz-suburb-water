@@ -714,3 +714,15 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - stored days from `climate_daily`, keyset paged, over each region's period (per cell: the union of its regions' periods, with a REGIONS column);
   - daily, monthly or annual: rain and ET₀ summed, temperatures averaged; DAYS and COMPLETE flag partial periods;
   - per climate cell, or per suburb (each cell's series repeated for its suburbs).
+
+## 34. Household data and area per title holder
+
+- **`household_rows(region, after, limit)`** (migration 0040; security invoker, paged by parcel id), one row per residential section:
+  - LINZ facts: suburb, SA2, parcel intent, area, titles;
+  - spatial measures: centre (NZTM to 0.1 m, lon/lat to 6 decimals), perimeter, compactness (4πA/P²);
+  - imagery measures: roof, unbuilt, garden and assessed m² from `section_imagery`, and pools and pool m² (learned verdict where applied). Row-level security leaves these blank for non-editors.
+- **`nz_household_ref.csv`:** the six standard columns first (suburb_lookup.html format), then SUBURB_LINZ_ID, SA2_CODE, PARCEL_INTENT, NZTM_X/Y, LON/LAT, PERIMETER_M, COMPACTNESS, ROOF_M2, UNBUILT_M2, GARDEN_M2, POOLS, POOL_M2 and IMAGERY_CAPTURE. An export-builder option keeps only the six standard columns.
+- **`nz_suburb_hh_area_stats.csv`:** per suburb and measure, N, MEAN, MEDIAN, SD, P10, P25, P75, P90 and IQR of area per title holder:
+  - LAND_M2_PER_TITLE (LINZ parcels and titles);
+  - ROOF_M2_PER_TITLE, UNBUILT_M2_PER_TITLE and GARDEN_M2_PER_TITLE (imagery measures);
+  - TITLES_PER_SECTION.
