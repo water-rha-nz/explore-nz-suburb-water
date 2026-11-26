@@ -697,3 +697,19 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - up to 60 candidates closest to p = 0.5 become new review items (`grp`/`tool_verdict` 'uncertain', left out of the precision and recall figures), and their chips are rendered;
   - when every chip of a region is labelled, `review_label` queues a retrain job (model, publish).
 - **When it runs:** new batches run `model` after imagery (it waits for labels on the first pass); *Refresh a region* has a "Learned pool check" option; the worker reads labels as item and label only (migration 0039).
+
+## 33. Export builder (configure, then fetch from the database)
+
+- **Choices** (remembered in the browser):
+  - regions: any region in the database, with Study, All and None shortcuts;
+  - statistics: by source group; they set the metric columns of `nz_suburb_demographics.csv` and the data dictionary;
+  - formats: the standard CSV outputs plus two new ones.
+- **Fetching:** at export time, regions not in the session are fetched with the normal region loader for that export only, then released. Output is one .zip of CSVs or one .xlsx, each with `MANIFEST.txt`.
+- **`water_charges_by_period.csv`:**
+  - from `water_rates` periods (`valid_from`); END is the day before the provider's next period, blank for the current one;
+  - long shape: one row per component (FIXED NZD/yr, VOLUMETRIC NZD/m³, THRESHOLD L/day); wide shape: one row per period;
+  - optional date window: periods overlapping it.
+- **`climate_timeseries.csv`:**
+  - stored days from `climate_daily`, keyset paged, over an optional date range;
+  - daily, monthly or annual: rain and ET₀ summed, temperatures averaged; DAYS and COMPLETE flag partial periods;
+  - per climate cell, or per suburb (each cell's series repeated for its suburbs).
