@@ -125,7 +125,7 @@ Same file names, columns, delimiters and encoding, so the files drop straight in
 | `nz_suburb_ref.csv` | M_SUBURB, TYPE, M_TERRITORY, M_SUBURB_HH_COUNT |
 | `nz_household_ref.csv` | M_SUBURB, M_DWELLING_ID, SECTION_TYPE, SECTION_SIZE_M2, NUM_SECTIONS, SECTION_AVG_M2 |
 | `nz_urban_rural.csv` (**tab-separated**) | SUBURB, TYPE, PROVIDER, NOTE |
-| `nz_water_rates.csv` | PROVIDER, CHARGING_TYPE, FIXED_PA, VOLUMETRIC_PA, THRESHOLD_Lpd, DATE_EST, NOTE |
+| `nz_water_rates.csv` | PROVIDER, CHARGING_TYPE, FIXED_NZD_PA (NZD/yr), VOLUMETRIC_NZD_PER_M3 (NZD per m³), THRESHOLD_L_PER_DAY, DATE_EST, NOTE (the original tool's FIXED_PA, VOLUMETRIC_PA and THRESHOLD_Lpd are an export option; VOLUMETRIC_PA was always NZD per m³, not per year) |
 | `nz_suburb_map_allocations.csv`, `nz_suburb_ref_dropped.csv`, `nz_household_ref_dropped.csv` | as the original |
 | `nz_suburb_demographics.csv` | M_SUBURB, M_TERRITORY, PRVDR, then one column per metric. **New metric columns** include PercPool, GardSize, etc. |
 | SA2-keyed wide tables | One row per SA2, for the original tool's *Demographics* loader (wide format, columns as measures) |
