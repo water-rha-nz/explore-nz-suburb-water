@@ -241,7 +241,8 @@ function glyphs(box, px) {
 // where pools and green space are, by zoom: dots per grid cell (grid step snapped to round distances) -> one dot per section
 // (editors) -> the imagery itself under section rings (closest zoom). A finer level only replaces a coarser one once its data has
 // arrived, so dots never vanish while zooming.
-const IMG_ZOOM = 700;   // view width (m) at which the aerial imagery is drawn
+const IMG_ZOOM = 1200;   // view width (m) at which the aerial imagery is drawn
+const liveSvg = (svg) => (svg && svg.isConnected) ? svg : ($("#mv-map svg") || svg);   // after a load, draw on the map shown now
 function presenceLayer(svg, box, px) {
   if (!MAPV.pres.size) return "";
   if (box[2] <= 2500) {
@@ -290,7 +291,7 @@ async function regionTiles(k) {
   const out = []; for (let i = 0; ; i += 1000) { const p = await q(sb.from("imagery_tiles").select("tile_id,cog_url").eq("region_id", k).range(i, i + 999)); out.push(...p); if (p.length < 1000) break; }
   return (MAPV.tiles[k] = out.map((t) => ({ ...t, bb: tileBoxJS(t.tile_id) })).filter((t) => t.bb));
 }
-const imgKey = (box) => box.map((v) => Math.round(v / 40)).join(",");
+const imgKey = (box) => box.map((v) => Math.round(v / 40)).join(",") + (MAPV.pres.has("green") ? "|veg" : "");
 async function fetchImagery(svg, box, key) {
   const bb = [box[0], -(box[1] + box[3]), box[0] + box[2], -box[1]];
   try {
@@ -301,16 +302,21 @@ async function fetchImagery(svg, box, key) {
     else {
       const W = Math.min(1400, Math.round((svg.getBoundingClientRect().width || 800) * Math.min(2, window.devicePixelRatio || 1))), H = Math.max(1, Math.round(W * box[3] / box[2]));
       const cv = document.createElement("canvas"); cv.width = W; cv.height = H; const ctx = cv.getContext("2d");
-      for (const u of urls.slice(0, 6)) await cogDraw(u, bb, W, H, ctx);
+      for (const u of urls.slice(0, 6)) { const got = await cogDraw(u, bb, W, H, ctx);
+        // gardens: vegetation (NDVI > 0.2 with enough near-infrared, as the worker measures it) tinted green
+        if (got && MAPV.pres.has("green") && got.r.length >= 4) { const { r, w, h, dx, dy } = got, im = ctx.getImageData(dx, dy, w, h);
+          for (let i = 0; i < w * h; i++) { const R_ = r[0][i], N = r[3][i], nd = (N - R_) / Math.max(1, N + R_);
+            if (nd > 0.2 && N >= 40 && im.data[4 * i + 3]) { im.data[4 * i] = im.data[4 * i] * 0.45 + 40 * 0.55; im.data[4 * i + 1] = im.data[4 * i + 1] * 0.45 + 220 * 0.55; im.data[4 * i + 2] = im.data[4 * i + 2] * 0.45 + 60 * 0.55; } }
+          ctx.putImageData(im, dx, dy); } }
       MAPV.imgs[key] = { url: cv.toDataURL("image/jpeg", 0.85), bb };
     }
   } catch (e) { MAPV.imgs[key] = { none: true, err: e.message }; }
-  if (BATCH.view && BATCH.view.id === "ovw" && imgKey(BATCH.view.box) === key) dynLayers(svg, BATCH.view.box);
+  if (BATCH.view && BATCH.view.id === "ovw" && imgKey(BATCH.view.box) === key) dynLayers(liveSvg(svg), BATCH.view.box);
 }
 async function fetchPresence(svg, regs, step) {
   for (const k of regs) { const key = k + "|" + step; if (MAPV.presence[key]) continue;
     try { const r = await q(sb.rpc("map_presence", { p_region: k, p_step: step })); MAPV.presence[key] = (r && r.cells) || []; } catch (e) { MAPV.presence[key] = []; MAPV.note = "Presence unavailable: " + e.message; } }
-  if (BATCH.view && BATCH.view.id === "ovw") dynLayers(svg, BATCH.view.box);
+  if (BATCH.view && BATCH.view.id === "ovw") dynLayers(liveSvg(svg), BATCH.view.box);
 }
 // layers that depend on the view: redrawn once a zoom or pan settles
 function dynLayers(svg, box) {
@@ -350,7 +356,7 @@ async function fetchItems(svg, box, key) {
     if (need.length) { const { data } = await sb.storage.from("chips").createSignedUrls(need, 3600); for (const d of data || []) if (d.signedUrl) MAPV.urls[d.path] = d.signedUrl; }
     MAPV.items[key] = { pools: (r && r.pools) || [], greens: (r && r.greens) || [], chips: (r && r.chips) || [] };
   } catch (e) { MAPV.items[key] = { pools: [], greens: [], chips: [] }; MAPV.note = "Imagery detail unavailable: " + e.message; }
-  if (BATCH.view && BATCH.view.id === "ovw") dynLayers(svg, BATCH.view.box);
+  if (BATCH.view && BATCH.view.id === "ovw") dynLayers(liveSvg(svg), BATCH.view.box);
 }
 
 // ---------------------------------------------------------------- layer panel
