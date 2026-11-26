@@ -29,7 +29,7 @@ SERVICES = {
     "statsnz_datafinder": dict(published="none published (same platform as LINZ)", budget_day=300, budget_hour=None, min_interval_s=1.0, page_size=10000),
     "statsnz_ade": dict(published="none published; fair use, shared keys may be throttled", budget_day=400, budget_hour=None, min_interval_s=2.0),
     "linz_imagery_s3": dict(published="public AWS Open Data bucket, no key", budget_day=None, budget_hour=None, min_interval_s=0.0,
-                            max_tiles_run=700, max_bytes_day=25 * 1024**3, max_parallel=4),
+                            max_tiles_run=700, max_bytes_day=60 * 1024**3, max_parallel=4),
 }
 
 # ------------------------------------------------------------------ adjustable rates (download progress panel)
@@ -42,7 +42,7 @@ DEFAULTS = {
     "linz_wfs": dict(per_min=60, budget_day=1500),
     "statsnz_datafinder": dict(per_min=60, budget_day=300),
     "statsnz_ade": dict(per_min=30, budget_day=400),
-    "linz_imagery_s3": dict(parallel=4, bytes_day=25 * 1024**3),
+    "linz_imagery_s3": dict(parallel=4, bytes_day=60 * 1024**3),   # AWS Open Data public bucket (no key, no egress charge to us): the ceiling
 }
 CEILINGS = {
     "openmeteo": dict(per_min=600, budget_day=9500, budget_hour=4750),     # published: 600/min, 5,000/h, 10,000/day
