@@ -705,11 +705,12 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - statistics: by source group; they set the metric columns of `nz_suburb_demographics.csv` and the data dictionary;
   - formats: the standard CSV outputs plus two new ones.
 - **Fetching:** at export time, regions not in the session are fetched with the normal region loader for that export only, then released. Output is one .zip of CSVs or one .xlsx, each with `MANIFEST.txt`.
+- **Periods:** both new formats follow each region's timeline: the region's own (3 · Load), else the study's for its TA (2 · Configure), else all stored data. Dates typed in the builder override them for every region. The builder lists each region's period, and the manifest records it with the census years.
 - **`water_charges_by_period.csv`:**
   - from `water_rates` periods (`valid_from`); END is the day before the provider's next period, blank for the current one;
   - long shape: one row per component (FIXED NZD/yr, VOLUMETRIC NZD/m³, THRESHOLD L/day); wide shape: one row per period;
-  - optional date window: periods overlapping it.
+  - each provider's periods overlapping the union of its regions' periods; a REGIONS column names them.
 - **`climate_timeseries.csv`:**
-  - stored days from `climate_daily`, keyset paged, over an optional date range;
+  - stored days from `climate_daily`, keyset paged, over each region's period (per cell: the union of its regions' periods, with a REGIONS column);
   - daily, monthly or annual: rain and ET₀ summed, temperatures averaged; DAYS and COMPLETE flag partial periods;
   - per climate cell, or per suburb (each cell's series repeated for its suburbs).
