@@ -5,7 +5,15 @@
 // suburb. The data type (statistic source group) is selectable; both tables download as CSV.
 const TBL = { type: store.get("tbl-type", "all"), sort: store.get("tbl-sort", "name"), dir: +store.get("tbl-dir", "1") };
 const tblGroups = () => [...new Set(METRICS.map((m) => m.src || "Other"))];
-const tblMetrics = () => METRICS.filter((m) => TBL.type === "all" || (m.src || "Other") === TBL.type);
+// the statistics chosen for export (Export builder) also choose the table columns; the data type narrows them further
+const tblMetrics = () => { xbDefaults(); return METRICS.filter((m) => XB.metrics.has(m.id) && (TBL.type === "all" || (m.src || "Other") === TBL.type)); };
+function tblPickerHTML() {
+  xbDefaults();
+  const groups = {}; for (const m of METRICS) (groups[m.src || "Other"] = groups[m.src || "Other"] || []).push(m);
+  return `<details style="margin:0 0 8px"><summary class="small">Statistics: ${XB.metrics.size} of ${METRICS.length} chosen (shared with the Export builder)</summary>
+    <div class="small" style="max-height:150px;overflow:auto;margin-top:4px">${Object.entries(groups).map(([g, ms]) => `<div><b>${esc(g)}</b> ${ms.map((m) => `<label style="display:inline-flex;gap:4px;margin:2px 10px 2px 0"><input type="checkbox" data-xb-metric="${esc(m.id)}" ${XB.metrics.has(m.id) ? "checked" : ""}> ${esc(m.label)}</label>`).join("")}</div>`).join("")}
+    <button class="btn" type="button" data-xb-metrics="all" style="padding:0 6px">All</button> <button class="btn" type="button" data-xb-metrics="none" style="padding:0 6px">None</button></div></details>`;
+}
 const tblSubs = () => studyRegions().flatMap(([k, g]) => g.suburbs.filter(resident).map((s) => ({ s, k, g })));
 const provName = (code) => ((D.water_rates || []).find((w) => w.PROVIDER === code) || {}).name || code || "–";
 function tblAggregate(rows, m) {
@@ -36,6 +44,7 @@ function tablesHTML() {
     <div class="row" style="margin-bottom:8px"><label class="small">Data type <select id="tbl-type"><option value="all" ${TBL.type === "all" ? "selected" : ""}>All statistics</option>${tblGroups().map((g) => `<option value="${esc(g)}" ${TBL.type === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></label>
       <span class="small muted">${st ? `Study: ${esc(st.name)}` : "All loaded regions"} · ${fmt(subs.length)} suburbs with residential sections</span>
       ${missing.length ? `<button class="btn" type="button" id="tbl-load">Load ${missing.length} more region${missing.length === 1 ? "" : "s"} of the study</button>` : ""}</div>
+    ${tblPickerHTML()}
     <h3>Per provider</h3><p class="small muted">Each figure is the mean over the provider's suburbs, weighted by residential sections. Hover for the median, the range and the number of suburbs.</p>
     <div class="card scroll">${pTable}</div><p><button class="btn" type="button" data-tbl-dl="provider">Download per-provider CSV</button></p>
     <h3>Per suburb</h3><p class="small muted">Click a column heading to sort.</p>
@@ -43,6 +52,8 @@ function tablesHTML() {
 }
 const _vExploreTbl = V.explore;
 V.explore = (...a) => { const html = _vExploreTbl(...a); return D && D.regions && Object.keys(D.regions).length && !/Before this step|isn't prepared yet/.test(html) ? html + tablesHTML() : html; };
+// a statistic ticked here (or in the Export builder) redraws the tables; the builder's own handler saves the choice
+document.addEventListener("change", (e) => { if (e.target && e.target.dataset && e.target.dataset.xbMetric && stage === "explore") setTimeout(() => { render(); const x = $("#tbl-top"); if (x && x.scrollIntoView) x.scrollIntoView(); }, 0); });
 document.addEventListener("change", (e) => { if (e.target && e.target.id === "tbl-type") { TBL.type = e.target.value; store.set("tbl-type", TBL.type); render(); setTimeout(() => { const t = $("#tbl-top"); if (t && t.scrollIntoView) t.scrollIntoView(); }, 0); } });
 document.addEventListener("click", async (e) => {
   const t = e.target; if (!t || !t.closest) return;
