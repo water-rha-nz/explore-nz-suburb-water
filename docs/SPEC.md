@@ -737,3 +737,8 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - for each statistic, the mean over the provider's suburbs weighted by residential sections (unweighted when sections are unknown), with the median, range and suburb count on hover.
 - **Per suburb:** territory, provider, sections and each statistic; sortable by any column.
 - **Downloads:** both tables as CSV; the provider CSV adds _MEAN_W, _MEDIAN, _MIN, _MAX and _N per statistic.
+- **Billing** (beneath *Regions in this study*):
+  - for each in-scope provider, every charging period from `water_rates`: start to the day before its next period, or *now*;
+  - the charging type, fixed NZD/yr (water + wastewater), volumetric NZD per m³, threshold L/day, verified flag and date, and source link;
+  - the row that applies today is highlighted;
+  - read from the database when shown.

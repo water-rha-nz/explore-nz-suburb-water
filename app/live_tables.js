@@ -68,3 +68,43 @@ document.addEventListener("click", async (e) => {
   else download(`suburb_summary_${tag}_${stamp}.csv`, csv([["M_SUBURB", "M_TERRITORY", "PRVDR", "SECTIONS", ...ms.map((m) => m.id)],
     ...tblSubs().map(({ s, g }) => [mName(s), s.ta || g.label, g.provider || "", s.sections ?? "", ...ms.map((m) => { const v = m.get(s); return v == null || !isFinite(v) ? "" : +(+v).toFixed(m.d); })])]));
 });
+
+// ---------------------------------------------------------------- Explore: billing beneath "Regions in this study"
+// Each in-scope provider's charging periods (water_rates: one row per provider and start date; a period ends the day before the
+// provider's next one), read from the database when shown: type, fixed NZD/yr, volumetric NZD per m³, threshold, verified, source.
+const BILL = { rows: null, key: "" };
+function billProviders() {
+  const st = studyOf_ && studyOf_(), idx = (D.index || []).filter((r) => !st || (st.ta_codes || []).includes(r.ta_code)), out = new Map();
+  for (const r of idx) { const p = ((D.regions || {})[r.id] || {}).provider || r.prvdr || ((BATCH.tas || []).find((t) => t.code === r.ta_code) || { prvdrs: [] }).prvdrs[0];
+    if (p) { if (!out.has(p)) out.set(p, []); out.get(p).push(r.name || r.id); } }
+  return out;
+}
+async function loadBilling(provs) {
+  const key = [...provs].sort().join(","); if (BILL.key === key && BILL.rows && BILL.rows.length) return;   // empty results are re-read next time
+  BILL.key = key; BILL.rows = null;
+  try { BILL.rows = provs.length ? await q(sb.from("water_rates").select("prvdr,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from")) : []; }
+  catch (e) { BILL.rows = []; BILL.err = e.message; }
+  const el = $("#bill-body"); if (el) el.innerHTML = billingTable(billProviders());
+}
+function billingTable(pm) {
+  if (!BILL.rows) return `<p class="small muted">Loading charges…</p>`;
+  if (!BILL.rows.length) return `<p class="small muted">${BILL.err ? "Charges unavailable: " + esc(BILL.err) : "No charges recorded for these providers yet."}</p>`;
+  const today = new Date().toISOString().slice(0, 10), dayBefore = (d) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
+  const rows = BILL.rows.map((r, i) => { const nx = BILL.rows[i + 1] && BILL.rows[i + 1].prvdr === r.prvdr ? BILL.rows[i + 1].valid_from : null; return { ...r, end: nx ? dayBefore(nx) : "" }; });
+  return `<table><thead><tr><th class="l">Provider</th><th class="l">Regions</th><th class="l">Period</th><th class="l">Charging</th><th>Fixed NZD/yr</th><th>Volumetric NZD/m³</th><th>Threshold L/day</th><th class="l">Checked</th><th class="l">Source</th></tr></thead><tbody>
+    ${rows.map((r) => { const cur = r.valid_from <= today && (!r.end || r.end >= today);
+      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.prvdr)}</b> <span class="small muted">${esc((r.providers || {}).name || "")}</span></td><td class="l small">${esc((pm.get(r.prvdr) || []).join(", "))}</td>
+        <td class="l small">${esc(r.valid_from)} to ${r.end ? esc(r.end) : "now"}${cur ? ' <span class="tag ok">current</span>' : ""}</td><td class="l small">${esc(r.charging_type || "–")}</td>
+        <td>${r.fixed_pa == null ? "–" : "$" + fmt(r.fixed_pa, 2)}</td><td>${r.volumetric_pa == null ? "–" : "$" + fmt(r.volumetric_pa, 2)}</td><td>${r.threshold_lpd == null ? "–" : fmt(r.threshold_lpd)}</td>
+        <td class="l small">${r.verified ? '<span class="tag ok">verified</span>' : '<span class="tag warn">not verified</span>'}${r.date_est ? ` ${esc(r.date_est)}` : ""}</td>
+        <td class="l small">${r.source_url ? `<a href="${esc(r.source_url)}" target="_blank" rel="noopener">source</a>` : "–"}${r.note ? ` <span class="muted" title="${esc(r.note)}">note</span>` : ""}</td></tr>`; }).join("")}</tbody></table>
+    <p class="small muted">Each period runs from its start date to the day before the provider's next period; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used.</p>`;
+}
+{ const _dov = detailedOverviewHTML;
+  detailedOverviewHTML = (...a) => {
+    const html = _dov(...a), i = html.search(/<h2>(Regions in this study|All regions in the database)<\/h2>/); if (i < 0) return html;
+    const j = html.indexOf("</table></div>", i); if (j < 0) return html;
+    const pm = billProviders(); setTimeout(() => loadBilling([...pm.keys()]), 0);
+    const at = j + "</table></div>".length;
+    return html.slice(0, at) + `<h2>Billing</h2><div class="card scroll" id="bill-body">${billingTable(pm)}</div>` + html.slice(at);
+  }; }
