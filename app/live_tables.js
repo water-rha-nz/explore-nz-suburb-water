@@ -82,7 +82,7 @@ function billProviders() {
 async function loadBilling(provs) {
   const key = [...provs].sort().join(","); if (BILL.key === key && BILL.rows && BILL.rows.length) return;   // empty results are re-read next time
   BILL.key = key; BILL.rows = null;
-  try { BILL.rows = provs.length ? await q(sb.from("water_rates").select("prvdr,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,date_est,note,source_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from")) : []; }
+  try { BILL.rows = provs.length ? await q(sb.from("water_rates").select("prvdr,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,value_rate,value_basis,date_est,note,source_url,website_url,policy_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from")) : []; }
   catch (e) { BILL.rows = []; BILL.err = e.message; }
   const el = $("#bill-body"); if (el) el.innerHTML = billingTable(billProviders());
 }
@@ -91,14 +91,15 @@ function billingTable(pm) {
   if (!BILL.rows.length) return `<p class="small muted">${BILL.err ? "Charges unavailable: " + esc(BILL.err) : "No charges recorded for these providers yet."}</p>`;
   const today = new Date().toISOString().slice(0, 10), dayBefore = (d) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
   const rows = BILL.rows.map((r, i) => { const nx = BILL.rows[i + 1] && BILL.rows[i + 1].prvdr === r.prvdr ? BILL.rows[i + 1].valid_from : null; return { ...r, end: nx ? dayBefore(nx) : "" }; });
-  return `<table><thead><tr><th class="l">Provider</th><th class="l">Regions</th><th class="l">Period</th><th class="l">Charging</th><th>Fixed NZD/yr</th><th>Volumetric NZD/m³</th><th>Threshold L/day</th><th class="l">Checked</th><th class="l">Source</th></tr></thead><tbody>
+  return `<table><thead><tr><th class="l">Provider</th><th class="l">Regions</th><th class="l">Period</th><th class="l">Charging</th><th>Fixed NZD/yr</th><th>Volumetric NZD/m³</th><th>Threshold L/day</th><th title="Water and wastewater charged on property value: dollars per $1 million of value">Value-based</th><th class="l">Checked</th><th class="l">Sources</th></tr></thead><tbody>
     ${rows.map((r) => { const cur = r.valid_from <= today && (!r.end || r.end >= today);
       return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.prvdr)}</b> <span class="small muted">${esc((r.providers || {}).name || "")}</span></td><td class="l small">${esc((pm.get(r.prvdr) || []).join(", "))}</td>
         <td class="l small">${esc(r.valid_from)} to ${r.end ? esc(r.end) : "now"}${cur ? ' <span class="tag ok">current</span>' : ""}</td><td class="l small">${esc(r.charging_type || "–")}</td>
         <td>${r.fixed_pa == null ? "–" : "$" + fmt(r.fixed_pa, 2)}</td><td>${r.volumetric_pa == null ? "–" : "$" + fmt(r.volumetric_pa, 2)}</td><td>${r.threshold_lpd == null ? "–" : fmt(r.threshold_lpd)}</td>
+        <td class="small" title="${r.value_rate == null ? "" : esc(`${r.value_rate} per $ of ${r.value_basis || "value"}`)}">${r.value_rate == null ? "–" : `$${fmt(r.value_rate * 1e6)} per $1M ${esc(r.value_basis || "value")}`}</td>
         <td class="l small">${r.verified ? '<span class="tag ok">verified</span>' : '<span class="tag warn">not verified</span>'}${r.date_est ? ` ${esc(r.date_est)}` : ""}</td>
-        <td class="l small">${r.source_url ? `<a href="${esc(r.source_url)}" target="_blank" rel="noopener">source</a>` : "–"}${r.note ? ` <span class="muted" title="${esc(r.note)}">note</span>` : ""}</td></tr>`; }).join("")}</tbody></table>
-    <p class="small muted">Each period runs from its start date to the day before the provider's next period; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used.</p>`;
+        <td class="l small">${r.website_url ? `<a href="${esc(r.website_url)}" target="_blank" rel="noopener">website</a>` : '<span class="muted">website –</span>'} · ${(r.policy_url || r.source_url) ? `<a href="${esc(r.policy_url || r.source_url)}" target="_blank" rel="noopener">pricing policy</a>` : '<span class="muted">policy –</span>'}${r.note ? ` <span class="muted" title="${esc(r.note)}">note</span>` : ""}</td></tr>`; }).join("")}</tbody></table>
+    <p class="small muted">Each period runs from its start date to the day before the provider's next period; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used; value-based charges are shown per $1 million of capital or land value (a $700,000 property pays 0.7 times that). Each charge cites the provider's website and its pricing policy document (rates resolution, funding impact statement or fees schedule).</p>`;
 }
 { const _dov = detailedOverviewHTML;
   detailedOverviewHTML = (...a) => {

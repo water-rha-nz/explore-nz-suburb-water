@@ -745,11 +745,13 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 
 ## 36. Water charges research
 
-- **`data/water_rates_research.csv`:** one row per provider and start date, researched from each provider's official 2026/27 documents (rates resolution, annual plan funding impact statement, or fees schedule). Columns: PRVDR, VALID_FROM, CHARGING_TYPE, FIXED_NZD_PA (water + wastewater for a typical connected household), VOLUMETRIC_NZD_PER_M3, THRESHOLD_L_PER_DAY, VERIFIED (yes / partly), SOURCE_URL, CHECKED, NOTE.
+- **`data/water_rates_research.csv`:** one row per provider and start date, researched from each provider's official 2026/27 documents (rates resolution, annual plan funding impact statement, or fees schedule). Columns: PRVDR, VALID_FROM, CHARGING_TYPE, FIXED_NZD_PA (water + wastewater for a typical connected household), VOLUMETRIC_NZD_PER_M3, THRESHOLD_L_PER_DAY, VALUE_RATE_PER_DOLLAR (water + wastewater charged on property value, dollars per dollar), VALUE_BASIS (capital or land value), VERIFIED (yes / partly), WEBSITE_URL (the provider's rates or charges web page), POLICY_URL (its pricing policy document: rates resolution, funding impact statement or fees schedule), CHECKED, NOTE.
 - **Rules:**
   - the charging type is always recorded;
   - a figure only where the source states it;
-  - charges based on property value are recorded as such, without a rate;
+  - charges based on property value are quantified as a rate per dollar of capital or land value (a proxy cost per $1M of value), never presented as a flat figure; an average bill is not a fixed charge;
+  - two sources per charge: the website link and the pricing policy document, either of which gives the figures;
   - per-scheme charges and other details go in NOTE;
   - verified only where read from the official document.
-- **`tools/water_rates_migration.py NNNN`** writes a migration that upserts these rows into `water_rates` (0042 is the first batch).
+- **`tools/water_rates_migration.py NNNN`** writes a migration that upserts these rows into `water_rates` (0042 first batch; 0043 adds value_rate, value_basis, website_url and policy_url; 0044 corrects QLDC and adds Christchurch).
+- **Billing (Explore) and the charge exports** show the value-based rate (per $1M of value) and both source links; `water_charges_by_period.csv` has a VALUE_BASED component.
