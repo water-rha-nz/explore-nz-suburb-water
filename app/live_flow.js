@@ -45,8 +45,18 @@ function stageState(id) {
   if (DATA_STAGES.has(id)) return ready.length ? ["ready", `${ready.length} prepared region(s)`] : ["blocked", "Needs a prepared region: 2 Configure, then 3 Load"];
   return ["ready", ""];
 }
+// statuses are read at sign-in; while a stage waits for regions, re-check them every 30 s so finished regions open without a reload
+let GATE_T = 0;
+async function refreshStatuses(ids) {
+  if (!ids.length || Date.now() - GATE_T < 30000) return; GATE_T = Date.now();
+  try { const fresh = await q(sb.from("regions").select("id,status").in("id", ids)); let changed = false;
+    for (const f of fresh) { const r = (D.index || []).find((x) => x.id === f.id); if (r && r.status !== f.status) { r.status = f.status; changed = true; } }
+    if (changed) { if (typeof MEMO !== "undefined") MEMO.fresh = false; render(); }
+    else if (DATA_STAGES.has(stage)) setTimeout(() => { if (DATA_STAGES.has(stage)) refreshStatuses(ids); }, 30500); } catch (e) { /* try again on the next view */ }
+}
 function gateHTML(id) {
   const rows = studyRows(), ready = rows.filter((r) => isPrepared(r.id));
+  const waiting = rows.filter((r) => !isPrepared(r.id)).map((r) => r.id); if (waiting.length) setTimeout(() => refreshStatuses(waiting), 0);
   if (ready.length && !BATCH.isNew) {
     if (!rows.some((r) => r.id === region)) { region = ready[0].id; store.set("region", region); return null; }   // region outside the study
     if (isPrepared(region)) return null;
