@@ -53,6 +53,7 @@ function exportBuilderHTML() {
         <select id="xb-c-per"><option value="cell" ${cl.per !== "suburb" ? "selected" : ""}>per climate cell</option><option value="suburb" ${cl.per === "suburb" ? "selected" : ""}>per suburb</option></select><br><span class="muted">Sums for rain and ET₀, means for temperatures. Partial months or years are flagged with their day count.</span></div>
     </div>
     <p class="small" style="margin:6px 0 0"><label><input type="checkbox" id="xb-hh-std" ${store.get("hh-standard", "0") === "1" ? "checked" : ""}> <code>nz_household_ref.csv</code>: standard six columns only (leave off the per-household spatial and imagery columns)</label></p>
+    <p class="small" style="margin:2px 0 0"><label><input type="checkbox" id="xb-rates-legacy" ${store.get("rates-legacy", "0") === "1" ? "checked" : ""}> Water rates: original tool headers (<code>FIXED_PA</code>, <code>VOLUMETRIC_PA</code>, <code>THRESHOLD_Lpd</code>) instead of headers with units (<code>FIXED_NZD_PA</code>, <code>VOLUMETRIC_NZD_PER_M3</code>, <code>THRESHOLD_L_PER_DAY</code>)</label></p>
     <div class="row" style="margin-top:10px"><button class="btn primary" type="button" id="xb-zip" ${user ? "" : "disabled"}>Export .zip of CSVs</button> <button class="btn" type="button" id="xb-xlsx" ${user ? "" : "disabled"}>Export .xlsx</button> <span class="small muted" id="xb-status"></span></div></div>`;
 }
 const _vExportXB = V.export;
@@ -65,6 +66,7 @@ document.addEventListener("change", (e) => {
   else if (t.dataset.xbMetric) tog(XB.metrics, "metrics", t.dataset.xbMetric);
   else if (t.dataset.xbFormat) tog(XB.formats, "formats", t.dataset.xbFormat);
   else if (t.id === "xb-hh-std") store.set("hh-standard", t.checked ? "1" : "0");
+  else if (t.id === "xb-rates-legacy") store.set("rates-legacy", t.checked ? "1" : "0");
   else if (/^xb-c-/.test(t.id)) xbSave("climate", { from: $("#xb-c-from").value, to: $("#xb-c-to").value, agg: $("#xb-c-agg").value, per: $("#xb-c-per").value });
   else if (/^xb-r-/.test(t.id) || t.name === "xb-r-shape") xbSave("rates", { from: $("#xb-r-from").value, to: $("#xb-r-to").value, shape: (document.querySelector('input[name="xb-r-shape"]:checked') || {}).value || "long" });
 });
@@ -130,8 +132,8 @@ async function xbRates(regs) {
     .filter((r) => { const w = xbUnion(byProv[r.prvdr].map(([k]) => xbPeriod(k, "rates"))); return (!w.to || r.start <= w.to) && (!w.from || !r.end || r.end >= w.from); });
   const regsOf = (r) => byProv[r.prvdr].map(([, g]) => g.label).join("; ");
   const name = (r) => (r.providers || {}).name || r.prvdr;
-  if (R.shape === "wide") return csv([["PROVIDER", "NAME", "REGIONS", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "VERIFIED", "SOURCE", "NOTE"],
-    ...per.map((r) => [r.prvdr, name(r), regsOf(r), r.start, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.date_est || "", r.verified ? "yes" : "no", r.source_url || "", r.note || ""])]);
+  if (R.shape === "wide") return unitHeaders(csv([["PROVIDER", "NAME", "REGIONS", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "DATE_EST", "VERIFIED", "SOURCE", "NOTE"],
+    ...per.map((r) => [r.prvdr, name(r), regsOf(r), r.start, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.date_est || "", r.verified ? "yes" : "no", r.source_url || "", r.note || ""])]));
   const comps = [["FIXED", "fixed_pa", "NZD/yr"], ["VOLUMETRIC", "volumetric_pa", "NZD/m³"], ["THRESHOLD", "threshold_lpd", "L/day"]];
   return csv([["PROVIDER", "NAME", "REGIONS", "COMPONENT", "VALUE", "UNIT", "START", "END", "CHARGING_TYPE", "VERIFIED", "SOURCE"],
     ...per.flatMap((r) => comps.filter(([, k]) => r[k] != null).map(([c, k, u]) => [r.prvdr, name(r), regsOf(r), c, r[k], u, r.start, r.end, r.charging_type || "", r.verified ? "yes" : "no", r.source_url || ""]))]);
@@ -209,3 +211,13 @@ EXPORTS["nz_suburb_hh_area_stats.csv"] = { desc: "Per suburb and measure: centre
     for (const { s, rows } of by.values()) for (const [m, src, f] of HH_MEASURES) { const st = hhStats(rows.map(f)); if (!st) continue;
       out.push([mName(s), s.ta || "", s.linz_id, m, src, st.n, +st.mean.toFixed(1), +st.median.toFixed(1), +st.sd.toFixed(1), +st.p10.toFixed(1), +st.p25.toFixed(1), +st.p75.toFixed(1), +st.p90.toFixed(1), +st.iqr.toFixed(1)]); }
     return csv([["M_SUBURB", "M_TERRITORY", "SUBURB_LINZ_ID", "MEASURE", "SOURCE", "N", "MEAN", "MEDIAN", "SD", "P10", "P25", "P75", "P90", "IQR"], ...out]); } };
+
+// ---------------------------------------------------------------- water rates: headers that state their units
+// FIXED_PA is NZD per year, VOLUMETRIC_PA is NZD per m³ (not per year) and THRESHOLD_Lpd litres per day (suburb_lookup.html's own
+// definitions). Exports name the units; the export builder's "original tool headers" option keeps the old names for that tool.
+const RATE_HEADERS = { FIXED_PA: "FIXED_NZD_PA", VOLUMETRIC_PA: "VOLUMETRIC_NZD_PER_M3", THRESHOLD_Lpd: "THRESHOLD_L_PER_DAY" };
+const unitHeaders = (text) => { if (store.get("rates-legacy", "0") === "1") return text; const i = text.indexOf("\n"), head = i < 0 ? text : text.slice(0, i);
+  return head.split(",").map((h) => RATE_HEADERS[h] || h).join(",") + (i < 0 ? "" : text.slice(i)); };
+{ const e = EXPORTS["nz_water_rates.csv"], mk = e.make;
+  e.make = async (...a) => unitHeaders(await mk(...a));
+  e.desc = "PROVIDER, CHARGING_TYPE, FIXED_NZD_PA (water + wastewater, NZD/yr), VOLUMETRIC_NZD_PER_M3 (NZD per m³ of water), THRESHOLD_L_PER_DAY, DATE_EST, NOTE (original headers FIXED_PA, VOLUMETRIC_PA, THRESHOLD_Lpd as an option)"; }
