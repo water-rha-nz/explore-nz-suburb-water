@@ -727,3 +727,13 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - LAND_M2_PER_TITLE (LINZ parcels and titles);
   - ROOF_M2_PER_TITLE, UNBUILT_M2_PER_TITLE and GARDEN_M2_PER_TITLE (imagery measures);
   - TITLES_PER_SECTION.
+
+## 35. Explore: summary tables
+
+- Below the map, for the regions in scope (the chosen study's loaded regions, else all loaded), with a data type selector (all statistics, or one source group: Imagery, LINZ, LINZ + imagery, LINZ titles, Stats NZ, Open-Meteo).
+  - Study regions that are published but not loaded can be loaded from a button.
+- **Per provider:**
+  - regions, suburbs and residential sections;
+  - for each statistic, the mean over the provider's suburbs weighted by residential sections (unweighted when sections are unknown), with the median, range and suburb count on hover.
+- **Per suburb:** territory, provider, sections and each statistic; sortable by any column.
+- **Downloads:** both tables as CSV; the provider CSV adds _MEAN_W, _MEDIAN, _MIN, _MAX and _N per statistic.
