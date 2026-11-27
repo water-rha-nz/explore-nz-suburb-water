@@ -918,8 +918,9 @@ V.region = () => {
       ${last.length ? `<button class="btn" type="button" id="ov-load-last">Load last session's regions (${last.length})</button>` : ""}
       ${loaded.length ? `<button class="btn" type="button" data-goto-stage="explore">Explore loaded regions (${loaded.length}) →</button>` : ""}</div>
     <div class="grid" style="grid-template-columns:minmax(0,1.2fr) minmax(300px,1fr);gap:12px;align-items:start"><div class="card" id="land-map"><p class="muted small">Loading map…</p></div>
-    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The study's provider acronym (as configured in 2.1)">PRVDR</th><th class="l">Provider</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l" title="${esc(r.prvdr || "")}">${esc((r.ta_code && typeof configuredAcronym === "function" && BATCH.sel.has(r.ta_code) ? configuredAcronym(r.ta_code) : "") || r.prvdr || "–")}</td><td class="l small">${esc(r.prvdr ? providerLegalName(r.prvdr) : "–")}</td>
+    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The acronym from your nz_suburb_provider.csv (a data key)">PRVDR</th><th class="l" title="The legal entity the acronym stands for">Provider</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td>${(() => { const acr = r.ta_code && typeof configuredAcronym === "function" && BATCH.sel.has(r.ta_code) ? configuredAcronym(r.ta_code) : "";
+        return `<td class="l" title="${esc(acr ? "From your nz_suburb_provider.csv" : "No acronym configured for this territory")}">${esc(acr || "–")}</td><td class="l small">${esc((acr && legalEntity(acr, r.ta_code)) || "–")}</td>`; })()}
       <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
       <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
 };
@@ -948,7 +949,7 @@ function detailedOverviewHTML() {
   const clim = (x) => { const c = Object.values(x.climate_cells || {}); if (!c.length) return "–"; const m = c.flatMap((y) => y.months || []).filter(Boolean).sort(), n = `${c.length} cell${c.length === 1 ? "" : "s"}`; return m.length ? `${n}, ${m[0].slice(0, 4)}–${m[m.length - 1].slice(0, 4)}` : `${n}, no months yet`; };
   const row = (k, x) => { const sub = x.suburbs.filter(resident), pools = sub.reduce((t, s) => t + (+s.pools || 0), 0);
     const tc = ((D.index || []).find((r) => r.id === k) || {}).ta_code, acr = tc && typeof configuredAcronym === "function" && BATCH.sel.has(tc) ? configuredAcronym(tc) : "";
-    return { k, name: x.label, ta: x.ta || "–", prvdr: acr || x.provider || "–", prvdr_code: x.provider || "", provider_name: typeof providerLegalName === "function" ? providerLegalName(x.provider) : (x.provider || "–"), suburbs: x.suburbs.length, housing: sub.length, sections: sub.reduce((t, s) => t + (s.sections || 0), 0), sa2: x.sa2.length,
+    return { k, name: x.label, ta: x.ta || "–", prvdr: acr || "–", prvdr_code: x.provider || "", provider_name: (acr && typeof legalEntity === "function" ? legalEntity(acr, tc) : "") || "–", suburbs: x.suburbs.length, housing: sub.length, sections: sub.reduce((t, s) => t + (s.sections || 0), 0), sa2: x.sa2.length,
       imagery: x.capture_id || "–", pools, garden: sub.some((s) => s.GardSize != null), census: yrs(x), climate: clim(x), status: x.status || "–" }; };
   const rows = regs.map(([k, x]) => row(k, x)), tot = (f) => rows.reduce((t, r) => t + r[f], 0);
   const cell = (v) => typeof v === "number" ? fmt(v) : esc(v);
@@ -973,8 +974,8 @@ function detailedOverviewHTML() {
       </tbody></table></div>
     <div class="card"><h3>About this overview</h3><p class="small">Everything shown comes from data already prepared and stored, loaded once when you signed in. Choose one statistic to colour the suburbs, add pool, green-space and rainfall symbols on top, and zoom in: at full zoom, detected pools and imagery chips appear. Each layer's source is linked in the legend and below.</p></div></div>
   <h2>${st ? "Regions in this study" : "All regions in the database"}</h2>
-  <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The study's provider acronym (as configured in 2.1)">PRVDR</th><th class="l">Provider</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l" title="${esc(`${r.prvdr_code} · ${r.provider_name}`)}">${esc(r.prvdr)}</td><td class="l small">${esc(r.provider_name)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
+  <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The acronym from your nz_suburb_provider.csv (a data key)">PRVDR</th><th class="l" title="The legal entity the acronym stands for">Provider</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l" title="${esc(r.prvdr === "–" ? "No acronym for this territory in your nz_suburb_provider.csv / study" : `From your nz_suburb_provider.csv; matched to provider code ${r.prvdr_code}`)}">${esc(r.prvdr)}</td><td class="l small">${esc(r.provider_name)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
       <td class="l small">${esc(r.imagery)}</td><td>${cell(r.pools)}</td><td class="l">${r.garden ? "yes" : "–"}</td><td class="l">${esc(r.census)}</td><td class="l small">${esc(r.climate)}</td><td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status)}</span></td></tr>`).join("")}
     ${rows.length > 1 ? `<tr><td class="l"><b>Total</b></td><td></td><td></td><td></td><td><b>${fmt(tot("suburbs"))}</b></td><td><b>${fmt(tot("housing"))}</b></td><td><b>${fmt(tot("sections"))}</b></td><td><b>${fmt(tot("sa2"))}</b></td><td></td><td><b>${fmt(tot("pools"))}</b></td><td colspan="4"></td></tr>` : ""}</tbody></table></div>${sourcesHTML()}`;
 };
@@ -1359,15 +1360,31 @@ function filePrvdr(c) {
 }
 // precedence: chosen by hand > your lists > a loaded saved configuration > the TA's saved provider
 const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0] || "";
-// The study's PRVDR acronym for a territory: as saved with the study; else the acronym your files use for the chosen provider; else
-// the acronym your provider-code matches map to it (one used only for this territory first); else the provider code itself.
+// PRVDR is the acronym from your nz_suburb_provider.csv (a data key, kept verbatim): as saved with the study, else the acronym your
+// files use for this territory's chosen provider, else the file acronym your saved matches map to it. Never an internal code.
 function configuredAcronym(c) {
-  const code = prvdrFor(c); if (BATCH.acr && BATCH.acr[c] && (!code || (BATCH.matches[norm(BATCH.acr[c])] || code) === code)) return BATCH.acr[c];
-  const f = filePrvdr(c); if (f && f.code === code && f.acronyms && f.acronyms.length) return f.acronyms[0];
+  const code = prvdrFor(c);
+  if (BATCH.acr && BATCH.acr[c]) return BATCH.acr[c];
+  const f = filePrvdr(c); if (f && f.acronyms && f.acronyms.length) return f.acronyms[0];
   const keys = Object.entries(BATCH.matches || {}).filter(([, v]) => v === code).map(([k]) => k.toUpperCase());
-  return keys[0] || code || "";
+  return keys[0] || "";
 }
-// the provider's legal name (providers table), else the code
+// Provider: the legal entity an acronym stands for, inferred from names (not from the territory a provider serves): an exact code,
+// alias or name match among providers; else names whose initials spell the acronym (providers' legal names and each territory's
+// council, e.g. WCC = Wellington City Council), preferring the one tied to the acronym's own territory. "" when nothing matches.
+const ENTITY_STOP = new Set(["of", "the", "and", "&", "te", "o"]);
+const initials = (name) => String(name || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z\s-]/g, " ").split(/[\s-]+/).filter((w) => w && !ENTITY_STOP.has(w.toLowerCase())).map((w) => w[0].toUpperCase()).join("");
+function legalEntity(acr, taCode) {
+  const a = String(acr || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z]/g, ""); if (!a) return "";
+  const provs = BATCH.providers || [], tas = BATCH.tas || [], taName = (tas.find((t) => t.code === taCode) || {}).name || "";
+  const exact = provs.find((p) => [p.prvdr, p.legacy_prvdr, p.name, ...(p.aliases || [])].some((x) => String(x || "").toUpperCase().replace(/[^A-Z]/g, "") === a));
+  if (exact && initials(exact.name) === a) return exact.name;
+  const cands = [...provs.map((p) => ({ name: p.name, ta: (p.territories || []).includes(taName) })),
+                 ...tas.map((t) => ({ name: `${t.name} Council`, ta: t.code === taCode }))].filter((x) => x.name && initials(x.name) === a);
+  const pick = cands.find((x) => x.ta) || cands[0];
+  return pick ? pick.name : (exact ? exact.name : "");
+}
+// kept for billing and summaries: the legal name of a provider code
 function providerLegalName(code) { const p = (BATCH.providers || []).find((x) => x.prvdr === code); return (p && p.name) || ((D && D.water_rates) || []).find((w) => w.PROVIDER === code)?.name || code || ""; }
 function prvdrSource(c) {
   if (BATCH.prvdr[c]) return "chosen by you";

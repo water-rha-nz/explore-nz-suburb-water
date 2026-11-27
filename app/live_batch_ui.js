@@ -149,15 +149,31 @@ function filePrvdr(c) {
 }
 // precedence: chosen by hand > your lists > a loaded saved configuration > the TA's saved provider
 const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0] || "";
-// The study's PRVDR acronym for a territory: as saved with the study; else the acronym your files use for the chosen provider; else
-// the acronym your provider-code matches map to it (one used only for this territory first); else the provider code itself.
+// PRVDR is the acronym from your nz_suburb_provider.csv (a data key, kept verbatim): as saved with the study, else the acronym your
+// files use for this territory's chosen provider, else the file acronym your saved matches map to it. Never an internal code.
 function configuredAcronym(c) {
-  const code = prvdrFor(c); if (BATCH.acr && BATCH.acr[c] && (!code || (BATCH.matches[norm(BATCH.acr[c])] || code) === code)) return BATCH.acr[c];
-  const f = filePrvdr(c); if (f && f.code === code && f.acronyms && f.acronyms.length) return f.acronyms[0];
+  const code = prvdrFor(c);
+  if (BATCH.acr && BATCH.acr[c]) return BATCH.acr[c];
+  const f = filePrvdr(c); if (f && f.acronyms && f.acronyms.length) return f.acronyms[0];
   const keys = Object.entries(BATCH.matches || {}).filter(([, v]) => v === code).map(([k]) => k.toUpperCase());
-  return keys[0] || code || "";
+  return keys[0] || "";
 }
-// the provider's legal name (providers table), else the code
+// Provider: the legal entity an acronym stands for, inferred from names (not from the territory a provider serves): an exact code,
+// alias or name match among providers; else names whose initials spell the acronym (providers' legal names and each territory's
+// council, e.g. WCC = Wellington City Council), preferring the one tied to the acronym's own territory. "" when nothing matches.
+const ENTITY_STOP = new Set(["of", "the", "and", "&", "te", "o"]);
+const initials = (name) => String(name || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^A-Za-z\s-]/g, " ").split(/[\s-]+/).filter((w) => w && !ENTITY_STOP.has(w.toLowerCase())).map((w) => w[0].toUpperCase()).join("");
+function legalEntity(acr, taCode) {
+  const a = String(acr || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z]/g, ""); if (!a) return "";
+  const provs = BATCH.providers || [], tas = BATCH.tas || [], taName = (tas.find((t) => t.code === taCode) || {}).name || "";
+  const exact = provs.find((p) => [p.prvdr, p.legacy_prvdr, p.name, ...(p.aliases || [])].some((x) => String(x || "").toUpperCase().replace(/[^A-Z]/g, "") === a));
+  if (exact && initials(exact.name) === a) return exact.name;
+  const cands = [...provs.map((p) => ({ name: p.name, ta: (p.territories || []).includes(taName) })),
+                 ...tas.map((t) => ({ name: `${t.name} Council`, ta: t.code === taCode }))].filter((x) => x.name && initials(x.name) === a);
+  const pick = cands.find((x) => x.ta) || cands[0];
+  return pick ? pick.name : (exact ? exact.name : "");
+}
+// kept for billing and summaries: the legal name of a provider code
 function providerLegalName(code) { const p = (BATCH.providers || []).find((x) => x.prvdr === code); return (p && p.name) || ((D && D.water_rates) || []).find((w) => w.PROVIDER === code)?.name || code || ""; }
 function prvdrSource(c) {
   if (BATCH.prvdr[c]) return "chosen by you";
