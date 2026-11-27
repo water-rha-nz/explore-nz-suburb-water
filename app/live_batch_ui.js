@@ -969,7 +969,7 @@ async function saveConfig(nameIn) {
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
   BATCH.dirty = false; BATCH.savedAt = new Date(); toastMsg(`Saved configuration "${name}"`); await loadBatchData(); STUDY.id = String(BATCH.config.id); store.set("study", STUDY.id); loadStudies(); drawBatch();
 }
-function loadConfig(id) {
+function loadConfig(id, quiet) {
   const c = BATCH.configs.find((x) => String(x.id) === String(id));
   if (typeof STUDY !== "undefined") { STUDY.id = c ? String(c.id) : ""; store.set("study", STUDY.id); setTimeout(renderHeader, 0); }
   if (!c) { BATCH.config = null; BATCH.savedScope = null; BATCH.cfgPrvdr = {}; return drawBatch(); }
@@ -978,7 +978,7 @@ function loadConfig(id) {
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
   BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; BATCH.acr = { ...(c.prvdr_acronyms || {}) }; migrateTl();
-  BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
+  BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); if (!quiet) toastMsg(`Loaded "${c.name}"`); drawBatch();
 }
 async function tileCSV(batchId) {
   const regs = BATCH.regions.filter((r) => r.batch_id === batchId).map((r) => r.id);
