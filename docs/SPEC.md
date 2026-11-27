@@ -762,3 +762,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - `water_rates.ta_code` is the territorial authority a charge applies to; rows without it apply to every territory of the provider that has no rows of its own. The key is provider, territory and start date.
   - Billing (Explore) lists each region in scope with its territory, provider, and its territory's charge periods (else the provider-wide ones, marked as such). `water_charges_by_period.csv` gives REGION, TA_CODE and TERRITORY per row.
   - Tiaki Wai has one row per city: Wellington 047, Hutt 046, Porirua 044, Upper Hutt 045. The research file has a TA_CODE column.
+- **Billing is keyed by territory** (migration 0052).
+  - Every charge row carries its territorial authority; rows of providers that serve one territory were stamped with it.
+  - Billing and `water_charges_by_period.csv` select charges by the region's territory, whichever provider bills it. A study may link a region to a provider outside that provider's jurisdiction; the charges shown stay the territory's, and the differing link is flagged (STUDY_LINKED_PROVIDER in the export).
+  - Tiaki Wai's per-city rows cite each city's own billing page; all their figures appear in the Pricing Policy's section for that city.

@@ -121,23 +121,23 @@ async function xbBuild(say) {
   return files;
 }
 
-// charges per region / territory: the territory's own rows, else the provider's territory-wide rows (see regionCharges); periods
+// charges per region are its territory's (any provider; see regionCharges); periods
 // overlapping the region's period (its timeline) are kept
 async function xbRates(regs) {
   const list = regs.map(([k, g]) => { const ix = (D.index || []).find((r) => r.id === k) || {}; const ta = (BATCH.tas || []).find((x) => x.code === ix.ta_code) || {};
     return { id: k, name: g.label, ta_code: ix.ta_code, ta_name: ta.name || ix.ta_code || "", prvdr: g.provider || ix.prvdr || "" }; });
-  const provs = [...new Set(list.map((r) => r.prvdr).filter(Boolean))];
-  if (!provs.length) return csv([["REGION", "NOTE"], ["", "no provider set for the chosen regions"]]);
-  const all = await q(sb.from("water_rates").select("prvdr,ta_code,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,value_rate,value_basis,date_est,note,source_url,website_url,policy_url,verified,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from"));
+  const tas = [...new Set(list.map((r) => r.ta_code).filter(Boolean))];
+  if (!tas.length) return csv([["REGION", "NOTE"], ["", "no territory set for the chosen regions"]]);
+  const all = await q(sb.from("water_rates").select("prvdr,ta_code,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,value_rate,value_basis,date_est,note,source_url,website_url,policy_url,verified,providers(name)").in("ta_code", tas).order("ta_code").order("valid_from"));
   const R = xbStore("rates", { from: "", to: "", shape: "long" }), out = [];
   for (const reg of list) { const w = xbPeriod(reg.id, "rates");
     for (const r of regionCharges(reg, all).filter((r) => (!w.to || r.valid_from <= w.to) && (!w.from || !r.end || r.end >= w.from))) out.push({ reg, r }); }
   const name = (r) => (r.providers || {}).name || r.prvdr;
-  if (R.shape === "wide") return unitHeaders(csv([["REGION", "TA_CODE", "TERRITORY", "PROVIDER", "NAME", "CHARGES_SET_FOR", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "VALUE_RATE_PER_DOLLAR", "VALUE_BASIS", "DATE_EST", "VERIFIED", "WEBSITE_URL", "POLICY_URL", "NOTE"],
-    ...out.map(({ reg, r }) => [reg.name, reg.ta_code || "", reg.ta_name, r.prvdr, name(r), r.scope, r.valid_from, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.value_rate ?? "", r.value_basis || "", r.date_est || "", r.verified ? "yes" : "no", r.website_url || "", r.policy_url || r.source_url || "", r.note || ""])]));
+  if (R.shape === "wide") return unitHeaders(csv([["REGION", "TA_CODE", "TERRITORY", "PROVIDER", "NAME", "STUDY_LINKED_PROVIDER", "START", "END", "CHARGING_TYPE", "FIXED_PA", "VOLUMETRIC_PA", "THRESHOLD_Lpd", "VALUE_RATE_PER_DOLLAR", "VALUE_BASIS", "DATE_EST", "VERIFIED", "WEBSITE_URL", "POLICY_URL", "NOTE"],
+    ...out.map(({ reg, r }) => [reg.name, reg.ta_code || "", reg.ta_name, r.prvdr, name(r), r.differs ? r.linked : "", r.valid_from, r.end, r.charging_type || "", r.fixed_pa ?? "", r.volumetric_pa ?? "", r.threshold_lpd ?? "", r.value_rate ?? "", r.value_basis || "", r.date_est || "", r.verified ? "yes" : "no", r.website_url || "", r.policy_url || r.source_url || "", r.note || ""])]));
   const comps = [["FIXED", "fixed_pa", () => "NZD/yr"], ["VOLUMETRIC", "volumetric_pa", () => "NZD/m³"], ["THRESHOLD", "threshold_lpd", () => "L/day"], ["VALUE_BASED", "value_rate", (r) => `NZD per NZD of ${r.value_basis || "property value"}`]];
-  return csv([["REGION", "TA_CODE", "TERRITORY", "PROVIDER", "NAME", "COMPONENT", "VALUE", "UNIT", "START", "END", "CHARGING_TYPE", "VERIFIED", "WEBSITE_URL", "POLICY_URL"],
-    ...out.flatMap(({ reg, r }) => comps.filter(([, k]) => r[k] != null).map(([c, k, u]) => [reg.name, reg.ta_code || "", reg.ta_name, r.prvdr, name(r), c, r[k], u(r), r.valid_from, r.end, r.charging_type || "", r.verified ? "yes" : "no", r.website_url || "", r.policy_url || r.source_url || ""]))]);
+  return csv([["REGION", "TA_CODE", "TERRITORY", "PROVIDER", "NAME", "STUDY_LINKED_PROVIDER", "COMPONENT", "VALUE", "UNIT", "START", "END", "CHARGING_TYPE", "VERIFIED", "WEBSITE_URL", "POLICY_URL"],
+    ...out.flatMap(({ reg, r }) => comps.filter(([, k]) => r[k] != null).map(([c, k, u]) => [reg.name, reg.ta_code || "", reg.ta_name, r.prvdr, name(r), r.differs ? r.linked : "", c, r[k], u(r), r.valid_from, r.end, r.charging_type || "", r.verified ? "yes" : "no", r.website_url || "", r.policy_url || r.source_url || ""]))]);
 }
 
 // climate: stored days per cell (keyset paged) over its regions' periods; per suburb, each region's own period
