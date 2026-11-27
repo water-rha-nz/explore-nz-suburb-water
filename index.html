@@ -2180,7 +2180,7 @@ async function saveConfig(nameIn) {
   else { const [r] = await q(sb.from("batch_configs").insert(rec).select("id")); BATCH.config = { id: r.id, name }; }
   BATCH.dirty = false; BATCH.savedAt = new Date(); toastMsg(`Saved configuration "${name}"`); await loadBatchData(); STUDY.id = String(BATCH.config.id); store.set("study", STUDY.id); loadStudies(); drawBatch();
 }
-function loadConfig(id) {
+function loadConfig(id, quiet) {
   const c = BATCH.configs.find((x) => String(x.id) === String(id));
   if (typeof STUDY !== "undefined") { STUDY.id = c ? String(c.id) : ""; store.set("study", STUDY.id); setTimeout(renderHeader, 0); }
   if (!c) { BATCH.config = null; BATCH.savedScope = null; BATCH.cfgPrvdr = {}; return drawBatch(); }
@@ -2189,7 +2189,7 @@ function loadConfig(id) {
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
   BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; BATCH.acr = { ...(c.prvdr_acronyms || {}) }; migrateTl();
-  BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
+  BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); if (!quiet) toastMsg(`Loaded "${c.name}"`); drawBatch();
 }
 async function tileCSV(batchId) {
   const regs = BATCH.regions.filter((r) => r.batch_id === batchId).map((r) => r.id);
@@ -3347,6 +3347,25 @@ document.addEventListener("click", async (e) => {
   const r = t.closest && t.closest("[data-rkey]");
   if (r) { try { await q(sb.rpc("admin_revoke_review_key", { p_prefix: r.dataset.rkey, p_revoked: r.dataset.rkeyOn === "1" })); await loadAdminExtras(); } catch (err) { toastMsg(err.message); } }
 });
+
+
+// ---------------------------------------------------------------- the selected study is loaded on start
+// After a reload the browser keeps only part of the study (selected TAs, matches); the saved study itself (provider choices,
+// acronyms per territory, allocations, timelines) is read again whenever the selected study isn't the one loaded yet, so PRVDR and
+// the rest show as configured. It never replaces a study that is already loaded (and its files) in this session.
+let STUDY_LOADING = null;
+async function ensureStudyLoaded() {
+  if (!STUDY.id || BATCH.isNew || !can("editor")) return;
+  if (BATCH.config && String(BATCH.config.id) === String(STUDY.id)) return;
+  if (STUDY_LOADING) return STUDY_LOADING;
+  STUDY_LOADING = (async () => {
+    try { await loadBatchData(); if (BATCH.configs.some((c) => String(c.id) === String(STUDY.id))) { loadConfig(STUDY.id, true); render(); } }
+    catch (e) { console.warn("study not loaded:", e.message); }
+    finally { STUDY_LOADING = null; }
+  })();
+  return STUDY_LOADING;
+}
+{ const _ls = loadStudies; loadStudies = async (...a) => { const r = await _ls(...a); ensureStudyLoaded(); return r; }; }
 
 
 // ---------------------------------------------------------------- export builder: configure, then stream from Supabase
