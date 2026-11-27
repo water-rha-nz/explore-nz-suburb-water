@@ -739,7 +739,8 @@ async function loadAll() {
   const d = { generated: today(), regions: {}, nz_regions: STATIC.nz_regions, limits: STATIC.limits, index_regions: STATIC.index_regions,
     water_rates: rates.map((r) => ({ PROVIDER: r.prvdr, name: (r.providers || {}).name || r.prvdr, CHARGING_TYPE: r.charging_type, FIXED_PA: r.fixed_pa, VOLUMETRIC_PA: r.volumetric_pa,
       THRESHOLD_Lpd: r.threshold_lpd, DATE_EST: r.date_est, NOTE: r.note, source: r.source_url, year: "2026/27" })) };
-  d.cen = await q(sb.rpc("region_centroids")); d.index = regions; d.empty = {};
+  // region markers are a convenience: a failure here must not stop sign-in
+  d.cen = await q(sb.rpc("region_centroids")).catch((e) => { console.warn("region centroids unavailable:", e.message); return {}; }); d.index = regions; d.empty = {};
   // M_SUBURB names saved by editors
   const ms = await q(sb.from("m_suburbs").select("id,region_id,m_suburb,m_suburb_links(linz_id)"));
   edits = {}; for (const m of ms) for (const l of m.m_suburb_links || []) edits[m.region_id + ":" + l.linz_id] = m.m_suburb;
