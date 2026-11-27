@@ -755,3 +755,6 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - verified only where read from the official document.
 - **`tools/water_rates_migration.py NNNN`** writes a migration that upserts these rows into `water_rates` (0042 first batch; 0043 adds value_rate, value_basis, website_url and policy_url; 0044 corrects QLDC and adds Christchurch).
 - **Billing (Explore) and the charge exports** show the value-based rate (per $1M of value) and both source links; `water_charges_by_period.csv` has a VALUE_BASED component.
+- **Full tariffs** (`water_rates.tariff`, migration 0048) where a provider publishes one: Tiaki Wai's 2026/27 calculator parameters per city (Wellington, Hutt, Porirua, Upper Hutt), taken from the `data-rates` of its billing-page calculator and checked against its Pricing Policy (1 July 2026, POL_0416) and year-one charging page.
+  - The calculator's own code isn't published with the page, so the app's **bill estimator** (Billing, Explore) rebuilds the residential formula from the parameters and the policy's rules: water, wastewater and stormwater by city, capital value, meter and m³ used, and SUIPs.
+  - Results are labelled indicative.
