@@ -2110,7 +2110,8 @@ function progressLive() {
         const done = steps.filter((st) => last[st] && (last[st].status === "done" || last[st].status === "skipped")).length; return { j, steps, last, runs, done }; });
       const tot = per.reduce((t, p) => t + Math.max(1, p.steps.length), 0), dn = per.reduce((t, p) => t + (p.j.status === "done" ? Math.max(1, p.steps.length) : p.done), 0), pct = tot ? Math.round(100 * dn / tot) : 0;
       const failed = jobs.filter((j) => j.status === "failed");
-      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}${jobs.some((j) => j.status !== "done") ? ` · <button class="btn" type="button" data-publish-batch="${b.id}" style="padding:0 8px" title="Publish the suburb statistics stored so far for every unfinished region of this batch, so they open in Explore (partly loaded) while the rest is prepared">⤴ Publish what's loaded so far</button>` : ""}</span></div>
+      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}${jobs.some((j) => j.status !== "done") ? ` · <button class="btn" type="button" data-bcomp-edit="${b.id}" style="padding:0 8px" title="Change which components this batch's unfinished regions still run (e.g. skip climate)">✎ Components</button>` : ""}${jobs.some((j) => j.status !== "done") ? ` · <button class="btn" type="button" data-publish-batch="${b.id}" style="padding:0 8px" title="Publish the suburb statistics stored so far for every unfinished region of this batch, so they open in Explore (partly loaded) while the rest is prepared">⤴ Publish what's loaded so far</button>` : ""}</span></div>
+        ${PROG.edit === b.id ? batchEditHTML(b) : ""}
         <div class="bar-out" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch progress" style="height:8px;margin:4px 0"><div class="bar-in" style="width:${pct}%"></div></div>
         <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
           const lastAct = lr ? (lr.updated_at || lr.started_at) : j.created_at, stalled = j.status === "running" && lastAct && Date.now() - new Date(lastAct).getTime() > 20 * 60000;
@@ -2139,12 +2140,25 @@ const COMPONENTS = [
 ];
 const STEP_ORDER = ["linz", "publish_partial", "imagery_index", "imagery", "model", "census", "publish_new", "climate"];
 BATCH.components = new Set(JSON.parse(store.get("batch-components", "null") || "null") || COMPONENTS.map((c) => c.id));
-function componentSteps() {
-  const on = BATCH.components, steps = new Set(COMPONENTS.filter((c) => on.has(c.id)).flatMap((c) => c.steps));
+function componentSteps(on = BATCH.components) {
+  const steps = new Set(COMPONENTS.filter((c) => on.has(c.id)).flatMap((c) => c.steps));
   if (steps.size) steps.add("publish_new");
   // with LINZ and later components: publish once early, so the region can be explored (partly loaded) while the rest runs
   if (steps.has("linz") && [...steps].some((x) => !["linz", "publish_new"].includes(x))) steps.add("publish_partial");
   return STEP_ORDER.filter((x) => steps.has(x));
+}
+// components of a queued batch, from its unfinished jobs' steps
+const redrawProgress = () => { const el = $("#batch-progress"); if (el) el.innerHTML = progressLive(); };
+function batchComponents(batchId) {
+  const steps = new Set(PROG.jobs.filter((j) => j.batch_id === batchId && j.status !== "done").flatMap((j) => (j.params && j.params.steps) || []));
+  return new Set(COMPONENTS.filter((c) => c.steps.some((x) => steps.has(x))).map((c) => c.id));
+}
+function batchEditHTML(b) {
+  const on = PROG.editSet || batchComponents(b.id);
+  return `<div class="card" style="margin:6px 0;padding:8px"><b class="small">Components for this batch's unfinished regions</b>
+    <div class="row small" style="gap:12px;flex-wrap:wrap;margin-top:4px">${COMPONENTS.map((c) => `<label><input type="checkbox" data-bcomp="${c.id}" ${on.has(c.id) ? "checked" : ""}> ${esc(c.label)}</label>`).join("")}</div>
+    <p class="small muted" style="margin:4px 0">Will run: ${componentSteps(on).map(esc).join(" → ") || "nothing"}. Steps a region has already finished are skipped; a region in the middle of a step finishes that step first.</p>
+    <button class="btn primary" type="button" data-bcomp-save="${b.id}">Save</button> <button class="btn" type="button" data-bcomp-cancel>Cancel</button></div>`;
 }
 function componentsHTML() {
   const on = BATCH.components, noLinz = !on.has("linz") && on.size;
@@ -2152,6 +2166,12 @@ function componentsHTML() {
     <div class="row small" style="gap:12px;flex-wrap:wrap;margin-top:4px">${COMPONENTS.map((c) => `<label title="${esc(c.needs.length ? "Needs: " + c.needs.map((n) => COMPONENTS.find((x) => x.id === n).label).join(", ") : "")}"><input type="checkbox" data-comp="${c.id}" ${on.has(c.id) ? "checked" : ""}> ${esc(c.label)}</label>`).join("")}</div>
     <p class="small muted" style="margin:4px 0 0">${on.size ? `Runs: ${componentSteps().map(esc).join(" → ")}. Suburb metrics are published after LINZ (the region opens in Explore, partly loaded) and again after the chosen components.` : "Choose at least one component."}${noLinz ? ` <span class="tag warn">without LINZ</span> the other components use the LINZ sections already stored for each region; a region with none stored gets nothing from them.` : ""}</p></div>`;
 }
+document.addEventListener("change", (e) => {
+  const b = e.target && e.target.dataset && e.target.dataset.bcomp; if (!b || !PROG.editSet) return;
+  const on = PROG.editSet, add = (k) => { on.add(k); for (const n of COMPONENTS.find((c) => c.id === k).needs) add(n); };
+  if (e.target.checked) add(b); else { on.delete(b); for (const c of COMPONENTS) if (c.needs.includes(b) && b !== "linz") on.delete(c.id); }
+  redrawProgress();
+});
 document.addEventListener("change", (e) => {
   const id = e.target && e.target.dataset && e.target.dataset.comp; if (!id) return;
   const on = BATCH.components, add = (k) => { on.add(k); for (const n of COMPONENTS.find((c) => c.id === k).needs) add(n); };
@@ -2321,6 +2341,18 @@ document.addEventListener("click", async (e) => {
     try { await q(sb.from("jobs").update({ status: "queued", reason: "restarted", not_before: null }).eq("id", +rj.dataset.restartJob)); toastMsg("Job queued again: the worker picks it up on its next run"); }
     catch (err) { toastMsg("Not restarted: " + err.message); }
     PROG.at = null; await refreshProgress(); kickWorker(true); return; }
+  // edit a queued batch's components: rewrite the steps of its unfinished jobs
+  const be = t.closest && t.closest("[data-bcomp-edit]");
+  if (be) { const id = +be.dataset.bcompEdit; PROG.edit = PROG.edit === id ? null : id; PROG.editSet = PROG.edit ? batchComponents(id) : null; redrawProgress(); return; }
+  if (t.closest && t.closest("[data-bcomp-cancel]")) { PROG.edit = null; PROG.editSet = null; redrawProgress(); return; }
+  const bs = t.closest && t.closest("[data-bcomp-save]");
+  if (bs && can("editor")) { const id = +bs.dataset.bcompSave, on = PROG.editSet || batchComponents(id), steps = componentSteps(on);
+    if (!steps.length) return toastMsg("Choose at least one component");
+    const jobs = PROG.jobs.filter((j) => j.batch_id === id && j.status !== "done"); bs.disabled = true;
+    try { for (const j of jobs) await q(sb.from("jobs").update({ params: { ...(j.params || {}), steps, components: [...on] } }).eq("id", j.id));
+      toastMsg(`Updated ${jobs.length} region job(s): ${steps.join(" → ")}`); }
+    catch (err) { toastMsg("Not saved: " + err.message); }
+    PROG.edit = null; PROG.editSet = null; PROG.at = null; await refreshProgress(); return; }
   // publish what's loaded so far, in bulk: one early-publish job per unfinished region of the batch (published regions are skipped)
   const pb = t.closest && t.closest("[data-publish-batch]");
   if (pb && can("editor")) { pb.disabled = true;
