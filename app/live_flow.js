@@ -161,3 +161,22 @@ document.addEventListener("click", async (e) => {
   const r = t.closest && t.closest("[data-rkey]");
   if (r) { try { await q(sb.rpc("admin_revoke_review_key", { p_prefix: r.dataset.rkey, p_revoked: r.dataset.rkeyOn === "1" })); await loadAdminExtras(); } catch (err) { toastMsg(err.message); } }
 });
+
+
+// ---------------------------------------------------------------- the selected study is loaded on start
+// After a reload the browser keeps only part of the study (selected TAs, matches); the saved study itself (provider choices,
+// acronyms per territory, allocations, timelines) is read again whenever the selected study isn't the one loaded yet, so PRVDR and
+// the rest show as configured. It never replaces a study that is already loaded (and its files) in this session.
+let STUDY_LOADING = null;
+async function ensureStudyLoaded() {
+  if (!STUDY.id || BATCH.isNew || !can("editor")) return;
+  if (BATCH.config && String(BATCH.config.id) === String(STUDY.id)) return;
+  if (STUDY_LOADING) return STUDY_LOADING;
+  STUDY_LOADING = (async () => {
+    try { await loadBatchData(); if (BATCH.configs.some((c) => String(c.id) === String(STUDY.id))) { loadConfig(STUDY.id, true); render(); } }
+    catch (e) { console.warn("study not loaded:", e.message); }
+    finally { STUDY_LOADING = null; }
+  })();
+  return STUDY_LOADING;
+}
+{ const _ls = loadStudies; loadStudies = async (...a) => { const r = await _ls(...a); ensureStudyLoaded(); return r; }; }
