@@ -149,6 +149,16 @@ function filePrvdr(c) {
 }
 // precedence: chosen by hand > your lists > a loaded saved configuration > the TA's saved provider
 const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0] || "";
+// The study's PRVDR acronym for a territory: as saved with the study; else the acronym your files use for the chosen provider; else
+// the acronym your provider-code matches map to it (one used only for this territory first); else the provider code itself.
+function configuredAcronym(c) {
+  const code = prvdrFor(c); if (BATCH.acr && BATCH.acr[c] && (!code || (BATCH.matches[norm(BATCH.acr[c])] || code) === code)) return BATCH.acr[c];
+  const f = filePrvdr(c); if (f && f.code === code && f.acronyms && f.acronyms.length) return f.acronyms[0];
+  const keys = Object.entries(BATCH.matches || {}).filter(([, v]) => v === code).map(([k]) => k.toUpperCase());
+  return keys[0] || code || "";
+}
+// the provider's legal name (providers table), else the code
+function providerLegalName(code) { const p = (BATCH.providers || []).find((x) => x.prvdr === code); return (p && p.name) || ((D && D.water_rates) || []).find((w) => w.PROVIDER === code)?.name || code || ""; }
 function prvdrSource(c) {
   if (BATCH.prvdr[c]) return "chosen by you";
   const f = filePrvdr(c);
@@ -208,7 +218,7 @@ async function loadBatchData() {
   if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 }));
   if (!BATCH.providers.length) BATCH.providers = await q(sb.from("providers").select("prvdr,legacy_prvdr,name,aliases,territories").order("prvdr"));
   if (can("editor")) {
-    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,timelines,updated_at").order("updated_at", { ascending: false }));
+    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,timelines,prvdr_acronyms,updated_at").order("updated_at", { ascending: false }));
     BATCH.batches = await q(sb.from("batches").select("id,name,ta_codes,keep_mode,status,created_at").order("id", { ascending: false }).limit(10));
     BATCH.regions = await q(sb.from("regions").select("id,name,ta_code,status,scope,batch_id,prvdr"));
     const ids = BATCH.regions.filter((r) => r.batch_id).map((r) => r.id);
@@ -929,7 +939,7 @@ function configBar() {
 }
 function configRec(name) {
   const sc = scopeByTA(), sel = [...BATCH.sel].sort();
-  return { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])),
+  return { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])), prvdr_acronyms: Object.fromEntries(sel.map((c) => [c, configuredAcronym(c)])),
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
     prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     suburb_picks: Object.fromEntries(Object.entries(BATCH.picks).filter(([c]) => BATCH.sel.has(c))),
@@ -951,7 +961,7 @@ function loadConfig(id) {
   BATCH.cfgPrvdr = { ...c.prvdr_by_ta }; BATCH.prvdr = Object.fromEntries((c.prvdr_manual || []).filter((k) => c.prvdr_by_ta[k]).map((k) => [k, c.prvdr_by_ta[k]]));
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
-  BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; migrateTl();
+  BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; BATCH.acr = { ...(c.prvdr_acronyms || {}) }; migrateTl();
   BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
 }
 async function tileCSV(batchId) {

@@ -766,3 +766,6 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - Every charge row carries its territorial authority; rows of providers that serve one territory were stamped with it.
   - Billing and `water_charges_by_period.csv` select charges by the region's territory, whichever provider bills it. A study may link a region to a provider outside that provider's jurisdiction; the charges shown stay the territory's, and the differing link is flagged (STUDY_LINKED_PROVIDER in the export).
   - Tiaki Wai's per-city rows cite each city's own billing page; all their figures appear in the Pricing Policy's section for that city.
+- **PRVDR vs Provider.**
+  - **PRVDR** is the study's own acronym for each territory, as configured in 2.1: the acronym your provider files use for the chosen provider, else your provider-code matches, else the provider code. It is saved with the study (`batch_configs.prvdr_acronyms`, migration 0054) and shown in the Overview and *Regions in this study* tables, with the provider code and legal name on hover.
+  - **Provider** columns (those tables, Billing, the Explore summary tables) show the provider's legal name (`providers.name`).

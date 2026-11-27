@@ -918,8 +918,8 @@ V.region = () => {
       ${last.length ? `<button class="btn" type="button" id="ov-load-last">Load last session's regions (${last.length})</button>` : ""}
       ${loaded.length ? `<button class="btn" type="button" data-goto-stage="explore">Explore loaded regions (${loaded.length}) →</button>` : ""}</div>
     <div class="grid" style="grid-template-columns:minmax(0,1.2fr) minmax(300px,1fr);gap:12px;align-items:start"><div class="card" id="land-map"><p class="muted small">Loading map…</p></div>
-    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l">${esc(r.prvdr || "–")}</td>
+    <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The study's provider acronym (as configured in 2.1)">PRVDR</th><th class="l">Provider</th><th class="l">Status</th><th class="l">Prepared</th><th class="l">Detail</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr${r.id === region ? ' style="background:var(--accent-soft)"' : ""}><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc((r.territorial_authorities || [])[0] || "–")}</td><td class="l" title="${esc(r.prvdr || "")}">${esc((r.ta_code && typeof configuredAcronym === "function" && BATCH.sel.has(r.ta_code) ? configuredAcronym(r.ta_code) : "") || r.prvdr || "–")}</td><td class="l small">${esc(r.prvdr ? providerLegalName(r.prvdr) : "–")}</td>
       <td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status || "–")}</span></td><td class="l small">${esc((r.created_at || "").slice(0, 10))}</td>
       <td class="l">${tag(r) || `<button class="btn" type="button" data-ov-load="${esc(r.id)}" style="padding:1px 8px">Load</button>`}</td></tr>`).join("")}</tbody></table></div></div>` : `<div class="card"><p>${st ? `The study <b>${esc(st.name)}</b> has no regions in the database yet.` : "No regions in the database yet."} Prepare them in <b>2 · Configure</b> and <b>3 · Load</b>.</p></div>`}`;
 };
@@ -947,7 +947,8 @@ function detailedOverviewHTML() {
   const yrs = (x) => [...new Set(x.suburbs.flatMap((s) => Object.keys(s.census || {})))].sort().join(", ") || "–";
   const clim = (x) => { const c = Object.values(x.climate_cells || {}); if (!c.length) return "–"; const m = c.flatMap((y) => y.months || []).filter(Boolean).sort(), n = `${c.length} cell${c.length === 1 ? "" : "s"}`; return m.length ? `${n}, ${m[0].slice(0, 4)}–${m[m.length - 1].slice(0, 4)}` : `${n}, no months yet`; };
   const row = (k, x) => { const sub = x.suburbs.filter(resident), pools = sub.reduce((t, s) => t + (+s.pools || 0), 0);
-    return { k, name: x.label, ta: x.ta || "–", prvdr: x.provider || "–", suburbs: x.suburbs.length, housing: sub.length, sections: sub.reduce((t, s) => t + (s.sections || 0), 0), sa2: x.sa2.length,
+    const tc = ((D.index || []).find((r) => r.id === k) || {}).ta_code, acr = tc && typeof configuredAcronym === "function" && BATCH.sel.has(tc) ? configuredAcronym(tc) : "";
+    return { k, name: x.label, ta: x.ta || "–", prvdr: acr || x.provider || "–", prvdr_code: x.provider || "", provider_name: typeof providerLegalName === "function" ? providerLegalName(x.provider) : (x.provider || "–"), suburbs: x.suburbs.length, housing: sub.length, sections: sub.reduce((t, s) => t + (s.sections || 0), 0), sa2: x.sa2.length,
       imagery: x.capture_id || "–", pools, garden: sub.some((s) => s.GardSize != null), census: yrs(x), climate: clim(x), status: x.status || "–" }; };
   const rows = regs.map(([k, x]) => row(k, x)), tot = (f) => rows.reduce((t, r) => t + r[f], 0);
   const cell = (v) => typeof v === "number" ? fmt(v) : esc(v);
@@ -972,10 +973,10 @@ function detailedOverviewHTML() {
       </tbody></table></div>
     <div class="card"><h3>About this overview</h3><p class="small">Everything shown comes from data already prepared and stored, loaded once when you signed in. Choose one statistic to colour the suburbs, add pool, green-space and rainfall symbols on top, and zoom in: at full zoom, detected pools and imagery chips appear. Each layer's source is linked in the legend and below.</p></div></div>
   <h2>${st ? "Regions in this study" : "All regions in the database"}</h2>
-  <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l">PRVDR</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l">${esc(r.prvdr)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
+  <div class="card scroll"><table><thead><tr><th class="l">Region</th><th class="l">TA</th><th class="l" title="The study's provider acronym (as configured in 2.1)">PRVDR</th><th class="l">Provider</th><th>Suburbs</th><th>With housing</th><th>Sections</th><th>SA2s</th><th class="l">Imagery</th><th>Pools</th><th class="l">Gardens</th><th class="l">Census</th><th class="l">Climate</th><th class="l">Status</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr data-reg="${esc(r.k)}" style="cursor:pointer${r.k === region ? ";background:var(--accent-soft)" : ""}"><td class="l"><b>${esc(r.name)}</b></td><td class="l">${esc(r.ta)}</td><td class="l" title="${esc(`${r.prvdr_code} · ${r.provider_name}`)}">${esc(r.prvdr)}</td><td class="l small">${esc(r.provider_name)}</td><td>${cell(r.suburbs)}</td><td>${cell(r.housing)}</td><td>${cell(r.sections)}</td><td>${cell(r.sa2)}</td>
       <td class="l small">${esc(r.imagery)}</td><td>${cell(r.pools)}</td><td class="l">${r.garden ? "yes" : "–"}</td><td class="l">${esc(r.census)}</td><td class="l small">${esc(r.climate)}</td><td class="l"><span class="tag ${r.status === "published" ? "ok" : r.status === "draft" ? "warn" : "info"}">${esc(r.status)}</span></td></tr>`).join("")}
-    ${rows.length > 1 ? `<tr><td class="l"><b>Total</b></td><td></td><td></td><td><b>${fmt(tot("suburbs"))}</b></td><td><b>${fmt(tot("housing"))}</b></td><td><b>${fmt(tot("sections"))}</b></td><td><b>${fmt(tot("sa2"))}</b></td><td></td><td><b>${fmt(tot("pools"))}</b></td><td colspan="4"></td></tr>` : ""}</tbody></table></div>${sourcesHTML()}`;
+    ${rows.length > 1 ? `<tr><td class="l"><b>Total</b></td><td></td><td></td><td></td><td><b>${fmt(tot("suburbs"))}</b></td><td><b>${fmt(tot("housing"))}</b></td><td><b>${fmt(tot("sections"))}</b></td><td><b>${fmt(tot("sa2"))}</b></td><td></td><td><b>${fmt(tot("pools"))}</b></td><td colspan="4"></td></tr>` : ""}</tbody></table></div>${sourcesHTML()}`;
 };
 
 // ---------------------------------------------------------------- validation: real labelling (labellers)
@@ -1358,6 +1359,16 @@ function filePrvdr(c) {
 }
 // precedence: chosen by hand > your lists > a loaded saved configuration > the TA's saved provider
 const prvdrFor = (c) => BATCH.prvdr[c] || (filePrvdr(c) || {}).code || BATCH.cfgPrvdr[c] || (taOf(c).prvdrs || [])[0] || "";
+// The study's PRVDR acronym for a territory: as saved with the study; else the acronym your files use for the chosen provider; else
+// the acronym your provider-code matches map to it (one used only for this territory first); else the provider code itself.
+function configuredAcronym(c) {
+  const code = prvdrFor(c); if (BATCH.acr && BATCH.acr[c] && (!code || (BATCH.matches[norm(BATCH.acr[c])] || code) === code)) return BATCH.acr[c];
+  const f = filePrvdr(c); if (f && f.code === code && f.acronyms && f.acronyms.length) return f.acronyms[0];
+  const keys = Object.entries(BATCH.matches || {}).filter(([, v]) => v === code).map(([k]) => k.toUpperCase());
+  return keys[0] || code || "";
+}
+// the provider's legal name (providers table), else the code
+function providerLegalName(code) { const p = (BATCH.providers || []).find((x) => x.prvdr === code); return (p && p.name) || ((D && D.water_rates) || []).find((w) => w.PROVIDER === code)?.name || code || ""; }
 function prvdrSource(c) {
   if (BATCH.prvdr[c]) return "chosen by you";
   const f = filePrvdr(c);
@@ -1417,7 +1428,7 @@ async function loadBatchData() {
   if (!BATCH.tas) BATCH.tas = await q(sb.rpc("ta_outlines", { p_tol: 200 }));
   if (!BATCH.providers.length) BATCH.providers = await q(sb.from("providers").select("prvdr,legacy_prvdr,name,aliases,territories").order("prvdr"));
   if (can("editor")) {
-    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,timelines,updated_at").order("updated_at", { ascending: false }));
+    BATCH.configs = await q(sb.from("batch_configs").select("id,name,ta_codes,keep_mode,prvdr_by_ta,prvdr_manual,scope_by_ta,prvdr_matches,allocations,suburb_picks,timelines,prvdr_acronyms,updated_at").order("updated_at", { ascending: false }));
     BATCH.batches = await q(sb.from("batches").select("id,name,ta_codes,keep_mode,status,created_at").order("id", { ascending: false }).limit(10));
     BATCH.regions = await q(sb.from("regions").select("id,name,ta_code,status,scope,batch_id,prvdr"));
     const ids = BATCH.regions.filter((r) => r.batch_id).map((r) => r.id);
@@ -2138,7 +2149,7 @@ function configBar() {
 }
 function configRec(name) {
   const sc = scopeByTA(), sel = [...BATCH.sel].sort();
-  return { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])),
+  return { name, ta_codes: sel, keep_mode: BATCH.keep, prvdr_by_ta: Object.fromEntries(sel.map((c) => [c, prvdrFor(c)])), prvdr_acronyms: Object.fromEntries(sel.map((c) => [c, configuredAcronym(c)])),
     scope_by_ta: Object.fromEntries(Object.entries(sc).map(([c, s]) => [c, s.keep])), updated_at: new Date().toISOString(),
     prvdr_manual: Object.keys(BATCH.prvdr).filter((c) => BATCH.sel.has(c)),
     suburb_picks: Object.fromEntries(Object.entries(BATCH.picks).filter(([c]) => BATCH.sel.has(c))),
@@ -2160,7 +2171,7 @@ function loadConfig(id) {
   BATCH.cfgPrvdr = { ...c.prvdr_by_ta }; BATCH.prvdr = Object.fromEntries((c.prvdr_manual || []).filter((k) => c.prvdr_by_ta[k]).map((k) => [k, c.prvdr_by_ta[k]]));
   BATCH.matches = Object.fromEntries(Object.entries(c.prvdr_matches || {}).map(([k, v]) => [norm(k), v]));
   BATCH.alloc = Object.fromEntries((c.allocations || []).map((a) => [allocKey(a.file, a.name, a.territory || ""), a]));
-  BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; migrateTl();
+  BATCH.picks = { ...(c.suburb_picks || {}) }; BATCH.tl = { ...(c.timelines || {}) }; BATCH.acr = { ...(c.prvdr_acronyms || {}) }; migrateTl();
   BATCH.savedScope = c.scope_by_ta || {}; BATCH.files = {}; BATCH.fileNames = {}; BATCH.valid = {}; saveSel(); toastMsg(`Loaded "${c.name}"`); drawBatch();
 }
 async function tileCSV(batchId) {
@@ -3581,12 +3592,12 @@ function tablesHTML() {
   const head = (k, l, t = "") => `<th class="${k === "name" || k === "ta" || k === "prov" ? "l" : ""}" data-tbl-sort="${esc(k)}" style="cursor:pointer;white-space:nowrap" title="${esc(t || "Sort")}">${esc(l)}${TBL.sort === k ? (TBL.dir > 0 ? " ▲" : " ▼") : ""}</th>`;
   const prov = providerRows();
   const pTable = `<table><thead><tr><th class="l">Provider</th><th class="l">Regions</th><th>Suburbs</th><th>Sections</th>${ms.map((m) => `<th title="${esc(m.label)} (${esc(m.src || "")})">${esc(m.label)}</th>`).join("")}</tr></thead><tbody>
-    ${prov.map(({ p, rows, regions, sections }) => `<tr><td class="l"><b>${esc(p)}</b> <span class="small muted">${esc(provName(p))}</span></td><td class="l small">${esc(regions.join(", "))}</td><td>${fmt(rows.length)}</td><td>${fmt(sections)}</td>
+    ${prov.map(({ p, rows, regions, sections }) => `<tr><td class="l" title="${esc(p)}"><b>${esc(providerLegalName(p))}</b></td><td class="l small">${esc(regions.join(", "))}</td><td>${fmt(rows.length)}</td><td>${fmt(sections)}</td>
       ${ms.map((m) => { const a = tblAggregate(rows, m); return a ? `<td title="${esc(`${a.weighted ? "Mean weighted by sections" : "Mean"}; median ${fmt(a.med, m.d)}; range ${fmt(a.min, m.d)}–${fmt(a.max, m.d)}; ${a.n} suburbs`)}">${fmt(a.mean, m.d)}</td>` : "<td>–</td>"; }).join("")}</tr>`).join("") || `<tr><td colspan="${4 + ms.length}" class="muted">No suburbs in scope.</td></tr>`}</tbody></table>`;
   const key = (r) => TBL.sort === "name" ? mName(r.s) : TBL.sort === "ta" ? (r.s.ta || r.g.label) : TBL.sort === "prov" ? (r.g.provider || "") : TBL.sort === "sections" ? (+r.s.sections || 0) : (() => { const m = METRICS.find((x) => x.id === TBL.sort); const v = m && m.get(r.s); return v == null || !isFinite(v) ? null : v; })();
   const sorted = subs.slice().sort((a, b) => { const x = key(a), y = key(b); if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * TBL.dir; });
   const sTable = `<table><thead><tr>${head("name", "Suburb")}${head("ta", "Territory")}${head("prov", "Provider")}${head("sections", "Sections")}${ms.map((m) => head(m.id, m.label, `${m.label} (${m.src || ""}): click to sort`)).join("")}</tr></thead><tbody>
-    ${sorted.map((r) => `<tr><td class="l">${esc(mName(r.s))}</td><td class="l small">${esc(r.s.ta || r.g.label)}</td><td class="l small">${esc(r.g.provider || "–")}</td><td>${fmt(r.s.sections)}</td>${ms.map((m) => `<td>${fmt(m.get(r.s), m.d)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    ${sorted.map((r) => `<tr><td class="l">${esc(mName(r.s))}</td><td class="l small">${esc(r.s.ta || r.g.label)}</td><td class="l small" title="${esc(r.g.provider || "")}">${esc(r.g.provider ? providerLegalName(r.g.provider) : "–")}</td><td>${fmt(r.s.sections)}</td>${ms.map((m) => `<td>${fmt(m.get(r.s), m.d)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   return `<h2 id="tbl-top">Summary tables</h2>
     <div class="row" style="margin-bottom:8px"><label class="small">Data type <select id="tbl-type"><option value="all" ${TBL.type === "all" ? "selected" : ""}>All statistics</option>${tblGroups().map((g) => `<option value="${esc(g)}" ${TBL.type === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select></label>
       <span class="small muted">${st ? `Study: ${esc(st.name)}` : "All loaded regions"} · ${fmt(subs.length)} suburbs with residential sections</span>
@@ -3652,9 +3663,9 @@ let billingTable = function () {
   if (!BILL.rows.length) return `<p class="small muted">${BILL.err ? "Charges unavailable: " + esc(BILL.err) : "No charges recorded for these regions yet."}</p>`;
   const today = new Date().toISOString().slice(0, 10), regs = billRegions();
   const body = regs.map((reg) => { const ch = regionCharges(reg, BILL.rows);
-    if (!ch.length) return `<tr><td class="l"><b>${esc(reg.name)}</b></td><td class="l small">${esc(reg.ta_name)}</td><td class="l small">${esc(reg.prvdr || "–")}</td><td colspan="8" class="muted small">No charges recorded for this territory yet.</td></tr>`;
+    if (!ch.length) return `<tr><td class="l"><b>${esc(reg.name)}</b></td><td class="l small">${esc(reg.ta_name)}</td><td class="l small">${esc(reg.prvdr ? providerLegalName(reg.prvdr) : "–")}</td><td colspan="8" class="muted small">No charges recorded for this territory yet.</td></tr>`;
     return ch.map((r, i) => { const cur = r.valid_from <= today && (!r.end || r.end >= today);
-      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}>${i === 0 ? `<td class="l" rowspan="${ch.length}"><b>${esc(reg.name)}</b></td><td class="l small" rowspan="${ch.length}">${esc(reg.ta_name)}</td><td class="l small" rowspan="${ch.length}">${esc(r.prvdr)} <span class="muted">${esc((r.providers || {}).name || "")}</span>${r.differs ? `<br><span class="tag warn" title="The study links this region to ${esc(r.linked)}; the charges shown are the territory's, billed by ${esc(r.prvdr)}">study links ${esc(r.linked)}</span>` : ""}</td>` : ""}
+      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}>${i === 0 ? `<td class="l" rowspan="${ch.length}"><b>${esc(reg.name)}</b></td><td class="l small" rowspan="${ch.length}">${esc(reg.ta_name)}</td><td class="l small" rowspan="${ch.length}"><span title="${esc(r.prvdr)}">${esc((r.providers || {}).name || providerLegalName(r.prvdr))}</span>${r.differs ? `<br><span class="tag warn" title="The study links this region to ${esc(r.linked)}; the charges shown are the territory's, billed by ${esc(r.prvdr)}">study links ${esc(providerLegalName(r.linked))}</span>` : ""}</td>` : ""}
         <td class="l small">${esc(r.valid_from)} to ${r.end ? esc(r.end) : "now"}${cur ? ' <span class="tag ok">current</span>' : ""}</td><td class="l small">${esc(r.charging_type || "–")}</td>
         <td>${r.fixed_pa == null ? "–" : "$" + fmt(r.fixed_pa, 2)}</td><td>${r.volumetric_pa == null ? "–" : "$" + fmt(r.volumetric_pa, 2)}</td><td>${r.threshold_lpd == null ? "–" : fmt(r.threshold_lpd)}</td>
         <td class="small" title="${r.value_rate == null ? "" : esc(`${r.value_rate} per $ of ${r.value_basis || "value"}`)}">${r.value_rate == null ? "–" : `$${fmt(r.value_rate * 1e6)} per $1M ${esc(r.value_basis || "value")}`}</td>
