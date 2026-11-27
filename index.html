@@ -2110,7 +2110,7 @@ function progressLive() {
         const done = steps.filter((st) => last[st] && (last[st].status === "done" || last[st].status === "skipped")).length; return { j, steps, last, runs, done }; });
       const tot = per.reduce((t, p) => t + Math.max(1, p.steps.length), 0), dn = per.reduce((t, p) => t + (p.j.status === "done" ? Math.max(1, p.steps.length) : p.done), 0), pct = tot ? Math.round(100 * dn / tot) : 0;
       const failed = jobs.filter((j) => j.status === "failed");
-      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}</span></div>
+      return `<div style="margin:8px 0"><div class="row small" style="justify-content:space-between"><span><b>${esc(b.name || "Batch " + b.id)}</b> <span class="muted">${esc(new Date(b.created_at).toLocaleString())}</span></span><span>${pct}% · ${jobs.filter((j) => j.status === "done").length}/${jobs.length} regions done${failed.length ? ` · <button class="btn" type="button" data-retry-batch="${b.id}" style="padding:0 8px" title="Queue the failed regions again (finished steps are skipped) and start the worker">↻ Retry failed (${failed.length})</button>` : ""}${jobs.some((j) => j.status !== "done") ? ` · <button class="btn" type="button" data-publish-batch="${b.id}" style="padding:0 8px" title="Publish the suburb statistics stored so far for every unfinished region of this batch, so they open in Explore (partly loaded) while the rest is prepared">⤴ Publish what's loaded so far</button>` : ""}</span></div>
         <div class="bar-out" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Batch progress" style="height:8px;margin:4px 0"><div class="bar-in" style="width:${pct}%"></div></div>
         <table class="small" style="width:100%"><tbody>${per.map(({ j, steps, last, runs }) => { const reg = (BATCH.regions.find((r) => r.id === j.region_id) || {}).name || j.region_id, lr = runs[runs.length - 1];
           const lastAct = lr ? (lr.updated_at || lr.started_at) : j.created_at, stalled = j.status === "running" && lastAct && Date.now() - new Date(lastAct).getTime() > 20 * 60000;
@@ -2321,6 +2321,15 @@ document.addEventListener("click", async (e) => {
     try { await q(sb.from("jobs").update({ status: "queued", reason: "restarted", not_before: null }).eq("id", +rj.dataset.restartJob)); toastMsg("Job queued again: the worker picks it up on its next run"); }
     catch (err) { toastMsg("Not restarted: " + err.message); }
     PROG.at = null; await refreshProgress(); kickWorker(true); return; }
+  // publish what's loaded so far, in bulk: one early-publish job per unfinished region of the batch (published regions are skipped)
+  const pb = t.closest && t.closest("[data-publish-batch]");
+  if (pb && can("editor")) { pb.disabled = true;
+    const ids = [...new Set(PROG.jobs.filter((j) => j.batch_id === +pb.dataset.publishBatch && j.status !== "done").map((j) => j.region_id))]
+      .filter((id) => (((D.index || []).find((r) => r.id === id) || {}).status) !== "published");
+    try { if (ids.length) await q(sb.from("jobs").insert(ids.map((id) => ({ type: "refresh", region_id: id, params: { steps: ["publish_partial"] }, status: "queued" }))));
+      toastMsg(ids.length ? `Publishing what's loaded for ${ids.length} region(s): they open in Explore once the worker has run` : "Nothing to publish: the batch's regions are already published"); }
+    catch (err) { toastMsg("Not queued: " + err.message); }
+    PROG.at = null; await refreshProgress(); if (ids.length) kickWorker(true); return; }
   const rb = t.closest && t.closest("[data-retry-batch]");
   if (rb && can("editor")) { rb.disabled = true; const ids = PROG.jobs.filter((j) => j.batch_id === +rb.dataset.retryBatch && j.status === "failed").map((j) => j.id);
     try { if (ids.length) await q(sb.from("jobs").update({ status: "queued", reason: null, not_before: null }).in("id", ids)); toastMsg(`${ids.length} region job(s) queued again`); }
