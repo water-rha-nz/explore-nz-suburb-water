@@ -2027,7 +2027,7 @@ function loadHTML() {
       return `<tr><td class="l">${esc(taOf(c).name)}</td><td class="l">${esc(prvdrFor(c))}</td><td>${r && r.status === "done" ? (r.scoped ? r.matched.length : r.linz.length) : "–"}</td>
         <td class="l" style="white-space:normal">${ready.includes(c) ? '<span class="tag ok">ready</span>' : `<span class="tag ${notReady.includes(c) ? "warn" : "bad"}">${esc(why(c))}</span>`}</td></tr>`; }).join("")}</tbody></table>
     <p class="small muted">Estimated Open-Meteo use ≈ ${fmt(tot)} weighted calls (budget ${fmt(budget)}/day) → about ${Math.max(1, Math.ceil(tot / budget))} day(s), plus imagery time. Only validated LINZ suburbs are loaded.</p>
-    ${can("editor") ? `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" id="batch-queue" type="button" ${ready.length ? "" : "disabled"}>Queue batch (${ready.length} region${ready.length === 1 ? "" : "s"})</button>
+    ${can("editor") ? componentsHTML() : ""}${can("editor") ? `<div class="row" style="gap:8px;align-items:center"><button class="btn primary" id="batch-queue" type="button" ${ready.length ? "" : "disabled"}>Queue batch (${ready.length} region${ready.length === 1 ? "" : "s"})</button>
       ${notReady.length ? `<button class="btn" type="button" id="load-validate">Validate the rest (${notReady.length})</button>` : ""}
       ${!ready.length ? `<span class="small muted">${sel.length ? "Nothing is ready yet: validate the TAs (2.3) first." : "Select TAs in 2.1 first."}</span>` : ready.length < sel.length ? `<span class="small muted">${sel.length - ready.length} TA(s) aren't ready and won't be queued.</span>` : ""}</div>
     <div id="batch-progress">${progressLive()}</div>` : lock("editor", "Queuing batches")}</div>
@@ -2127,11 +2127,40 @@ function progressHTML() {
       <td>${r.status === "published" ? '<span class="tag ok">published</span>' : j && j.status === "done" ? `<button class="btn" data-publish="${r.id}" type="button">Publish</button>` : `<span class="tag info">${esc(r.status)}</span>`}</td></tr>`; }).join("")}</tbody></table>
     <div class="row" style="margin-top:8px"><button class="btn" data-tiles="${b.id}" type="button">Download tile list (CSV)</button><button class="btn" type="button" id="batch-refresh">Refresh</button></div></div>`; }).join("")}`;
 }
+// ---- components to load (3 Load): which preparation steps a queued batch runs. Ticking one ticks what it needs; the metrics
+// publish always runs last for the regions. Unticking LINZ keeps the others: they then use LINZ data already stored for the region.
+const COMPONENTS = [
+  { id: "linz", label: "LINZ suburbs, sections and buildings", steps: ["linz"], needs: [] },
+  { id: "imagery", label: "Imagery: pools and gardens", steps: ["imagery_index", "imagery"], needs: ["linz"] },
+  { id: "model", label: "Learned pool check (needs review labels)", steps: ["model"], needs: ["imagery"] },
+  { id: "census", label: "Census (Stats NZ)", steps: ["census"], needs: ["linz"] },
+  { id: "climate", label: "Climate (Open-Meteo)", steps: ["climate"], needs: ["linz"] },
+];
+const STEP_ORDER = ["linz", "imagery_index", "imagery", "model", "census", "publish_new", "climate"];
+BATCH.components = new Set(JSON.parse(store.get("batch-components", "null") || "null") || COMPONENTS.map((c) => c.id));
+function componentSteps() {
+  const on = BATCH.components, steps = new Set(COMPONENTS.filter((c) => on.has(c.id)).flatMap((c) => c.steps));
+  if (steps.size) steps.add("publish_new");
+  return STEP_ORDER.filter((x) => steps.has(x));
+}
+function componentsHTML() {
+  const on = BATCH.components, noLinz = !on.has("linz") && on.size;
+  return `<div class="card" style="margin:8px 0"><b class="small">Components to load</b>
+    <div class="row small" style="gap:12px;flex-wrap:wrap;margin-top:4px">${COMPONENTS.map((c) => `<label title="${esc(c.needs.length ? "Needs: " + c.needs.map((n) => COMPONENTS.find((x) => x.id === n).label).join(", ") : "")}"><input type="checkbox" data-comp="${c.id}" ${on.has(c.id) ? "checked" : ""}> ${esc(c.label)}</label>`).join("")}</div>
+    <p class="small muted" style="margin:4px 0 0">${on.size ? `Runs: ${componentSteps().map(esc).join(" → ")}. Suburb metrics are recomputed after the chosen components.` : "Choose at least one component."}${noLinz ? ` <span class="tag warn">without LINZ</span> the other components use the LINZ sections already stored for each region; a region with none stored gets nothing from them.` : ""}</p></div>`;
+}
+document.addEventListener("change", (e) => {
+  const id = e.target && e.target.dataset && e.target.dataset.comp; if (!id) return;
+  const on = BATCH.components, add = (k) => { on.add(k); for (const n of COMPONENTS.find((c) => c.id === k).needs) add(n); };
+  if (e.target.checked) add(id); else { on.delete(id); for (const c of COMPONENTS) if (c.needs.includes(id) && id !== "linz") on.delete(c.id); }
+  store.set("batch-components", JSON.stringify([...on])); drawBatch();
+});
 async function queueBatch() {
   const sc = scopeByTA(), v = BATCH.valid;
   // only TAs that are validated and have something to load
   const sel = [...BATCH.sel].sort().filter((c) => v[c] && v[c].status === "done" && !((v[c].scoped && !v[c].matched.length) || (!v[c].scoped && taOf(c).parts > 1)));
   if (!sel.length) return toastMsg("Nothing is ready to queue: validate the TAs first");
+  const steps = componentSteps(); if (!steps.length) return toastMsg("Choose at least one component to load");
   const [b] = await q(sb.from("batches").insert({ name: `${BATCH.config ? BATCH.config.name + " · " : ""}${sel.length} region(s), ${new Date().toLocaleDateString("en-NZ")}`, ta_codes: sel, keep_mode: BATCH.keep }).select("id"));
   for (const c of sel) {
     const t = taOf(c), r = v[c], s = sc[c], p = prvdrFor(c);
@@ -2146,7 +2175,7 @@ async function queueBatch() {
         return [`${norm(m.mname)}|${norm(m.linz.name)}`, { region_id: id, m_suburb: m.mname, m_territory: x.territory || t.name, prvdr: x.prvdr || p, other_spellings: x.spellings || null, linz_ref: m.linz.name, source_file: m.manual ? "allocation" : x.file }]; })).values()];
       if (rows.length) await q(sb.from("m_suburbs").insert(rows));
     }
-    await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps: ["linz", "imagery_index", "imagery", "model", "census", "publish_new", "climate"], timeline: tlFor(c) } }));
+    await q(sb.from("jobs").insert({ type: "prepare", region_id: id, batch_id: b.id, status: "queued", params: { steps, components: [...BATCH.components], timeline: tlFor(c) } }));
   }
   toastMsg(`Queued ${sel.length} region job(s): progress shows below; the worker runs them one at a time`); PROG.at = null; setTimeout(refreshProgress, 0); kickWorker(true);
   await loadBatchData(); drawBatch();

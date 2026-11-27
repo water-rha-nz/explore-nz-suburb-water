@@ -771,3 +771,15 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - **Provider** is the legal entity that acronym stands for, inferred from names, not from the territory a provider serves: an exact code, alias or name match among providers, else the names whose initials spell the acronym (providers' legal names and each territory's council, e.g. WCC = Wellington City Council), preferring the one tied to the acronym's own territory. Blank when nothing matches.
   - Billing stays keyed by territory; its Provider column names whoever bills that territory.
   - After a reload, the selected study is read again from the database (quietly) whenever it isn't the one already loaded, so PRVDR and the other saved choices show as configured. A study already loaded in the session, with its files, is never replaced.
+
+## 37. Components to load (3 · Load)
+
+- A checklist above *Queue batch* chooses what a batch prepares:
+  - LINZ suburbs, sections and buildings (`linz`);
+  - imagery: pools and gardens (`imagery_index`, `imagery`; needs LINZ);
+  - learned pool check (`model`; needs imagery);
+  - census (`census`; needs LINZ);
+  - climate (`climate`; needs LINZ).
+- Ticking a component ticks what it needs. Unticking imagery unticks the learned pool check. Unticking LINZ keeps the others, which then use the LINZ sections already stored for each region (flagged).
+- `publish_new` (suburb metrics) always runs after the chosen components, in the order linz → imagery_index → imagery → model → census → publish_new → climate.
+- The choice is remembered in the browser and recorded in each job (`params.steps`, `params.components`); the worker runs exactly those steps.
