@@ -784,3 +784,12 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 - `publish_new` (suburb metrics) always runs after the chosen components, in the order linz → imagery_index → imagery → model → census → publish_new → climate.
 - The choice is remembered in the browser and recorded in each job (`params.steps`, `params.components`); the worker runs exactly those steps.
 - **Commerce Commission charges disclosures** (Water Services Information Disclosure Determination 2026, clause 4.8 *Charges and IFF levies*) are the preferred pricing-policy source per provider and territory. They use a standard template: one row per charge with service, charge type, property use, area, circumstances, amount and basis, plus a cover sheet naming the provider, operating model and districts. First used for IAWAI (Hamilton City 016: $42 fixed + 0.00148824 per $ of capital value; Waikato District 013: $2,490.61 + $2.74/m³ metered; migration 0055).
+
+## 38. Valid geometries
+
+- Some outlines delivered by LINZ are invalid polygons; a union over them fails ("TopologyException: unable to assign free hole to a shell"), which broke `region_centroids` at sign-in.
+- Migration 0056:
+  - `region_centroids` uses the centroid of the collected outlines (no union);
+  - invalid stored outlines in suburbs, sections, SA2 and the LINZ suburb cache are repaired (`ST_MakeValid`, polygon parts kept, as MultiPolygon);
+  - a trigger repairs any invalid outline on insert or update.
+- The app treats region centroids as optional at sign-in.
