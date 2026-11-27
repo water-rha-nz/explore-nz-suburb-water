@@ -27,7 +27,11 @@ class Continue(RuntimeError):
 
 
 def _multi(g):
-    return g if isinstance(g, MultiPolygon) else MultiPolygon([g])
+    """MultiPolygon for storage; a repaired outline may come back as a collection, of which only the polygon parts are kept."""
+    if isinstance(g, MultiPolygon): return g
+    if isinstance(g, Polygon): return MultiPolygon([g])
+    parts = [p for x in getattr(g, "geoms", []) for p in (x.geoms if isinstance(x, MultiPolygon) else [x]) if isinstance(p, Polygon)]
+    return MultiPolygon(parts)
 
 
 def _region(con, region):
@@ -59,7 +63,7 @@ def _wfs_hits(client, service, base, layer, bbox):
 
 
 def _bbox4326(geoms):
-    minx, miny, maxx, maxy = gpd.GeoSeries([geoms.union_all()], crs=2193).to_crs(4326).total_bounds
+    minx, miny, maxx, maxy = gpd.GeoSeries([gpd.GeoSeries(geoms, crs=2193).make_valid().union_all()], crs=2193).to_crs(4326).total_bounds   # invalid LINZ outlines break a union
     return f"{miny},{minx},{maxy},{maxx},urn:ogc:def:crs:EPSG::4326"
 
 
@@ -122,6 +126,7 @@ def linz(con, client, region, log):
     if sub.empty:
         raise ValueError("no LINZ suburbs matched the region (check the suburb list against LINZ names)")
     sub = gpd.GeoDataFrame(sub, crs=2193)
+    sub["geometry"] = sub.geometry.make_valid()   # a few LINZ outlines are invalid (TopologyException in unions)
     for _, s in sub.iterrows():
         con.execute("""insert into suburbs (linz_id, name, type, territorial_authority, population_estimate, geom, region_id, source_version)
                        values (%s,%s,%s,%s,%s, st_geomfromwkb(%s,2193), %s, %s)
@@ -169,10 +174,12 @@ def linz(con, client, region, log):
 
     par = _wfs(client, "linz_wfs", LINZ, 50772, bbox=bbox)
     par = par[par.parcel_intent.isin(RES_INTENTS)]
+    par["geometry"] = par.geometry.make_valid()
     pts = par.copy(); pts["geometry"] = par.representative_point()
     j = gpd.sjoin(pts, sub[["id", "geometry"]].rename(columns={"id": "suburb_id"}), predicate="within")
     par = par.loc[j.index].assign(suburb_id=j["suburb_id"].values)
     bl = _wfs(client, "linz_wfs", LINZ, 101290, bbox=bbox)
+    bl["geometry"] = bl.geometry.make_valid()
     bl = bl[bl.intersects(area)].explode(index_parts=False)
     bl = bl[bl.geometry.geom_type == "Polygon"]
     ov = gpd.overlay(bl[["building_id", "geometry"]], par[["id", "geometry"]], how="intersection", keep_geom_type=True)
