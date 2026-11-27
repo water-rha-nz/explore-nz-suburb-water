@@ -793,3 +793,12 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - invalid stored outlines in suburbs, sections, SA2 and the LINZ suburb cache are repaired (`ST_MakeValid`, polygon parts kept, as MultiPolygon);
   - a trigger repairs any invalid outline on insert or update.
 - The app treats region centroids as optional at sign-in.
+
+## 39. Partly loaded regions; faster climate
+
+- **Climate:** each cell and range is saved with one bulk copy (temporary table, then insert with conflict skipped), instead of one insert per day, which was a database round trip per day and took hours for a large region.
+- **Early publish:**
+  - batches with LINZ and later components run `publish_partial` straight after LINZ;
+  - this publishes suburb metrics from the LINZ sections and marks the region `partial` (never downgrading a published one; migration 0057 allows the status);
+  - editors can open partial regions on the data pages with a "partly loaded" notice; figures fill in as imagery, census and climate finish, and the final `publish_new` marks the region published.
+- *Refresh a region* offers "Publish what's loaded so far" for batches queued before this change.

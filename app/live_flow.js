@@ -8,7 +8,8 @@ const DATA_STAGES = new Set(["imagery", "validate", "context", "explore", "expor
 const stageNo = (id) => STAGES.findIndex(([x]) => x === id) + 1;
 const stageLabel = (id) => (STAGES.find(([x]) => x === id) || [])[1] || id;
 const studyIdsNow = () => { const st = studyOf(); return st ? (D.index || []).filter((r) => (st.ta_codes || []).includes(r.ta_code)).map((r) => r.id) : null; };
-const isPrepared = (k) => !!(D && D.regions && D.regions[k] && D.regions[k].suburbs && D.regions[k].suburbs.some((s) => s.sections != null)) || indexOf(k).status === "published";
+const isPrepared = (k) => !!(D && D.regions && D.regions[k] && D.regions[k].suburbs && D.regions[k].suburbs.some((s) => s.sections != null)) || ["published", "partial"].includes(indexOf(k).status);
+const isPartial = (k) => indexOf(k).status === "partial";
 const studyRows = () => { if (BATCH.isNew) return []; const ids = studyIdsNow(); return (D && D.index || []).filter((r) => !ids || ids.includes(r.id)); };
 
 function resetBatchState() {
@@ -56,7 +57,7 @@ async function refreshStatuses(ids) {
 }
 function gateHTML(id) {
   const rows = studyRows(), ready = rows.filter((r) => isPrepared(r.id));
-  const waiting = rows.filter((r) => !isPrepared(r.id)).map((r) => r.id); if (waiting.length) setTimeout(() => refreshStatuses(waiting), 0);
+  const waiting = rows.filter((r) => !isPrepared(r.id) || isPartial(r.id)).map((r) => r.id); if (waiting.length) setTimeout(() => refreshStatuses(waiting), 0);
   if (ready.length && !BATCH.isNew) {
     if (!rows.some((r) => r.id === region)) { region = ready[0].id; store.set("region", region); return null; }   // region outside the study
     if (isPrepared(region)) return null;
@@ -77,7 +78,9 @@ function gateHTML(id) {
     </ol></div>
     <p class="small muted">This page opens as soon as one of the study's regions is prepared.</p>`;
 }
-for (const id of DATA_STAGES) { const f = V[id]; if (!f) continue; V[id] = (...a) => gateHTML(id) || f(...a); }
+// a partly loaded region opens with what is stored so far, and says so
+const partialNote = () => isPartial(region) ? `<div class="note" style="margin:6px 0">Partly loaded: <b>${esc(indexOf(region).name || region)}</b> is still being prepared (imagery, census or climate). Figures not yet available show as –; they fill in as the worker finishes. Progress is on <b>3 · Load</b>.</div>` : "";
+for (const id of DATA_STAGES) { const f = V[id]; if (!f) continue; V[id] = (...a) => gateHTML(id) || f(...a).replace(/(<\/h1>)/, `$1${partialNote()}`); }
 document.addEventListener("click", (e) => {
   const rb = e.target.closest && e.target.closest("[data-flow-region]");
   if (rb) { region = rb.dataset.flowRegion; store.set("region", region); render(); return; }
