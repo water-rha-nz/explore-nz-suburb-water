@@ -751,6 +751,8 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - a figure only where the source states it;
   - charges based on property value are quantified as a rate per dollar of capital or land value (a proxy cost per $1M of value), never presented as a flat figure; an average bill is not a fixed charge;
   - two sources per charge: the website link and the pricing policy document, either of which gives the figures;
+  - plain wording: per household, per toilet, capital value, m³ (no rating jargon such as SUIP, pan or CV);
+  - sample-property or average bills are never recorded as fixed charges;
   - per-scheme charges and other details go in NOTE;
   - verified only where read from the official document.
 - **`tools/water_rates_migration.py NNNN`** writes a migration that upserts these rows into `water_rates` (0042 first batch; 0043 adds value_rate, value_basis, website_url and policy_url; 0044 corrects QLDC and adds Christchurch).

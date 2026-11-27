@@ -129,7 +129,7 @@ let billingTable = function () {
 // Tiaki Wai 2026/27: parameters from its billing-page calculator (validated against its Pricing Policy). The formula is rebuilt from
 // those parameters and the policy's rules (its own calculator code is not published with the page), residential properties only:
 //  Wellington: water = fixed + per $CV (or metered: fixed + per m3); wastewater = fixed + per $CV
-//  Hutt: water = per SUIP (or metered: fixed + per m3); wastewater = per SUIP
+//  Hutt: water = per household (or metered: fixed + per m3); wastewater = per household
 //  Porirua: water = per SUIP (or metered: per m3); wastewater = per pan, a home counting as one pan per SUIP
 //  Upper Hutt: water = per SUIP + per $CV (or metered: fixed + per m3); wastewater = per pan, one per SUIP
 //  Stormwater: fixed (per SUIP in Hutt) + per $CV, shown separately (not part of water + wastewater)
@@ -156,7 +156,7 @@ function estimatorHTML() {
       <label>Rateable capital value $ <input type="number" id="est-cv" min="0" step="10000" value="${esc(EST.cv)}" style="width:110px"></label>
       <label><input type="checkbox" id="est-met" ${EST.metered ? "checked" : ""}> water meter</label>
       <label>Water used m³/yr <input type="number" id="est-m3" min="0" step="10" value="${esc(EST.m3)}" style="width:80px" ${EST.metered ? "" : "disabled"}></label>
-      <label>Separately used parts (SUIPs) <input type="number" id="est-suip" min="1" step="1" value="${esc(EST.suip)}" style="width:60px"></label></div>
+      <label>Households on the property <input type="number" id="est-suip" min="1" step="1" value="${esc(EST.suip)}" style="width:60px"></label></div>
     ${e ? `<table style="margin-top:6px"><tbody><tr><td>Drinking water</td><td>${money(e.water)}</td></tr><tr><td>Wastewater</td><td>${money(e.ww)}</td></tr><tr><td><b>Water + wastewater</b></td><td><b>${money(e.total)}</b></td></tr><tr><td class="muted">Stormwater (also billed)</td><td class="muted">${money(e.sw)}</td></tr></tbody></table>` : ""}
     <p class="small muted">Uses the rates published in ${esc(t.prvdr)}'s billing calculator, checked against its <a href="${esc(t.policy_url || t.source_url || "")}" target="_blank" rel="noopener">pricing policy</a>. The formula is rebuilt from those rates and the policy's rules (the provider's own calculator code isn't published with the page), so treat results as indicative; the bill confirms the charge.</p></div>`;
 }
