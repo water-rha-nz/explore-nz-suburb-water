@@ -829,7 +829,7 @@ function regionJobsHTML() {
   const regs = (D.index || []).map((r) => [r.id, { label: r.name }]);
   return `<h2>Refresh a region in the database</h2><div class="grid g2"><div class="card">
     ${regs.length ? `<p class="small"><label>Region <select id="rj-region">${regs.map(([k, g]) => `<option value="${esc(k)}" ${k === region ? "selected" : ""}>${esc(g.label)}</option>`).join("")}</select></label></p>
-    <div class="row small">${[["imagery", "Imagery: pools and gardens (search again)", false], ["model", "Learned pool check (retrain from review labels)", false], ["climate", "Climate top-up", true], ["census", "Census", true], ["publish", "Recompute metrics", true]].map(([v, l, on]) => `<label><input type="checkbox" data-step value="${v}" ${on ? "checked" : ""}> ${l}</label>`).join("")}</div>
+    <div class="row small">${[["publish_partial", "Publish what's loaded so far (explore it now, partly loaded)", false], ["imagery", "Imagery: pools and gardens (search again)", false], ["model", "Learned pool check (retrain from review labels)", false], ["climate", "Climate top-up", true], ["census", "Census", true], ["publish", "Recompute metrics", true]].map(([v, l, on]) => `<label><input type="checkbox" data-step value="${v}" ${on ? "checked" : ""}> ${l}</label>`).join("")}</div>
     <p class="small" style="margin:8px 0 4px"><b>Timeline</b> <span class="muted">for this region (saved to the database)</span></p><div id="rj-tl">${tlEditor("r:" + region)}</div>
     <div class="row" style="margin-top:6px"><button class="btn primary" id="queue-live" type="button">Queue job</button><button class="btn" type="button" id="rj-refresh">Refresh</button></div>
     <p class="small muted">One region per job, run by the worker (GitHub Actions) within each service's free-tier budget. Data already stored, by anyone, is reused.</p>
@@ -925,18 +925,20 @@ const COMPONENTS = [
   { id: "census", label: "Census (Stats NZ)", steps: ["census"], needs: ["linz"] },
   { id: "climate", label: "Climate (Open-Meteo)", steps: ["climate"], needs: ["linz"] },
 ];
-const STEP_ORDER = ["linz", "imagery_index", "imagery", "model", "census", "publish_new", "climate"];
+const STEP_ORDER = ["linz", "publish_partial", "imagery_index", "imagery", "model", "census", "publish_new", "climate"];
 BATCH.components = new Set(JSON.parse(store.get("batch-components", "null") || "null") || COMPONENTS.map((c) => c.id));
 function componentSteps() {
   const on = BATCH.components, steps = new Set(COMPONENTS.filter((c) => on.has(c.id)).flatMap((c) => c.steps));
   if (steps.size) steps.add("publish_new");
+  // with LINZ and later components: publish once early, so the region can be explored (partly loaded) while the rest runs
+  if (steps.has("linz") && [...steps].some((x) => !["linz", "publish_new"].includes(x))) steps.add("publish_partial");
   return STEP_ORDER.filter((x) => steps.has(x));
 }
 function componentsHTML() {
   const on = BATCH.components, noLinz = !on.has("linz") && on.size;
   return `<div class="card" style="margin:8px 0"><b class="small">Components to load</b>
     <div class="row small" style="gap:12px;flex-wrap:wrap;margin-top:4px">${COMPONENTS.map((c) => `<label title="${esc(c.needs.length ? "Needs: " + c.needs.map((n) => COMPONENTS.find((x) => x.id === n).label).join(", ") : "")}"><input type="checkbox" data-comp="${c.id}" ${on.has(c.id) ? "checked" : ""}> ${esc(c.label)}</label>`).join("")}</div>
-    <p class="small muted" style="margin:4px 0 0">${on.size ? `Runs: ${componentSteps().map(esc).join(" → ")}. Suburb metrics are recomputed after the chosen components.` : "Choose at least one component."}${noLinz ? ` <span class="tag warn">without LINZ</span> the other components use the LINZ sections already stored for each region; a region with none stored gets nothing from them.` : ""}</p></div>`;
+    <p class="small muted" style="margin:4px 0 0">${on.size ? `Runs: ${componentSteps().map(esc).join(" → ")}. Suburb metrics are published after LINZ (the region opens in Explore, partly loaded) and again after the chosen components.` : "Choose at least one component."}${noLinz ? ` <span class="tag warn">without LINZ</span> the other components use the LINZ sections already stored for each region; a region with none stored gets nothing from them.` : ""}</p></div>`;
 }
 document.addEventListener("change", (e) => {
   const id = e.target && e.target.dataset && e.target.dataset.comp; if (!id) return;

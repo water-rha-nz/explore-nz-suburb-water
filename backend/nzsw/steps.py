@@ -75,14 +75,19 @@ def climate(con, client, region, log):
         if r.status_code != 200:
             raise RuntimeError(f"Open-Meteo HTTP {r.status_code}: {r.text[:200]}")
         d = r.json()["daily"]
+        # one bulk copy per cell and range (a row-by-row insert made one database round trip per day: hours for a large region)
         with con.cursor() as cur:
-            for i, t in enumerate(d["time"]):
-                if d["precipitation_sum"][i] is None:
-                    continue
-                cur.execute("""insert into climate_daily (cell_id, date, rain_mm, tmean_c, tmax_c, et0_mm) values (%s,%s,%s,%s,%s,%s)
-                               on conflict (cell_id, date) do nothing""", (cid, t, d["precipitation_sum"][i], d["temperature_2m_mean"][i],
-                                                                         d["temperature_2m_max"][i], d["et0_fao_evapotranspiration"][i]))
-                added += 1
+            cur.execute("create temp table if not exists _cd (cell_id text, date date, rain_mm numeric, tmean_c numeric, tmax_c numeric, et0_mm numeric)")
+            cur.execute("truncate _cd")
+            n = 0
+            with cur.copy("copy _cd (cell_id, date, rain_mm, tmean_c, tmax_c, et0_mm) from stdin") as cp:
+                for i, t in enumerate(d["time"]):
+                    if d["precipitation_sum"][i] is None:
+                        continue
+                    cp.write_row((cid, t, d["precipitation_sum"][i], d["temperature_2m_mean"][i], d["temperature_2m_max"][i], d["et0_fao_evapotranspiration"][i])); n += 1
+            cur.execute("""insert into climate_daily (cell_id, date, rain_mm, tmean_c, tmax_c, et0_mm)
+                           select cell_id, date, rain_mm, tmean_c, tmax_c, et0_mm from _cd on conflict (cell_id, date) do nothing""")
+            added += n
         log(f"climate cell {cid}: {start}..{end} (~{w:.1f} weighted calls)")
         if hasattr(log, "progress"):
             log.progress((cells.index((cid, lat, lon, first, last)) + 1) / max(1, len(cells)))

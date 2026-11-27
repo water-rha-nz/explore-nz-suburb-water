@@ -726,4 +726,14 @@ def model(con, client, region, log, n_uncertain=60):
     return "; ".join(out) or "no pool candidates in the region"
 
 
-STEPS = {"linz": linz, "imagery_index": imagery_index, "imagery": imagery, "model": model, "publish_new": publish_new}
+def publish_partial(con, client, region, log):
+    """Publish suburb metrics as soon as LINZ sections are stored, so the region can be explored while imagery, census and climate
+    are still being prepared. The region is marked 'partial' unless it was already published (a re-run never downgrades it)."""
+    prev = (con.execute("select status from regions where id=%s", (region,)).fetchone() or [None])[0]
+    msg = publish_new(con, client, region, log)
+    if prev != "published":
+        con.execute("update regions set status = 'partial' where id = %s", (region,))
+    return msg + ("; region open to explore (partly loaded)" if prev != "published" else "")
+
+
+STEPS = {"linz": linz, "publish_partial": publish_partial, "imagery_index": imagery_index, "imagery": imagery, "model": model, "publish_new": publish_new}

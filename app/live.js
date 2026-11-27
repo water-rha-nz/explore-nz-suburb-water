@@ -198,7 +198,7 @@ document.addEventListener("click", async (e) => {
   if (e.target.id !== "queue-live" || !can("editor")) return;
   // "imagery" re-runs the imagery search and analysis (finds and combines captures again), before the metrics are recomputed
   const picked = new Set([...document.querySelectorAll("[data-step]:checked")].map((x) => x.value));
-  const steps = ["imagery_index", "imagery", "model", "climate", "census", "publish"].filter((st) => picked.has(st) || (picked.has("imagery") && (st.startsWith("imagery") || st === "model")));
+  const steps = ["publish_partial", "imagery_index", "imagery", "model", "climate", "census", "publish"].filter((st) => picked.has(st) || (picked.has("imagery") && (st.startsWith("imagery") || st === "model")));
   if (picked.has("model") && !steps.includes("publish")) steps.push("publish");
   if (picked.has("imagery") && !steps.includes("publish")) steps.push("publish");
   if (!steps.length) return toastMsg("Choose at least one step");
