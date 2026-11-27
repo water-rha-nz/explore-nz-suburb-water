@@ -801,4 +801,4 @@ These two stages replace the reference builder's Load and Allocate stages. The s
   - batches with LINZ and later components run `publish_partial` straight after LINZ;
   - this publishes suburb metrics from the LINZ sections and marks the region `partial` (never downgrading a published one; migration 0057 allows the status);
   - editors can open partial regions on the data pages with a "partly loaded" notice; figures fill in as imagery, census and climate finish, and the final `publish_new` marks the region published.
-- *Refresh a region* offers "Publish what's loaded so far" for batches queued before this change.
+- *Refresh a region* offers "Publish what's loaded so far" for batches queued before this change, and each batch in the progress panel has a **Publish what's loaded so far** button that queues it for all of its unfinished regions at once (published regions skipped).
