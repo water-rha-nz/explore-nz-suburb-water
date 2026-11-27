@@ -758,3 +758,7 @@ These two stages replace the reference builder's Load and Allocate stages. The s
 - **Full tariffs** (`water_rates.tariff`, migration 0048) where a provider publishes one: Tiaki Wai's 2026/27 calculator parameters per city (Wellington, Hutt, Porirua, Upper Hutt), taken from the `data-rates` of its billing-page calculator and checked against its Pricing Policy (1 July 2026, POL_0416) and year-one charging page.
   - The calculator's own code isn't published with the page, so the app's **bill estimator** (Billing, Explore) rebuilds the residential formula from the parameters and the policy's rules: water, wastewater and stormwater by city, capital value, meter and m³ used, and SUIPs.
   - Results are labelled indicative.
+- **Billing is per region / territory** (migration 0050).
+  - `water_rates.ta_code` is the territorial authority a charge applies to; rows without it apply to every territory of the provider that has no rows of its own. The key is provider, territory and start date.
+  - Billing (Explore) lists each region in scope with its territory, provider, and its territory's charge periods (else the provider-wide ones, marked as such). `water_charges_by_period.csv` gives REGION, TA_CODE and TERRITORY per row.
+  - Tiaki Wai has one row per city: Wellington 047, Hutt 046, Porirua 044, Upper Hutt 045. The research file has a TA_CODE column.
