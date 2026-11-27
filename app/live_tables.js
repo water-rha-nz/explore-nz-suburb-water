@@ -83,41 +83,44 @@ function billRegions() {
 }
 // kept for callers that want providers in scope
 function billProviders() { const out = new Map(); for (const r of billRegions()) if (r.prvdr) { if (!out.has(r.prvdr)) out.set(r.prvdr, []); out.get(r.prvdr).push(r.name); } return out; }
-async function loadBilling(provs) {
-  const key = [...provs].sort().join(","); if (BILL.key === key && BILL.rows && BILL.rows.length) return;   // empty results are re-read next time
+// charges are read by the territories of the regions in scope (any provider)
+async function loadBilling() {
+  const tas = [...new Set(billRegions().map((r) => r.ta_code).filter(Boolean))].sort(), key = tas.join(",");
+  if (BILL.key === key && BILL.rows && BILL.rows.length) return;   // empty results are re-read next time
   BILL.key = key; BILL.rows = null;
-  try { BILL.rows = provs.length ? await q(sb.from("water_rates").select("prvdr,ta_code,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,value_rate,value_basis,date_est,note,source_url,website_url,policy_url,verified,tariff,providers(name)").in("prvdr", provs).order("prvdr").order("valid_from")) : []; }
+  try { BILL.rows = tas.length ? await q(sb.from("water_rates").select("prvdr,ta_code,valid_from,charging_type,fixed_pa,volumetric_pa,threshold_lpd,value_rate,value_basis,date_est,note,source_url,website_url,policy_url,verified,tariff,providers(name)").in("ta_code", tas).order("ta_code").order("valid_from")) : []; }
   catch (e) { BILL.rows = []; BILL.err = e.message; }
   const el = $("#bill-body"); if (el) el.innerHTML = billingTable();
 }
 const dayBeforeISO = (d) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); };
-// a region's charge periods: its territory's rows, else the provider-wide rows; each ends the day before the next one
+// a region's charges are its territory's (whichever provider bills it); each provider's periods end the day before its next one.
+// linked = the provider the study links the region to; differs = the territory is billed by another provider.
 function regionCharges(reg, all) {
-  const own = all.filter((w) => w.prvdr === reg.prvdr && w.ta_code && w.ta_code === reg.ta_code);
-  const rows = (own.length ? own : all.filter((w) => w.prvdr === reg.prvdr && !w.ta_code)).slice().sort((x, y) => x.valid_from < y.valid_from ? -1 : 1);
-  return rows.map((w, i) => ({ ...w, end: rows[i + 1] ? dayBeforeISO(rows[i + 1].valid_from) : "", scope: own.length ? "territory" : "provider" }));
+  const rows = all.filter((w) => w.ta_code && w.ta_code === reg.ta_code).slice().sort((x, y) => x.prvdr < y.prvdr ? -1 : x.prvdr > y.prvdr ? 1 : x.valid_from < y.valid_from ? -1 : 1);
+  return rows.map((w, i) => { const nx = rows[i + 1] && rows[i + 1].prvdr === w.prvdr ? rows[i + 1].valid_from : null;
+    return { ...w, end: nx ? dayBeforeISO(nx) : "", linked: reg.prvdr || "", differs: !!(reg.prvdr && reg.prvdr !== w.prvdr) }; });
 }
 let billingTable = function () {
   if (!BILL.rows) return `<p class="small muted">Loading charges…</p>`;
   if (!BILL.rows.length) return `<p class="small muted">${BILL.err ? "Charges unavailable: " + esc(BILL.err) : "No charges recorded for these regions yet."}</p>`;
   const today = new Date().toISOString().slice(0, 10), regs = billRegions();
   const body = regs.map((reg) => { const ch = regionCharges(reg, BILL.rows);
-    if (!ch.length) return `<tr><td class="l"><b>${esc(reg.name)}</b></td><td class="l small">${esc(reg.ta_name)}</td><td class="l small">${esc(reg.prvdr || "–")}</td><td colspan="9" class="muted small">No charges recorded for this territory yet.</td></tr>`;
+    if (!ch.length) return `<tr><td class="l"><b>${esc(reg.name)}</b></td><td class="l small">${esc(reg.ta_name)}</td><td class="l small">${esc(reg.prvdr || "–")}</td><td colspan="8" class="muted small">No charges recorded for this territory yet.</td></tr>`;
     return ch.map((r, i) => { const cur = r.valid_from <= today && (!r.end || r.end >= today);
-      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}>${i === 0 ? `<td class="l" rowspan="${ch.length}"><b>${esc(reg.name)}</b></td><td class="l small" rowspan="${ch.length}">${esc(reg.ta_name)}</td><td class="l small" rowspan="${ch.length}">${esc(r.prvdr)} <span class="muted">${esc((r.providers || {}).name || "")}</span>${r.scope === "provider" ? '<br><span class="muted">provider-wide charges</span>' : ""}</td>` : ""}
+      return `<tr${cur ? ' style="background:var(--accent-soft)"' : ""}>${i === 0 ? `<td class="l" rowspan="${ch.length}"><b>${esc(reg.name)}</b></td><td class="l small" rowspan="${ch.length}">${esc(reg.ta_name)}</td><td class="l small" rowspan="${ch.length}">${esc(r.prvdr)} <span class="muted">${esc((r.providers || {}).name || "")}</span>${r.differs ? `<br><span class="tag warn" title="The study links this region to ${esc(r.linked)}; the charges shown are the territory's, billed by ${esc(r.prvdr)}">study links ${esc(r.linked)}</span>` : ""}</td>` : ""}
         <td class="l small">${esc(r.valid_from)} to ${r.end ? esc(r.end) : "now"}${cur ? ' <span class="tag ok">current</span>' : ""}</td><td class="l small">${esc(r.charging_type || "–")}</td>
         <td>${r.fixed_pa == null ? "–" : "$" + fmt(r.fixed_pa, 2)}</td><td>${r.volumetric_pa == null ? "–" : "$" + fmt(r.volumetric_pa, 2)}</td><td>${r.threshold_lpd == null ? "–" : fmt(r.threshold_lpd)}</td>
         <td class="small" title="${r.value_rate == null ? "" : esc(`${r.value_rate} per $ of ${r.value_basis || "value"}`)}">${r.value_rate == null ? "–" : `$${fmt(r.value_rate * 1e6)} per $1M ${esc(r.value_basis || "value")}`}</td>
         <td class="l small">${r.verified ? '<span class="tag ok">verified</span>' : '<span class="tag warn">not verified</span>'}${r.date_est ? ` ${esc(r.date_est)}` : ""}</td>
         <td class="l small">${r.website_url ? `<a href="${esc(r.website_url)}" target="_blank" rel="noopener">website</a>` : '<span class="muted">website –</span>'} · ${(r.policy_url || r.source_url) ? `<a href="${esc(r.policy_url || r.source_url)}" target="_blank" rel="noopener">pricing policy</a>` : '<span class="muted">policy –</span>'}${r.note ? ` <span class="muted" title="${esc(r.note)}">note</span>` : ""}</td></tr>`; }).join(""); }).join("");
   return `<table><thead><tr><th class="l">Region</th><th class="l">Territory</th><th class="l">Provider</th><th class="l">Period</th><th class="l">Charging</th><th>Fixed NZD/yr</th><th>Volumetric NZD/m³</th><th>Threshold L/day</th><th title="Water and wastewater charged on property value: dollars per $1 million of value">Value-based</th><th class="l">Checked</th><th class="l">Sources</th></tr></thead><tbody>${body}</tbody></table>
-    <p class="small muted">Charges are those of each region's territory where the provider sets them per territory, otherwise the provider's charges for all its territories. Each period runs from its start date to the day before the next; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used; value-based charges are shown per $1 million of capital or land value (a $700,000 property pays 0.7 times that). Each charge cites the provider's website and its pricing policy document.</p>`;
+    <p class="small muted">Charges belong to the territory: each region shows what its territorial authority's provider charges there, whichever provider the study links to the region (a different link is flagged). Each period runs from its start date to the day before the next; the highlighted row applies today. Fixed charges are water plus wastewater per year; volumetric charges are per m³ of water used; value-based charges are shown per $1 million of capital or land value (a $700,000 property pays 0.7 times that). Each charge cites the provider's website and its pricing policy document.</p>`;
 };
 { const _dov = detailedOverviewHTML;
   detailedOverviewHTML = (...a) => {
     const html = _dov(...a), i = html.search(/<h2>(Regions in this study|All regions in the database)<\/h2>/); if (i < 0) return html;
     const j = html.indexOf("</table></div>", i); if (j < 0) return html;
-    const pm = billProviders(); setTimeout(() => loadBilling([...pm.keys()]), 0);   // billing rows are per region / territory
+    setTimeout(() => loadBilling(), 0);   // billing rows are per region / territory
     const at = j + "</table></div>".length;
     return html.slice(0, at) + `<h2>Billing</h2><div class="card scroll" id="bill-body">${billingTable()}</div>` + html.slice(at);
   }; }
